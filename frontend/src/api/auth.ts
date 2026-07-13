@@ -6,44 +6,16 @@ export interface AuthResponse {
   user: User;
 }
 
-/** Which sign-in methods the login screen should offer. */
+/** Returns configuration for the login screen. */
 export async function fetchAuthConfig(): Promise<AuthConfig> {
   return apiFetch<AuthConfig>('/auth/config');
 }
 
-export async function signup(name: string, email: string, password: string): Promise<AuthResponse> {
-  const res = await apiFetch<AuthResponse>('/auth/signup', {
+/** Exchange a Firebase ID token for a Khaao session. */
+export async function loginWithFirebase(idToken: string): Promise<AuthResponse> {
+  const res = await apiFetch<AuthResponse>('/auth/firebase', {
     method: 'POST',
-    body: { name, email, password },
-  });
-  setAuthStorage(res.token, res.user);
-  return res;
-}
-
-export async function login(email: string, password: string): Promise<AuthResponse> {
-  const res = await apiFetch<AuthResponse>('/auth/login', {
-    method: 'POST',
-    body: { email, password },
-  });
-  setAuthStorage(res.token, res.user);
-  return res;
-}
-
-/** Exchange a Google Identity Services ID token for a Khaao session. */
-export async function loginWithGoogle(credential: string): Promise<AuthResponse> {
-  const res = await apiFetch<AuthResponse>('/auth/google', {
-    method: 'POST',
-    body: { credential },
-  });
-  setAuthStorage(res.token, res.user);
-  return res;
-}
-
-/** Start a throwaway 24h guest session — name only, no account. */
-export async function loginAsGuest(name: string): Promise<AuthResponse> {
-  const res = await apiFetch<AuthResponse>('/auth/guest', {
-    method: 'POST',
-    body: { name },
+    body: { id_token: idToken },
   });
   setAuthStorage(res.token, res.user);
   return res;

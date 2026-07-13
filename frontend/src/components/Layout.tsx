@@ -1,56 +1,108 @@
+import type { ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { getActiveOrder } from '../api/orders';
+import { getShopOrders } from '../api/shop';
 import { StudentRealtime } from './StudentRealtime';
 import { ShopRealtime } from './ShopRealtime';
 
-const STUDENT_LINKS = [
-  { to: '/', label: 'Menu', end: true },
-  { to: '/order', label: 'Order status', end: false },
+function Icon({ d }: { d: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[22px] w-[22px]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+// Simple single-path icons keep the bar light; shapes echo what each tab does.
+const ICONS = {
+  menu: 'M4 5h7v7H4zM13 5h7v7h-7zM4 15h7v5H4zM13 15h7v5h-7z',
+  ticket: 'M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4zM14 6v12',
+  inbox: 'M4 13l2-7h12l2 7M4 13v5h16v-5M4 13h5a3 3 0 0 0 6 0h5',
+  flame: 'M12 3c1 3-3 4.5-3 8a3 3 0 0 0 6 0c0-1.5-.8-2.5-.8-2.5C16.5 9.5 18 11 18 13.5A6 6 0 0 1 6 13.5C6 8.5 10.5 7 12 3z',
+  clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
+  tag: 'M4 4h7l9 9-7 7-9-9zM8.5 8.5h0',
+};
+
+interface Tab {
+  to: string;
+  label: string;
+  end: boolean;
+  icon: keyof typeof ICONS;
+}
+
+const STUDENT_TABS: Tab[] = [
+  { to: '/', label: 'Menu', end: true, icon: 'menu' },
+  { to: '/order', label: 'Order', end: false, icon: 'ticket' },
 ];
 
-const SHOP_LINKS = [
-  { to: '/shop', label: 'Orders', end: true },
-  { to: '/shop/prep', label: 'Prep', end: false },
-  { to: '/shop/menu', label: 'Menu', end: false },
+const SHOP_TABS: Tab[] = [
+  { to: '/shop', label: 'Orders', end: true, icon: 'inbox' },
+  { to: '/shop/prep', label: 'Prep', end: false, icon: 'flame' },
+  { to: '/shop/history', label: 'History', end: false, icon: 'clock' },
+  { to: '/shop/menu', label: 'Menu', end: false, icon: 'tag' },
 ];
 
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold transition ${
-    isActive ? 'bg-brand-light text-brand-dark' : 'text-ink/70 hover:bg-black/5 hover:text-ink'
-  }`;
+function TabBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="absolute -right-2.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-turmeric px-1 text-[10px] font-black text-white">
+      {children}
+    </span>
+  );
+}
 
 export function Layout() {
   const { user, logout } = useAuth();
-  const links = user?.role === 'shopkeeper' ? SHOP_LINKS : STUDENT_LINKS;
+  const isShop = user?.role === 'shopkeeper';
+  const tabs = isShop ? SHOP_TABS : STUDENT_TABS;
+
+  // Badge data rides the same query keys the pages use, so SSE invalidation
+  // keeps the bar live without extra plumbing.
+  const activeOrderQuery = useQuery({
+    queryKey: ['orders', 'active'],
+    queryFn: getActiveOrder,
+    enabled: !isShop,
+  });
+  const shopOrdersQuery = useQuery({
+    queryKey: ['shop', 'orders'],
+    queryFn: getShopOrders,
+    enabled: isShop,
+  });
+
+  const incomingCount = shopOrdersQuery.data?.incoming.length ?? 0;
+  const hasActiveOrder = !isShop && Boolean(activeOrderQuery.data);
 
   return (
     <div className="flex min-h-screen flex-col bg-cream">
-      {user?.role === 'student' && <StudentRealtime />}
-      {user?.role === 'shopkeeper' && <ShopRealtime />}
+      {!isShop && <StudentRealtime />}
+      {isShop && <ShopRealtime />}
 
-      <header className="sticky top-0 z-20 border-b border-sage bg-cream/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
+      <header className="sticky top-0 z-20 border-b border-sage bg-cream/95 pt-safe backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-md items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-black text-white">
               K
             </span>
-            <span className="text-lg font-black tracking-tight text-brand-dark">Khaao</span>
+            <span className="font-display text-xl font-black tracking-tight text-brand-dark">
+              Khaao
+            </span>
           </div>
-
-          <nav className="flex items-center gap-1">
-            {links.map((link) => (
-              <NavLink key={link.to} to={link.to} end={link.end} className={navLinkClass}>
-                {link.label}
-              </NavLink>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <span className="hidden text-sm text-ink/60 sm:inline">{user?.name}</span>
+          <div className="flex items-center gap-1">
+            <span className="max-w-[9rem] truncate text-sm text-ink/60">{user?.name}</span>
             <button
               type="button"
               onClick={logout}
-              className="flex min-h-[44px] items-center rounded-lg px-3 text-sm font-semibold text-ink/70 transition hover:bg-black/5 hover:text-ink"
+              className="flex min-h-[44px] items-center rounded-lg px-2.5 text-sm font-semibold text-ink/70 transition hover:bg-black/5 hover:text-ink"
             >
               Log out
             </button>
@@ -58,9 +110,35 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-24 pt-4">
         <Outlet />
       </main>
+
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-sage bg-white/95 pb-safe shadow-bar backdrop-blur">
+        <div className={`mx-auto grid max-w-md ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
+          {tabs.map((tab) => (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              end={tab.end}
+              className={({ isActive }) =>
+                `flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition ${
+                  isActive ? 'text-brand-dark' : 'text-ink/45 hover:text-ink/70'
+                }`
+              }
+            >
+              <span className="relative">
+                <Icon d={ICONS[tab.icon]} />
+                {tab.icon === 'inbox' && incomingCount > 0 && <TabBadge>{incomingCount}</TabBadge>}
+                {tab.icon === 'ticket' && hasActiveOrder && (
+                  <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-turmeric" />
+                )}
+              </span>
+              {tab.label}
+            </NavLink>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

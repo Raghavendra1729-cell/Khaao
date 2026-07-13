@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getActiveOrder, getOrderHistory } from '../../api/orders';
+import { getActiveOrder, getOrderHistory, cancelOrder } from '../../api/orders';
 import { ApiError } from '../../api/client';
 import type { Order, OrderStatus as OrderStatusType } from '../../api/types';
 import { formatCountdown, formatDateTime, formatPrice, secondsUntil } from '../../lib/format';
@@ -11,12 +11,14 @@ import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { OrderTicket } from '../../components/OrderTicket';
 import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/StatusBadge';
+import { useToast } from '../../components/Toast';
 
 const TIMELINE_STEPS: { status: OrderStatusType; label: string }[] = [
-  { status: 'submitted', label: 'Submitted' },
-  { status: 'preparing', label: 'Preparing' },
+  { status: 'submitted', label: 'Waiting' },
+  { status: 'preparing', label: 'Cooking' },
   { status: 'ready', label: 'Ready' },
-  { status: 'picked', label: 'Picked up' },
+  { status: 'awaiting_payment', label: 'Pay' },
+  { status: 'completed', label: 'Done' },
 ];
 
 function stepIndex(status: OrderStatusType): number {
@@ -28,8 +30,10 @@ function stepIndex(status: OrderStatusType): number {
       return 1;
     case 'ready':
       return 2;
-    case 'picked':
+    case 'awaiting_payment':
       return 3;
+    case 'completed':
+      return 4;
     default:
       return -1;
   }
@@ -40,8 +44,8 @@ function Timeline({ status }: { status: OrderStatusType }) {
   return (
     <div className="flex items-center">
       {TIMELINE_STEPS.map((step, i) => {
-        const done = i < current || status === 'picked';
-        const active = i === current && status !== 'picked';
+        const done = i < current || status === 'completed';
+        const active = i === current && status !== 'completed';
         return (
           <div key={step.status} className="flex flex-1 items-center last:flex-none">
             <div className="flex flex-col items-center gap-1.5">
@@ -92,13 +96,19 @@ function ReadyBanner({ order }: { order: Order }) {
   );
 }
 
-function ActiveOrderView({ order }: { order: Order }) {
+function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => void }) {
   return (
     <Card className="p-5">
       {order.status === 'ready' && <ReadyBanner order={order} />}
+      {order.status === 'awaiting_payment' && (
+        <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-[#e9a03b] px-4 py-5 text-center text-white shadow-ticket">
+          <p className="text-xl font-black tracking-tight">Pay {formatPrice(order.total_price)} at the counter</p>
+          <p className="text-sm font-semibold text-white/90">All items are ready.</p>
+        </div>
+      )}
 
       <div className="mb-5 flex justify-center">
-        <OrderTicket id={order.id} size="lg" />
+        <OrderTicket id={order.order_no} size="lg" />
       </div>
 
       <div className="mb-6">
@@ -117,7 +127,7 @@ function ActiveOrderView({ order }: { order: Order }) {
             <div>
               <p className="font-semibold text-ink">{item.name}</p>
               <p className="tabular text-xs text-ink/50">
-                {item.allocated_qty}/{item.qty} allocated · {formatPrice(item.price_each)} each
+                {item.allocated_qty}/{item.qty} ready · {item.handed_qty ?? 0} picked up
               </p>
             </div>
             <OrderItemStatusBadge status={item.status} />
@@ -129,6 +139,14 @@ function ActiveOrderView({ order }: { order: Order }) {
         <span className="font-semibold text-ink/70">Total</span>
         <span className="tabular text-lg font-black text-brand-dark">{formatPrice(order.total_price)}</span>
       </div>
+
+      {order.status === 'submitted' && (
+        <div className="mt-5 border-t border-sage pt-5">
+          <Button variant="secondary" fullWidth onClick={onCancel}>
+            Cancel order
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -139,7 +157,9 @@ function historyStatusHint(status: OrderStatusType): string | null {
       return 'Rejected by the canteen — you can place a new order anytime.';
     case 'expired':
       return 'Expired — the 15-minute pickup window was missed.';
-    case 'picked':
+    case 'cancelled':
+      return 'You cancelled this order.';
+    case 'completed':
       return 'Picked up and paid at the counter.';
     default:
       return null;
@@ -161,7 +181,7 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
           <Card key={order.id} className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-bold text-ink">Order #{order.id}</p>
+                <p className="font-bold text-ink">Token #{order.order_no}</p>
                 <p className="text-xs text-ink/50">{formatDateTime(order.created_at)}</p>
               </div>
               <OrderStatusBadge status={order.status} />
@@ -181,8 +201,23 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
 }
 
 export function OrderStatusPage() {
+  const { showToast } = useToast();
   const activeOrderQuery = useQuery({ queryKey: ['orders', 'active'], queryFn: getActiveOrder });
   const historyQuery = useQuery({ queryKey: ['orders', 'history'], queryFn: getOrderHistory });
+
+  const handleCancel = async () => {
+    const activeOrder = activeOrderQuery.data;
+    if (!activeOrder) return;
+    if (!window.confirm(`Cancel order #${activeOrder.order_no}? This can't be undone.`)) return;
+    try {
+      await cancelOrder(activeOrder.id);
+      activeOrderQuery.refetch();
+      historyQuery.refetch();
+      showToast('Order cancelled.', 'success');
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : 'Could not cancel order', 'error');
+    }
+  };
 
   if (activeOrderQuery.isLoading || historyQuery.isLoading) return <FullPageSpinner />;
 
@@ -204,7 +239,7 @@ export function OrderStatusPage() {
       <section>
         <h1 className="mb-4 text-2xl font-black tracking-tight text-ink">Order status</h1>
         {activeOrder ? (
-          <ActiveOrderView order={activeOrder} />
+          <ActiveOrderView order={activeOrder} onCancel={handleCancel} />
         ) : (
           <EmptyState
             title="No active order"

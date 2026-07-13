@@ -38,9 +38,11 @@ const ORDER_STATUS_META: Record<OrderStatus, { label: string; tone: Tone }> = {
   preparing: { label: 'Preparing', tone: 'amber' },
   partially_ready: { label: 'Partially ready', tone: 'amber' },
   ready: { label: 'Ready', tone: 'green' },
-  picked: { label: 'Picked up', tone: 'gray' },
+  awaiting_payment: { label: 'Collect payment', tone: 'amber' },
+  completed: { label: 'Paid', tone: 'green' },
   rejected: { label: 'Rejected', tone: 'red' },
   expired: { label: 'Expired', tone: 'red' },
+  cancelled: { label: 'Cancelled', tone: 'gray' },
 };
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {

@@ -29,6 +29,9 @@ export function StudentRealtime() {
         const wasReady = prevStatusRef.current === 'ready';
         if (order.status === 'ready' && !wasReady) {
           playReadyChime();
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate([200, 100, 200]); // buzz phones on silent
+          }
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             new Notification('Khaao — order ready', {
               body: `Order #${order.id} is ready. Pick up within 15 minutes.`,

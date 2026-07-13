@@ -45,8 +45,8 @@ export async function setMenuItemStock(id: number, outOfStock: boolean): Promise
 
 export interface ShopOrders {
   incoming: Order[];
-  active: Order[];
-  ready: Order[];
+  in_progress: Order[];
+  awaiting_payment: Order[];
 }
 
 export async function getShopOrders(): Promise<ShopOrders> {
@@ -59,8 +59,9 @@ export interface ShopHistory {
 }
 
 /** Today's finished orders + paid total, for counter reconciliation. */
-export async function getShopHistory(): Promise<ShopHistory> {
-  return apiFetch<ShopHistory>('/shop/history');
+export async function getShopHistory(date?: string): Promise<ShopHistory> {
+  const query = date ? `?date=${date}` : '';
+  return apiFetch<ShopHistory>(`/shop/history${query}`);
 }
 
 export async function acceptOrder(id: number, rejectedItemIds: number[]): Promise<Order> {
@@ -78,8 +79,27 @@ export async function rejectOrder(id: number): Promise<Order> {
   return res.order;
 }
 
-export async function closeOrder(id: number): Promise<void> {
-  await apiFetch<unknown>(`/shop/orders/${id}/close`, { method: 'POST' });
+export async function handoverItem(orderId: number, itemId: number, qty = 1): Promise<Order> {
+  const res = await apiFetch<{ order: Order }>(`/shop/orders/${orderId}/items/${itemId}/handover`, {
+    method: 'POST',
+    body: { qty },
+  });
+  return res.order;
+}
+
+/** Remove a line from an accepted order; prepared units return to the pool. */
+export async function removeOrderItem(orderId: number, itemId: number): Promise<Order> {
+  const res = await apiFetch<{ order: Order }>(`/shop/orders/${orderId}/items/${itemId}`, {
+    method: 'DELETE',
+  });
+  return res.order;
+}
+
+export async function markPaid(orderId: number): Promise<Order> {
+  const res = await apiFetch<{ order: Order }>(`/shop/orders/${orderId}/paid`, {
+    method: 'POST',
+  });
+  return res.order;
 }
 
 export async function getPrep(): Promise<PrepItem[]> {

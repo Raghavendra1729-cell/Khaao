@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { acceptOrder, closeOrder, getShopOrders, rejectOrder } from '../../api/shop';
+import { acceptOrder, handoverItem, markPaid, getShopOrders, rejectOrder, removeOrderItem } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { Order, OrderItem } from '../../api/types';
 import { formatPrice, formatTime } from '../../lib/format';
@@ -8,7 +8,6 @@ import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
-import { OrderTicket } from '../../components/OrderTicket';
 import { useToast } from '../../components/Toast';
 
 function IncomingOrderCard({ order }: { order: Order }) {
@@ -45,7 +44,7 @@ function IncomingOrderCard({ order }: { order: Order }) {
         <div>
           <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
           <p className="text-xs text-ink/50">
-            #{order.id} · {formatTime(order.created_at)}
+            #{order.order_no} · {formatTime(order.created_at)}
           </p>
         </div>
         <span className="tabular text-sm font-semibold text-brand-dark">{formatPrice(order.total_price)}</span>
@@ -111,54 +110,120 @@ function IncomingOrderCard({ order }: { order: Order }) {
 }
 
 function itemProgress(item: OrderItem): string {
-  return `${item.allocated_qty}/${item.qty}`;
+  return `ready ${item.allocated_qty}/${item.qty} · picked ${item.handed_qty ?? 0}`;
 }
 
-function ActiveOrderCard({ order }: { order: Order }) {
+function CookingOrderCard({ order }: { order: Order }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+
+  const handleHandover = async (itemId: number, qty: number) => {
+    try {
+      await handoverItem(order.id, itemId, qty);
+      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not hand over item.', 'error');
+    }
+  };
+
+  const handleRemove = async (itemId: number, name: string) => {
+    if (!window.confirm(`Remove "${name}" from this order? Any prepared units go back to the pool.`)) return;
+    try {
+      await removeOrderItem(order.id, itemId);
+      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
+      queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
+      showToast('Item removed.', 'success');
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not remove item.', 'error');
+    }
+  };
+
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
           <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
-          <p className="text-xs text-ink/50">#{order.id}</p>
+          <p className="text-xs text-ink/50">#{order.order_no}</p>
         </div>
-        <span className="tabular text-sm font-semibold text-brand-dark">{formatPrice(order.total_price)}</span>
       </div>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-3 border-t border-sage pt-3">
         {order.items
           .filter((i) => i.status !== 'rejected')
-          .map((item) => (
-            <div key={item.id} className="flex items-center justify-between text-sm">
-              <span className="text-ink/80">
-                {item.name} ×{item.qty}
-              </span>
-              <span className="tabular font-semibold text-ink/60">{itemProgress(item)}</span>
-            </div>
-          ))}
+          .map((item) => {
+            const readyToGive = item.allocated_qty - (item.handed_qty ?? 0);
+            return (
+              <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                <div className="flex flex-col">
+                  <span className="font-medium text-ink">
+                    {item.name} ×{item.qty}
+                  </span>
+                  <span className="text-[11px] text-ink/50">{itemProgress(item)}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {(item.handed_qty ?? 0) === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(item.id, item.name)}
+                      className="text-[11px] font-semibold text-red-600/80 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  {readyToGive > 1 && (
+                    <Button size="md" onClick={() => handleHandover(item.id, readyToGive)}>
+                      Give all {readyToGive}
+                    </Button>
+                  )}
+                  <Button
+                    size="md"
+                    variant="secondary"
+                    disabled={readyToGive <= 0}
+                    onClick={() => handleHandover(item.id, 1)}
+                  >
+                    Give 1
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
       </div>
     </Card>
   );
 }
 
-function ReadyOrderCard({ order }: { order: Order }) {
+function AwaitingPaymentCard({ order }: { order: Order }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const closeMutation = useMutation({
-    mutationFn: () => closeOrder(order.id),
+  const markPaidMutation = useMutation({
+    mutationFn: () => markPaid(order.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-      showToast(`Order #${order.id} closed.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['shop', 'history'] });
+      showToast(`Order #${order.order_no} paid.`, 'success');
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not close order.', 'error'),
+    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not collect payment.', 'error'),
   });
 
   return (
-    <Card className="flex flex-col items-center gap-4 p-5">
-      <OrderTicket id={order.id} />
-      <p className="font-semibold text-ink">{order.student_name || 'Student'}</p>
-      <Button fullWidth loading={closeMutation.isPending} onClick={() => closeMutation.mutate()}>
-        Close (handed over + paid)
+    <Card className="flex flex-col gap-4 p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className="text-xl font-black text-ink">#{order.order_no}</span>
+          <p className="font-semibold text-ink">{order.student_name || 'Student'}</p>
+        </div>
+      </div>
+      
+      <div className="text-sm text-ink/70">
+        {order.items.filter(i => i.status !== 'rejected').map((item) => (
+          <div key={item.id} className="flex justify-between">
+            <span>{item.name} ×{item.qty}</span>
+          </div>
+        ))}
+      </div>
+
+      <Button size="lg" fullWidth loading={markPaidMutation.isPending} onClick={() => markPaidMutation.mutate()}>
+        Paid {formatPrice(order.total_price)}
       </Button>
     </Card>
   );
@@ -204,12 +269,12 @@ export function ShopOrdersPage() {
     );
   }
 
-  const { incoming, active, ready } = ordersQuery.data ?? { incoming: [], active: [], ready: [] };
+  const { incoming, in_progress, awaiting_payment } = ordersQuery.data ?? { incoming: [], in_progress: [], awaiting_payment: [] };
 
   return (
     <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
       <Column
-        title="Incoming"
+        title="New"
         count={incoming.length}
         emptyTitle="No incoming orders"
         emptyHint="New orders will appear here for you to accept or reject."
@@ -220,24 +285,24 @@ export function ShopOrdersPage() {
       </Column>
 
       <Column
-        title="Active"
-        count={active.length}
+        title="Cooking"
+        count={in_progress.length}
         emptyTitle="Nothing cooking right now"
         emptyHint="Accepted orders being prepared will show up here."
       >
-        {active.map((order) => (
-          <ActiveOrderCard key={order.id} order={order} />
+        {in_progress.map((order) => (
+          <CookingOrderCard key={order.id} order={order} />
         ))}
       </Column>
 
       <Column
-        title="Ready"
-        count={ready.length}
-        emptyTitle="No orders ready for pickup"
-        emptyHint="Fully-prepared orders will show up here."
+        title="Collect payment"
+        count={awaiting_payment.length}
+        emptyTitle="No payments pending"
+        emptyHint="Orders that are fully handed over will show up here for payment."
       >
-        {ready.map((order) => (
-          <ReadyOrderCard key={order.id} order={order} />
+        {awaiting_payment.map((order) => (
+          <AwaitingPaymentCard key={order.id} order={order} />
         ))}
       </Column>
     </div>

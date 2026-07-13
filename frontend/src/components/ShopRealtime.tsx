@@ -29,6 +29,7 @@ export function ShopRealtime() {
     (msg: SSEMessage) => {
       if (msg.type === 'orders_update') {
         queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
+        queryClient.invalidateQueries({ queryKey: ['shop', 'history'] });
       } else if (msg.type === 'prep_update') {
         queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
       } else if (msg.type === 'menu_update') {

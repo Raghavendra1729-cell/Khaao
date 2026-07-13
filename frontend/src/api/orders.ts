@@ -30,15 +30,6 @@ export async function getOrderHistory(): Promise<Order[]> {
   return res.orders;
 }
 
-export async function addOrderItem(orderId: number, item: OrderItemInput): Promise<Order> {
-  const res = await apiFetch<{ order: Order }>(`/orders/${orderId}/items`, {
-    method: 'POST',
-    body: item,
-  });
-  return res.order;
-}
-
-/** Withdraw an order — only allowed while the canteen hasn't accepted it yet. */
 export async function cancelOrder(orderId: number): Promise<Order> {
   const res = await apiFetch<{ order: Order }>(`/orders/${orderId}/cancel`, {
     method: 'POST',
