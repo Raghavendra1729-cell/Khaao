@@ -1,0 +1,201 @@
+# ==========================================================================
+# KHAAO — Canteen Pre-Order App
+# Living project brief + status. Last updated: 2026-07-13.
+# Companion docs:  docs/SPEC.md (the authoritative contract)
+#                  PLAN.md      (roadmap to 2000+ students, keys, topology)
+#                  REVIEW.md    (architecture / security review findings)
+# ==========================================================================
+
+
+# ---------------------------------------------------------------------------
+# 1. PROJECT OVERVIEW
+# ---------------------------------------------------------------------------
+Project Name: Khaao
+Description: A web-based food ordering app for a single college canteen.
+Scale: Strictly single-college. Target load: ~2000+ students, with a
+       lunch/break rush (bursts of orders + many live connections).
+Platform: Mobile-first PWA (installable from the browser). Exceptional,
+          highly-optimized UX for mobile students and mobile/tablet
+          shopkeepers; desktop is secondary.
+
+Stack (v3, current):
+  backend/   Go 1.23 + Gin + GORM, Postgres ONLY. Layered SOLID:
+             controllers -> services -> repositories, with authn + realtime.
+  frontend/  Vite + React 18 + TypeScript + Tailwind 3.4 + TanStack Query
+             + react-router + Firebase JS SDK. Mobile-only PWA.
+  Topology:  ONE backend instance (vertically scaled) behind a TLS proxy.
+             Correct + simplest for a single canteen: the in-process mutex
+             and in-memory SSE hub are safe with one instance, so no
+             distributed lock / Redis is needed. (Rationale in PLAN.md §4.)
+
+
+# ---------------------------------------------------------------------------
+# 2. USER ROLES & AUTHENTICATION
+# ---------------------------------------------------------------------------
+1. Students  — sign in with Google (Firebase Auth) using their college
+               domain email (@sst.scaler.com). No passwords, no signup form.
+2. Shopkeepers — same Google button; their emails live in a DB allowlist
+               (shopkeeper_emails, seeded from SHOPKEEPER_EMAILS env).
+3. Chefs     — use the shopkeeper's Prep dashboard (same backend/role).
+
+Auth is server-verified: the backend validates the Firebase ID token itself
+against Google's public certs (golang-jwt, NO Firebase Admin SDK), then
+issues its own Khaao JWT. Role is re-read from the DB on every request, so
+removing someone from the allowlist locks them out on their next call.
+
+
+# ---------------------------------------------------------------------------
+# 3. STUDENT WORKFLOW
+# ---------------------------------------------------------------------------
+* Login with college Google account.
+* Browse the live menu (availability from shopkeeper's stock/time windows).
+* Build a cart, see the total, check out — places ONE active order at a time.
+* Waiting (submitted): student can CANCEL until the shopkeeper responds.
+* Track real-time status (SSE): Waiting -> Cooking -> Ready -> Pay -> Done.
+* Ready: chime + vibration + browser notification; pick up per item.
+* Pickup & payment: pay at the counter when all items are handed over.
+
+
+# ---------------------------------------------------------------------------
+# 4. SHOPKEEPER WORKFLOW
+# ---------------------------------------------------------------------------
+* Morning: update the menu + set availability / out-of-stock.
+* Triage incoming orders: Accept / Reject, or per-item trim at accept.
+* Accepted orders enter the Prep pool (aggregate demand across all orders).
+* Remove an item from an ALREADY-accepted order (prepared units return to
+  the pool and are re-assigned FCFS — see §5). "Remove" button per line.
+* Hand over ready items one-by-one ("Give 1") or all at once ("Give all N").
+* Collect payment ("Paid ₹X"); order moves to history.
+* Close day: expire open orders, clear pool, reset stock.
+
+
+# ---------------------------------------------------------------------------
+# 5. CHEF / KITCHEN / POOL WORKFLOW
+# ---------------------------------------------------------------------------
+* Prep list = aggregate remaining demand per menu item across accepted orders.
+* Chef taps "+1 Done" per finished unit -> the unit enters the pool.
+* Fulfillment (FCFS): each done unit is allocated to the OLDEST open order
+  waiting for that item (created_at ASC, id ASC — deterministic tiebreak).
+* Re-pooling edge case (IMPLEMENTED): if a shopkeeper removes an item AFTER
+  it was prepared, the finished unit returns to the pool and immediately
+  serves the next FCFS order requesting that item.
+
+
+# ---------------------------------------------------------------------------
+# 6. STATE MACHINES
+# ---------------------------------------------------------------------------
+Order:  submitted -> preparing -> partially_ready -> ready
+                  -> awaiting_payment -> completed
+        branches: submitted->cancelled (student), submitted->rejected
+        (shopkeeper), ready->expired (hold timeout, only if nothing handed).
+Item:   pending -> queued -> allocated -> handed_over ; branch: rejected.
+Status is derived by ONE pure recompute function after every mutation.
+Prices are integers in paise. Daily order token resets each business day
+(BUSINESS_TIMEZONE, default Asia/Kolkata).
+
+
+# ==========================================================================
+# 7. STATUS — WHAT'S DONE
+# ==========================================================================
+
+## Core product (built + verified working end-to-end, e2e smoke 20/20)
+[x] Firebase Google auth, server-side token verification, DB-allowlist
+    shopkeepers, domain-gated students, Khaao JWT, DB-role-per-request.
+[x] Full order lifecycle: cart -> order -> accept/reject/trim -> Prep pool
+    -> FCFS allocation -> per-item handover -> awaiting_payment -> paid.
+[x] One active order per student (enforced in code + partial unique index).
+[x] Menu CRUD + one-tap stock toggle; daily order tokens; order history +
+    shopkeeper "collected today" total.
+[x] Real-time SSE: student order updates, shop order/prep/menu updates,
+    ready-chime + vibration + browser notification, new-order beep.
+[x] Mobile PWA (installable, offline shell, /api NetworkOnly).
+[x] Layered SOLID backend (controllers/services/repositories/authn/realtime).
+
+## Hardening + features added this pass (2026-07-13) — all verified
+[x] PLAN.md: roadmap to 2000 students, single-instance topology decision,
+    step-by-step keys/secrets guide.
+[x] Fail-closed config: in production the server REFUSES to boot with dev
+    JWT secret, the dev/localhost DATABASE_URL, missing FIREBASE_PROJECT_ID,
+    a non-https FRONTEND_ORIGIN, or an unknown APP_ENV; AUTH_FAKE is dev/test
+    only. + BUSINESS_TIMEZONE for correct daily-token/history dates.
+[x] Authorization: RequireRole(student) now guards student routes (role
+    separation enforced both directions).
+[x] FCFS determinism: stable "created_at ASC, id ASC" tiebreak (orders+items).
+[x] MarkDone validation: menu item must exist; sane upper bound.
+[x] Shop history honors ?date=YYYY-MM-DD (was ignored) in the business tz.
+[x] Server hardening: http.Server ReadHeader/Read/Idle timeouts +
+    MaxHeaderBytes (slowloris), 1 MiB request-body cap, security headers
+    (nosniff, X-Frame-Options, Referrer-Policy, Permissions-Policy).
+    WriteTimeout left unset so long-lived SSE isn't killed.
+[x] Frontend UX (both roles): request notification permission on order tap,
+    vibrate on "ready", cancel = confirm + toast (no more raw alert()),
+    "Give all N" handover for multi-unit lines.
+[x] **Post-accept item trim + re-pool (the previously-MISSING feature):**
+    shopkeeper DELETE /api/shop/orders/:id/items/:itemID — returns unhanded
+    prepared units to the pool, re-allocates FCFS, recomputes total/status
+    (all lines trimmed -> order rejected), refuses if the student has begun
+    collecting (409). Backend engine + controller + route + unit tests +
+    frontend "Remove" button. Verified by unit tests (-race) and e2e smoke.
+
+Verification available: scratchpad smoke.sh boots the server on a throwaway
+Postgres and asserts the whole lifecycle incl. trim/re-pool (20/20 pass);
+`go test ./... -race` and `npm run build` both green.
+
+
+# ==========================================================================
+# 8. STATUS — WHAT'S LEFT  (priority order; detail in PLAN.md / REVIEW.md)
+# ==========================================================================
+
+## P0 / stability for 2000 students (do before real deployment)
+[ ] WP5 — DB-level concurrency: SELECT ... FOR UPDATE on order/items/pool
+    inside each mutation (deterministic lock order), keep the in-process
+    mutex as fast-path; daily order_no retry-once on unique violation;
+    move the one-active-order check inside the transaction (map to 409).
+    (Single-instance is safe today via the mutex; this is defense-in-depth
+    and makes a second replica non-corrupting.)
+[ ] WP4 — Versioned SQL migrations: explicit FKs + ON DELETE, CHECKs, the
+    partial unique index, indexes; verify schema in CI. Replace reliance on
+    AutoMigrate + one raw index.
+
+## P1 / correctness + security
+[ ] Reliable events/writes: logEvent currently swallows JSON/DB errors;
+    emit item_ready / item_trimmed consistently; make writes error-checked
+    inside the transaction.
+[ ] Reject-with-stock-out: let the shopkeeper mark specific out-of-stock
+    items on reject and flip them unavailable on the menu (decide vs the v3
+    trim-at-accept model).
+[ ] Input validation: dedupe repeated menu_item_id lines (they bypass the
+    per-line qty cap), cap lines/total value, validate photo URL scheme.
+[ ] Menu-delete policy: block soft-delete while referenced by active orders
+    (or keep immutable snapshots) to avoid orphaned references.
+[ ] Session/token security: move the SSE JWT out of the ?token= query string
+    (short-lived ticket or HttpOnly cookie); reconsider localStorage token;
+    pin Firebase RS256 / app-JWT HS256 explicitly; validate one exact CORS
+    origin at boot.
+[ ] Rate limiting: NAT-aware (per-user / per-token, NOT per-IP — 2000
+    students share campus NAT), plus SSE connection caps per user.
+
+## P2 / reliability + ops
+[ ] Health/readiness endpoints; DB connection-pool tuning (SetMaxOpenConns);
+    structured logs; metrics/alerts (auth failures, tx conflicts, pool
+    anomalies).
+[ ] CloseDay: confirmation token + idempotency + audit actor.
+[ ] Postgres integration test suite + `go test -race` in CI; load test at
+    2000 students (k6): 2000 SSE + rush order-creates, tune instance/pool.
+[ ] SSE: reconnect/refetch guarantees; consider an outbox only if ever
+    scaling beyond one instance.
+[ ] Update backend/README (still references old v2 env/paths).
+
+## Deployment (deferred milestone)
+[ ] Provision managed Postgres (citext, daily backups + tested restore).
+[ ] Firebase: create project, enable Google sign-in, add authorized domains
+    (the #1 launch gotcha), copy VITE_FIREBASE_* + FIREBASE_PROJECT_ID.
+    (Full click-by-click + the 6 required secrets are in PLAN.md §5.)
+[ ] One backend instance behind Caddy/nginx tuned for SSE (proxy_buffering
+    off, long read timeout on /stream); raise ulimit -n; static-host the SPA.
+
+## Repo hygiene
+[x] v3 (backend refactor + this hardening pass) committed to `main` and
+    pushed to origin (2026-07-13), in several focused commits. Build
+    artifacts (backend/khaao-server) and scratch files (keys.txt) removed and
+    gitignored; secrets stay untracked (.env, .claude/settings.local.json).
