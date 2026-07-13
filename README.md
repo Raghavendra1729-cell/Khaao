@@ -1,92 +1,168 @@
-# Khaao — Canteen Pre-Order App (v3)
+# Khaao — Canteen Pre-Order App
 
-A mobile-only PWA for one college canteen. Students sign in with their
-**@sst.scaler.com Google account**, build a cart, check out, and follow their
-order live. The shopkeeper accepts / rejects / trims incoming orders, cooks to
-**aggregate demand** (Prep tab), and taps **−1 · Done** per finished unit; each
-unit is **FCFS-allocated** to the earliest waiting order. Students can pick up
-ready items one by one — the shopkeeper taps **Give 1** per handed item. When
-everything is handed over the order asks for payment; the shopkeeper taps
-**Paid** and the order lands in the **History** tab. Order numbers are daily
-tokens that reset every morning. No in-app payments.
+A **mobile-first installable PWA** for a single college canteen. Students sign in with their `@sst.scaler.com` Google account, browse the menu, place one order at a time, and track it live via SSE. The shopkeeper accepts/rejects/trims orders, cooks to **aggregate demand** (Prep tab), taps **+1 Done** per finished unit (FCFS-allocated to the earliest waiting order), hands items over one-by-one (**Give 1**), and collects payment (**Paid**).
 
-- Build spec (schema, API contract, state machines, pool rules): `docs/SPEC.md`
-- Original product flows: `docs/01-flows.html` · Technical brief: `docs/02-technical.html`
+> **For agents / contributors:** Full context, architecture decisions, codebase map, what's done, and what's next is in **[STATUS.md](./STATUS.md)**. Read that first.
+
+---
 
 ## Stack
 
-| Layer | Choice |
+| Layer | Details |
 |---|---|
-| Backend | Go 1.23 · Gin · GORM · **PostgreSQL** · controllers → services → repositories (SOLID, interface-driven) |
-| Auth | **Firebase Google sign-in only** — students domain-locked, shopkeepers via a DB email allowlist; backend verifies ID tokens against Google's public certs, then issues its own JWT (role re-read from DB per request) |
-| Real-time | Server-Sent Events (student order updates + shop dashboard) |
-| Frontend | React 18 · TypeScript · Vite · Tailwind CSS · TanStack Query · installable PWA |
+| **Backend** | Go 1.23 · Gin · GORM · **PostgreSQL only** |
+| **Auth** | Firebase Google sign-in only. Backend verifies Firebase ID tokens against Google's public certs, issues its own HS256 JWT. Role re-read from DB on every request. |
+| **Real-time** | Server-Sent Events — in-memory fan-out hub |
+| **Frontend** | React 18 · TypeScript · Vite · Tailwind CSS 3.4 · TanStack Query · installable PWA |
+| **Topology** | **One backend instance** (vertically scaled) behind a TLS reverse proxy. Explicit constraint — see STATUS.md §3 |
 
-## Setup
+---
 
-### 1. Postgres
+## Quick Start
 
-```sh
-createdb khaao   # any Postgres 14+; citext is enabled automatically
+### Prerequisites
+
+- Go 1.23+
+- Node 18+
+- PostgreSQL 14+ (run `createdb khaao`)
+- A Firebase project with Google sign-in enabled
+
+### 1. Clone and configure
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
 ```
 
-### 2. Firebase (one project, two screens)
+Edit `backend/.env` — minimum required:
+```env
+DATABASE_URL=postgres://localhost:5432/khaao?sslmode=disable
+JWT_SECRET=<at-least-32-random-chars>
+FIREBASE_PROJECT_ID=<your-firebase-project-id>
+SHOPKEEPER_EMAILS=<your-email@gmail.com>
+```
 
-1. [console.firebase.google.com](https://console.firebase.google.com) → create/select a project.
-2. **Authentication → Sign-in method → enable Google.**
-3. Project settings (gear) → General:
-   - **Project ID** → `FIREBASE_PROJECT_ID` in `backend/.env`
-   - "Your apps" → add a **Web app** (`</>`) → SDK config → copy
-     `apiKey`, `authDomain`, `projectId`, `appId` → the four
-     `VITE_FIREBASE_*` values in `frontend/.env`
-4. Authentication → Settings → **Authorized domains**: make sure `localhost`
-   is listed (it is by default).
+Edit `frontend/.env` — copy from Firebase console → Project settings → Web app:
+```env
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=....firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_APP_ID=...
+```
 
-### 3. Env files
+### 2. Run backend (port 8080)
 
-Copy `backend/.env.example` → `backend/.env` and
-`frontend/.env.example` → `frontend/.env`, then fill in the Firebase values.
-Put the shopkeeper Google emails (any domain) in `SHOPKEEPER_EMAILS` —
-everyone else must sign in with an `@sst.scaler.com` account.
-
-## Run locally
-
-Backend (port 8080, auto-loads `backend/.env`):
-
-```sh
+```bash
 cd backend
 go run ./cmd/server
 ```
 
-Frontend (port 5173, proxies `/api` to the backend):
+Auto-migrates the schema, seeds shopkeeper emails, and seeds sample menu items on first boot.
 
-```sh
+### 3. Run frontend (port 5173)
+
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173 on a phone-sized viewport. The app is installable
-("Add to Home Screen").
+Open http://localhost:5173. Install as PWA from the browser.
+
+---
 
 ## Testing without Firebase
 
-Set `AUTH_FAKE=true` (dev only — the server refuses it when
-`APP_ENV=production`). `POST /api/auth/firebase` then accepts
-`{"id_token": "fake:someone@sst.scaler.com:Name"}` — this is what the e2e
-suite uses. The UI itself always uses the real Google popup.
+Set `AUTH_FAKE=true` in `backend/.env` (dev only — refused in production). Then:
+
+```bash
+curl -X POST http://localhost:8080/api/auth/firebase \
+  -H 'Content-Type: application/json' \
+  -d '{"id_token": "fake:student@sst.scaler.com:Test Student"}'
+```
+
+---
+
+## Verification
+
+```bash
+# Backend
+cd backend
+go build ./... && go vet ./... && go test ./... -race
+
+# Frontend
+cd frontend
+npx tsc --noEmit
+```
+
+---
 
 ## Project layout
 
 ```
-backend/   Go API — cmd/server + internal/{config,models,repository,authn,
-           services,controllers,middleware,routes,database,realtime}
-frontend/  React PWA — src/{api,lib,context,hooks,components,pages}
-docs/      SPEC.md (the contract) + original product docs
+backend/                      Go API
+  cmd/server/main.go          → entry point, dependency wiring, expiry ticker
+  internal/
+    config/                   → fail-closed config (refuses bad production secrets)
+    authn/                    → Firebase token verification + fake verifier
+    middleware/               → auth, CORS, security headers, role guards
+    models/                   → GORM models with CHECK constraints
+    database/                 → connection, AutoMigrate, seed, pool tuning
+    repository/               → interfaces + GORM implementations
+    realtime/                 → in-memory SSE hub
+    services/                 → business logic (auth, menu, orders, pool engine, FCFS)
+    controllers/              → HTTP handlers
+    routes/                   → Gin router + middleware registration
+
+frontend/                     React PWA
+  src/
+    api/                      → typed fetch wrappers (client, auth, menu, orders, shop)
+    lib/                      → firebase, format helpers, WebAudio beeps
+    context/                  → AuthContext
+    hooks/                    → useSSE (exponential backoff + retry cap)
+    components/               → Layout, realtime handlers, UI primitives
+    pages/                    → Login, student/Menu, student/OrderStatus,
+                                 shop/Orders, shop/Prep, shop/History, shop/MenuManage
+
+docs/
+  SPEC.md                     → authoritative API contract + state machines (read this)
+  01-flows.html               → product flow diagrams
+  02-technical.html           → original technical brief
+
+STATUS.md                     → full project context, what's done, what's next
+scripts/smoke.sh              → e2e smoke test (full lifecycle against a live server)
 ```
+
+---
+
+## What's been built
+
+See [STATUS.md §8](./STATUS.md) for the complete list. Highlights:
+
+- ✅ Full order lifecycle (cart → FCFS allocation → per-item handover → payment)
+- ✅ Post-accept item trim + re-pool (shopkeeper removes an item; prepared units return to pool and are re-allocated FCFS)
+- ✅ Fail-closed production config (refuses to boot with dev secrets)
+- ✅ DB-backed concurrency (`SELECT … FOR UPDATE` + Postgres advisory locks inside every mutation transaction)
+- ✅ Server hardening (timeouts, body cap, security headers)
+- ✅ Role separation (`RequireRole(student)` / `RequireRole(shopkeeper)`)
+- ✅ SSE retry bounding (8 failures → force re-login)
+- ✅ Health endpoint (`GET /api/health`)
+- ✅ DB connection pool tuned (`MaxOpenConns(25)`)
+- ✅ Menu delete safety (409 if item is in an active order)
+- ✅ Server-side menu validation (name length, price > 0, URL scheme, paired availability window)
+
+## What's next
+
+See [STATUS.md §9](./STATUS.md) for the full prioritized list. Top items:
+
+1. Dedupe `menu_item_id` lines in `CreateOrder` (P1 correctness)
+2. Rate limiting middleware, per-user (P1 security)
+3. Structured logging with `slog` (P2 reliability)
+4. Versioned SQL migrations with golang-migrate (WP4)
+5. Postgres integration tests + `go test -race` in CI (P2)
+
+---
 
 ## Out of scope (unchanged)
 
-In-app payments · OTP · time-slot scheduling · strike/ban system · bilingual
-toggle · analytics. Deployment (Docker/VM/HTTPS) is planned but deferred —
-see `docs/02-technical.html` §8.
+In-app payments · OTP · time-slot scheduling · strike/ban system · bilingual toggle · analytics.
