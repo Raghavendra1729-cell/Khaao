@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"khaao/internal/config"
 	"khaao/internal/models"
 	"khaao/internal/realtime"
 	"khaao/internal/repository"
@@ -27,8 +28,7 @@ type MenuItemResponse struct {
 	Orderable   bool    `json:"orderable"`
 }
 
-func ToMenuItemResponse(item models.MenuItem) MenuItemResponse {
-	now := time.Now()
+func ToMenuItemResponse(item models.MenuItem, now time.Time) MenuItemResponse {
 	status := "available"
 	switch {
 	case item.OutOfStock:
@@ -97,10 +97,18 @@ type MenuItemInput struct {
 type MenuService struct {
 	repo repository.MenuRepo
 	hub  *realtime.Hub
+	cfg  *config.Config
 }
 
-func NewMenuService(repo repository.MenuRepo, hub *realtime.Hub) *MenuService {
-	return &MenuService{repo: repo, hub: hub}
+func NewMenuService(repo repository.MenuRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
+	return &MenuService{repo: repo, hub: hub, cfg: cfg}
+}
+
+// now returns the current time in the configured business timezone, so
+// availability windows are evaluated in the canteen's local time regardless of
+// where the server runs.
+func (s *MenuService) now() time.Time {
+	return time.Now().In(s.cfg.Location())
 }
 
 func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, error) {
@@ -108,7 +116,7 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items), nil
+	return toMenuResponses(items, s.now()), nil
 }
 
 func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
@@ -116,13 +124,13 @@ func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items), nil
+	return toMenuResponses(items, s.now()), nil
 }
 
-func toMenuResponses(items []models.MenuItem) []MenuItemResponse {
+func toMenuResponses(items []models.MenuItem, now time.Time) []MenuItemResponse {
 	out := make([]MenuItemResponse, 0, len(items))
 	for _, it := range items {
-		out = append(out, ToMenuItemResponse(it))
+		out = append(out, ToMenuItemResponse(it, now))
 	}
 	return out
 }
@@ -177,7 +185,7 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 		return MenuItemResponse{}, err
 	}
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(item), nil
+	return ToMenuItemResponse(item, s.now()), nil
 }
 
 func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) (MenuItemResponse, error) {
@@ -203,7 +211,7 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 		return MenuItemResponse{}, err
 	}
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(*item), nil
+	return ToMenuItemResponse(*item, s.now()), nil
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
@@ -228,7 +236,7 @@ func (s *MenuService) SetStock(ctx context.Context, id uint, outOfStock bool) (M
 	}
 	item.OutOfStock = outOfStock
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(*item), nil
+	return ToMenuItemResponse(*item, s.now()), nil
 }
 
 func (s *MenuService) GetByID(ctx context.Context, id uint) (models.MenuItem, error) {

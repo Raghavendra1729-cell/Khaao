@@ -54,8 +54,8 @@ func activeStatuses() []models.OrderStatus {
 	}
 }
 
-func itemOrderableNow(mi models.MenuItem) bool {
-	return mi.IsAvailable && !mi.OutOfStock && withinWindow(mi.AvailFrom, mi.AvailTo, time.Now())
+func itemOrderableNow(mi models.MenuItem, now time.Time) bool {
+	return mi.IsAvailable && !mi.OutOfStock && withinWindow(mi.AvailFrom, mi.AvailTo, now)
 }
 
 func (e *PoolEngine) recomputeStatus(order *models.Order) {
@@ -168,7 +168,7 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 		if mi == nil {
 			return OrderResponse{}, ErrUnorderable("menu item not found")
 		}
-		if !itemOrderableNow(*mi) {
+		if !itemOrderableNow(*mi, time.Now().In(e.cfg.Location())) {
 			return OrderResponse{}, ErrUnorderable(mi.Name + " is not orderable right now")
 		}
 		
