@@ -174,7 +174,10 @@ export function Menu() {
       )}
 
       {showCheckout && (
-        <div className="fixed inset-0 z-50 flex items-end bg-ink/40 backdrop-blur-sm sm:items-center sm:justify-center">
+        <div
+          className="fixed inset-0 z-50 flex items-end bg-ink/40 backdrop-blur-sm sm:items-center sm:justify-center"
+          onClick={() => setShowCheckout(false)}
+        >
           <div className="w-full rounded-t-3xl bg-cream p-5 shadow-2xl sm:max-w-md sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-black text-ink">Checkout</h2>

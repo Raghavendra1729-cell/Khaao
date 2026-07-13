@@ -87,7 +87,7 @@ function ReadyBanner({ order }: { order: Order }) {
 
   return (
     <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-brand px-4 py-5 text-center text-white shadow-ticket">
-      <p className="text-lg font-black tracking-tight">Ready — pick up within 15 min, pay at counter</p>
+      <p className="text-lg font-black tracking-tight">Ready — pick up before the timer, pay at counter</p>
       <p className={`tabular text-3xl font-black ${expiringSoon ? 'animate-soft-pulse' : ''}`}>
         {remaining > 0 ? formatCountdown(remaining) : "Time's up"}
       </p>
