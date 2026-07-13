@@ -1,433 +1,741 @@
-// Package services: pool.go is the pool engine described in SPEC.md. It is
-// the single choke point for every mutation touching orders, order items or
-// the done pool, all guarded by one sync.Mutex — correctness over
-// throughput, since this is a monolith serving one canteen.
 package services
 
 import (
-	"errors"
-	"log"
+	"context"
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
 
-	"gorm.io/gorm"
-
 	"khaao/internal/config"
 	"khaao/internal/models"
 	"khaao/internal/realtime"
+	"khaao/internal/repository"
 )
 
-// Engine implements the pool engine rules from SPEC.md.
-type Engine struct {
-	db  *gorm.DB
-	hub *realtime.Hub
-	cfg *config.Config
-	mu  sync.Mutex
+type PoolEngine struct {
+	uow       repository.UnitOfWork
+	orderRepo repository.OrderRepo
+	menuRepo  repository.MenuRepo
+	poolRepo  repository.PoolRepo
+	eventRepo repository.EventRepo
+	hub       *realtime.Hub
+	cfg       *config.Config
+	alloc     AllocationStrategy
+	mu        sync.Mutex
 }
 
-// NewEngine builds the pool engine.
-func NewEngine(db *gorm.DB, hub *realtime.Hub, cfg *config.Config) *Engine {
-	return &Engine{db: db, hub: hub, cfg: cfg}
+func NewPoolEngine(
+	uow repository.UnitOfWork,
+	orderRepo repository.OrderRepo,
+	menuRepo repository.MenuRepo,
+	poolRepo repository.PoolRepo,
+	eventRepo repository.EventRepo,
+	hub *realtime.Hub,
+	cfg *config.Config,
+	alloc AllocationStrategy,
+) *PoolEngine {
+	return &PoolEngine{
+		uow:       uow,
+		orderRepo: orderRepo,
+		menuRepo:  menuRepo,
+		poolRepo:  poolRepo,
+		eventRepo: eventRepo,
+		hub:       hub,
+		cfg:       cfg,
+		alloc:     alloc,
+	}
 }
 
 func activeStatuses() []models.OrderStatus {
 	return []models.OrderStatus{
 		models.OrderSubmitted, models.OrderPreparing,
-		models.OrderPartiallyReady, models.OrderReady,
+		models.OrderPartiallyReady, models.OrderReady, models.OrderAwaitingPayment,
 	}
 }
 
-func prepStatuses() []models.OrderStatus {
-	return []models.OrderStatus{models.OrderPreparing, models.OrderPartiallyReady}
-}
-
-// itemOrderableNow mirrors the MenuItem.orderable computed field.
 func itemOrderableNow(mi models.MenuItem) bool {
 	return mi.IsAvailable && !mi.OutOfStock && withinWindow(mi.AvailFrom, mi.AvailTo, time.Now())
 }
 
-// ---- Accept / Reject --------------------------------------------------
+func (e *PoolEngine) recomputeStatus(order *models.Order) {
+	if order.Status == models.OrderRejected || order.Status == models.OrderCancelled || order.Status == models.OrderExpired || order.Status == models.OrderCompleted {
+		return
+	}
 
-// Accept accepts an order's pending items, trimming rejectedItemIDs. If all
-// items end up rejected the whole order is rejected; otherwise it moves to
-// preparing and allocation is immediately (re-)run for the newly queued
-// items, since the done pool may already hold matching units.
-func (e *Engine) Accept(orderID uint, rejectedItemIDs []uint) (OrderResponse, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	allHanded := true
+	allAllocated := true
+	anyProgress := false
+	hasActiveItems := false
 
-	var order models.Order
-	if err := e.db.First(&order, orderID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return OrderResponse{}, ErrNotFound("order not found")
+	for _, it := range order.Items {
+		if it.Status == models.ItemRejected {
+			continue
 		}
-		return OrderResponse{}, err
-	}
-
-	var pendingItems []models.OrderItem
-	if err := e.db.Where("order_id = ? AND status = ?", orderID, models.ItemPending).
-		Find(&pendingItems).Error; err != nil {
-		return OrderResponse{}, err
-	}
-	if len(pendingItems) == 0 {
-		return OrderResponse{}, ErrConflict("order has no pending items to accept")
-	}
-
-	rejectedSet := make(map[uint]struct{}, len(rejectedItemIDs))
-	for _, id := range rejectedItemIDs {
-		rejectedSet[id] = struct{}{}
-	}
-
-	newlyQueuedMenuItems := map[uint]struct{}{}
-	for i := range pendingItems {
-		it := &pendingItems[i]
-		if _, rejected := rejectedSet[it.ID]; rejected {
-			it.Status = models.ItemRejected
-		} else {
-			it.Status = models.ItemQueued
-			newlyQueuedMenuItems[it.MenuItemID] = struct{}{}
+		hasActiveItems = true
+		if it.HandedQty < it.Qty {
+			allHanded = false
 		}
-		if err := e.db.Save(it).Error; err != nil {
-			return OrderResponse{}, err
+		if it.AllocatedQty < it.Qty {
+			allAllocated = false
+		}
+		if it.AllocatedQty > 0 || it.HandedQty > 0 {
+			anyProgress = true
 		}
 	}
 
-	var allItems []models.OrderItem
-	if err := e.db.Where("order_id = ?", orderID).Find(&allItems).Error; err != nil {
-		return OrderResponse{}, err
-	}
-	allRejected := true
-	for _, it := range allItems {
-		if it.Status != models.ItemRejected {
-			allRejected = false
-			break
-		}
+	if !hasActiveItems {
+		return // leave it alone, probably rejected
 	}
 
-	if allRejected {
-		order.Status = models.OrderRejected
-		if err := e.db.Save(&order).Error; err != nil {
-			return OrderResponse{}, err
-		}
-	} else {
-		order.Status = models.OrderPreparing
-		if err := e.db.Save(&order).Error; err != nil {
-			return OrderResponse{}, err
-		}
-		if err := e.recomputeTotalPrice(orderID); err != nil {
-			return OrderResponse{}, err
-		}
-		for menuItemID := range newlyQueuedMenuItems {
-			if err := e.allocateLocked(menuItemID); err != nil {
-				return OrderResponse{}, err
-			}
-		}
-		// The order may already be complete without any new allocation —
-		// e.g. every pending item was trimmed while the rest of the order
-		// was fully allocated — so re-derive its status unconditionally.
-		if err := e.recomputeOrderStatus(orderID); err != nil {
-			return OrderResponse{}, err
-		}
-	}
-
-	e.broadcastOrder(orderID)
-	e.hub.NotifyShopOrdersUpdate()
-	e.hub.NotifyShopPrepUpdate()
-	return e.orderResponseFor(orderID, true)
-}
-
-// Reject rejects an order outright: every non-terminal item -> rejected. A
-// re-opened order may already hold allocated units; those go back to the
-// done pool (and may complete other waiting orders), mirroring expiry.
-func (e *Engine) Reject(orderID uint) (OrderResponse, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	var order models.Order
-	if err := e.db.First(&order, orderID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return OrderResponse{}, ErrNotFound("order not found")
-		}
-		return OrderResponse{}, err
-	}
-
-	var items []models.OrderItem
-	if err := e.db.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
-		return OrderResponse{}, err
-	}
-
-	touchedMenuItems := map[uint]struct{}{}
-	for i := range items {
-		it := &items[i]
-		if it.AllocatedQty > 0 {
-			if err := e.creditPool(it.MenuItemID, it.AllocatedQty); err != nil {
-				return OrderResponse{}, err
-			}
-			touchedMenuItems[it.MenuItemID] = struct{}{}
-			it.AllocatedQty = 0
-		}
-		it.Status = models.ItemRejected
-		if err := e.db.Save(it).Error; err != nil {
-			return OrderResponse{}, err
-		}
-	}
-
-	order.Status = models.OrderRejected
-	if err := e.db.Save(&order).Error; err != nil {
-		return OrderResponse{}, err
-	}
-
-	for menuItemID := range touchedMenuItems {
-		if err := e.allocateLocked(menuItemID); err != nil {
-			return OrderResponse{}, err
-		}
-	}
-
-	e.broadcastOrder(orderID)
-	e.hub.NotifyShopOrdersUpdate()
-	e.hub.NotifyShopPrepUpdate()
-	return e.orderResponseFor(orderID, true)
-}
-
-// ---- Done / allocation --------------------------------------------------
-
-// MarkDone records qty finished units of a menu item into the done pool,
-// then immediately runs allocation for that item.
-func (e *Engine) MarkDone(menuItemID uint, qty int) error {
-	if qty <= 0 {
-		qty = 1
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	var mi models.MenuItem
-	if err := e.db.First(&mi, menuItemID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrNotFound("menu item not found")
-		}
-		return err
-	}
-
-	if err := e.creditPool(menuItemID, qty); err != nil {
-		return err
-	}
-	if err := e.allocateLocked(menuItemID); err != nil {
-		return err
-	}
-
-	e.hub.NotifyShopPrepUpdate()
-	e.hub.NotifyShopOrdersUpdate()
-	return nil
-}
-
-// creditPool adds qty units of menuItemID to the done pool (upsert).
-func (e *Engine) creditPool(menuItemID uint, qty int) error {
-	var pool models.DonePool
-	err := e.db.Where("menu_item_id = ?", menuItemID).First(&pool).Error
+	oldStatus := order.Status
 	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		pool = models.DonePool{MenuItemID: menuItemID, QtyAvailable: qty}
-		return e.db.Create(&pool).Error
-	case err != nil:
-		return err
-	default:
-		pool.QtyAvailable += qty
-		return e.db.Save(&pool).Error
-	}
-}
-
-// allocateLocked implements rule 5: FIFO-allocate done-pool units of
-// menuItemID to queued order items across preparing/partially_ready orders,
-// oldest order first, oldest item within an order first. Must be called
-// with e.mu held.
-func (e *Engine) allocateLocked(menuItemID uint) error {
-	var pool models.DonePool
-	err := e.db.Where("menu_item_id = ?", menuItemID).First(&pool).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	touchedOrders := map[uint]struct{}{}
-
-	for pool.QtyAvailable > 0 {
-		item, ok, err := e.nextQueuedItem(menuItemID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			break
-		}
-		remaining := item.Qty - item.AllocatedQty
-		take := remaining
-		if take > pool.QtyAvailable {
-			take = pool.QtyAvailable
-		}
-		if take <= 0 {
-			break
-		}
-		item.AllocatedQty += take
-		pool.QtyAvailable -= take
-		if item.AllocatedQty >= item.Qty {
-			item.Status = models.ItemAllocated
-		}
-		if err := e.db.Save(&item).Error; err != nil {
-			return err
-		}
-		touchedOrders[item.OrderID] = struct{}{}
-	}
-
-	if err := e.db.Save(&pool).Error; err != nil {
-		return err
-	}
-
-	for orderID := range touchedOrders {
-		if err := e.recomputeOrderStatus(orderID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// nextQueuedItem finds the oldest not-fully-allocated queued item of
-// menuItemID, across preparing/partially_ready orders, oldest order first.
-func (e *Engine) nextQueuedItem(menuItemID uint) (models.OrderItem, bool, error) {
-	var item models.OrderItem
-	err := e.db.Model(&models.OrderItem{}).
-		Joins("JOIN orders ON orders.id = order_items.order_id").
-		Where("order_items.menu_item_id = ? AND order_items.status = ? AND order_items.qty > order_items.allocated_qty",
-			menuItemID, models.ItemQueued).
-		Where("orders.status IN ?", prepStatuses()).
-		Order("orders.created_at ASC, order_items.created_at ASC").
-		First(&item).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return models.OrderItem{}, false, nil
-	}
-	if err != nil {
-		return models.OrderItem{}, false, err
-	}
-	return item, true, nil
-}
-
-// recomputeOrderStatus re-derives an order's status from its items per rule
-// 5, and broadcasts the result. Only acts on preparing/partially_ready
-// orders (others are terminal or awaiting a fresh accept decision).
-func (e *Engine) recomputeOrderStatus(orderID uint) error {
-	var order models.Order
-	if err := e.db.First(&order, orderID).Error; err != nil {
-		return err
-	}
-	if order.Status != models.OrderPreparing && order.Status != models.OrderPartiallyReady {
-		return nil
-	}
-
-	var items []models.OrderItem
-	if err := e.db.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
-		return err
-	}
-
-	hasPending := false
-	hasAllocated := false
-	allResolved := true
-	for _, it := range items {
-		switch it.Status {
-		case models.ItemPending:
-			hasPending = true
-			allResolved = false
-		case models.ItemAllocated:
-			hasAllocated = true
-		case models.ItemRejected:
-			// resolved, doesn't block readiness
-		default: // queued but not fully allocated
-			allResolved = false
-			if it.AllocatedQty > 0 {
-				hasAllocated = true
-			}
-		}
-	}
-
-	switch {
-	case !hasPending && allResolved && hasAllocated:
+	case allHanded:
+		order.Status = models.OrderAwaitingPayment
+	case allAllocated:
 		order.Status = models.OrderReady
-		now := time.Now()
-		order.ReadyAt = &now
-		expiresAt := now.Add(time.Duration(e.cfg.HoldMinutes) * time.Minute)
-		order.ExpiresAt = &expiresAt
-	case hasAllocated:
+		if oldStatus != models.OrderReady {
+			now := time.Now()
+			order.ReadyAt = &now
+			exp := now.Add(time.Duration(e.cfg.HoldMinutes) * time.Minute)
+			order.ExpiresAt = &exp
+		}
+	case anyProgress:
 		order.Status = models.OrderPartiallyReady
 	default:
 		order.Status = models.OrderPreparing
 	}
-
-	if err := e.db.Save(&order).Error; err != nil {
-		return err
-	}
-
-	e.broadcastOrder(order.ID)
-	e.hub.NotifyShopOrdersUpdate()
-	e.hub.NotifyShopPrepUpdate()
-	return nil
 }
 
-// ---- Expiry ticker -------------------------------------------------------
+func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.EventType, payload any) {
+	b, _ := json.Marshal(payload)
+	_ = e.eventRepo.Log(ctx, &models.OrderEvent{
+		OrderID: orderID,
+		Type:    typ,
+		Payload: b,
+	})
+}
 
-// ExpiryTick expires ready orders past their hold window, returns their
-// allocated units to the done pool, and re-runs allocation for those menu
-// items (rule 7).
-func (e *Engine) ExpiryTick() error {
+func (e *PoolEngine) broadcast(orderID uint) {
+	ctx := context.Background()
+	order, _ := e.orderRepo.FindByID(ctx, orderID)
+	if order != nil {
+		resp := ToOrderResponse(*order, false)
+		e.hub.NotifyOrderUpdate(order.UserID, resp)
+	}
+}
+
+func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []OrderItemInput) (OrderResponse, error) {
+	if len(inputs) == 0 {
+		return OrderResponse{}, ErrBadRequest("order must contain at least one item")
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	now := time.Now()
-	var expiredOrders []models.Order
-	if err := e.db.Where("status = ? AND expires_at < ?", models.OrderReady, now).
-		Find(&expiredOrders).Error; err != nil {
-		return err
+	active, err := e.orderRepo.FindActiveByUserID(ctx, userID)
+	if err != nil {
+		return OrderResponse{}, err
 	}
-	if len(expiredOrders) == 0 {
-		return nil
+	if active != nil {
+		return OrderResponse{}, ErrConflict("you already have an active order")
 	}
 
-	touchedMenuItems := map[uint]struct{}{}
+	today := models.DayOf(time.Now().In(e.cfg.Location()))
+	maxNo, err := e.orderRepo.GetMaxOrderNo(ctx, today)
+	if err != nil {
+		return OrderResponse{}, err
+	}
 
-	for _, order := range expiredOrders {
-		order.Status = models.OrderExpired
-		if err := e.db.Save(&order).Error; err != nil {
-			return err
+	order := &models.Order{
+		UserID:    userID,
+		OrderNo:   maxNo + 1,
+		OrderDate: today,
+		Status:    models.OrderSubmitted,
+	}
+
+	var items []models.OrderItem
+	total := 0
+
+	for _, in := range inputs {
+		if in.Qty < 1 || in.Qty > 20 {
+			return OrderResponse{}, ErrBadRequest("qty must be between 1 and 20")
 		}
+		mi, err := e.menuRepo.FindByID(ctx, in.MenuItemID)
+		if err != nil {
+			return OrderResponse{}, err
+		}
+		if mi == nil {
+			return OrderResponse{}, ErrUnorderable("menu item not found")
+		}
+		if !itemOrderableNow(*mi) {
+			return OrderResponse{}, ErrUnorderable(mi.Name + " is not orderable right now")
+		}
+		
+		items = append(items, models.OrderItem{
+			MenuItemID: mi.ID,
+			Name:       mi.Name,
+			PriceEach:  mi.Price,
+			Qty:        in.Qty,
+			Status:     models.ItemPending,
+		})
+		total += mi.Price * in.Qty
+	}
+	order.TotalPrice = total
 
-		var items []models.OrderItem
-		if err := e.db.Where("order_id = ?", order.ID).Find(&items).Error; err != nil {
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		if err := e.orderRepo.Create(txCtx, order); err != nil {
 			return err
 		}
 		for i := range items {
-			it := &items[i]
-			if it.AllocatedQty <= 0 {
-				continue
-			}
-			if err := e.creditPool(it.MenuItemID, it.AllocatedQty); err != nil {
-				return err
-			}
-			touchedMenuItems[it.MenuItemID] = struct{}{}
-			it.AllocatedQty = 0
-			if it.Status == models.ItemAllocated {
-				it.Status = models.ItemQueued
-			}
-			if err := e.db.Save(it).Error; err != nil {
+			items[i].OrderID = order.ID
+			if err := e.orderRepo.SaveItem(txCtx, &items[i]); err != nil {
 				return err
 			}
 		}
-		e.broadcastOrder(order.ID)
+		e.logEvent(txCtx, order.ID, models.EventPlaced, map[string]any{})
+		return nil
+	})
+	
+	if err != nil {
+		return OrderResponse{}, err
 	}
-	e.hub.NotifyShopOrdersUpdate()
 
-	for menuItemID := range touchedMenuItems {
-		if err := e.allocateLocked(menuItemID); err != nil {
+	e.broadcast(order.ID)
+	e.hub.NotifyShopOrdersUpdate()
+	
+	order, _ = e.orderRepo.FindByID(ctx, order.ID)
+	return ToOrderResponse(*order, false), nil
+}
+
+func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs []uint) (OrderResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	if order.Status != models.OrderSubmitted {
+		return OrderResponse{}, ErrConflict("order is not in submitted state")
+	}
+
+	rejectedSet := make(map[uint]struct{})
+	for _, id := range rejectedItemIDs {
+		rejectedSet[id] = struct{}{}
+	}
+
+	allRejected := true
+	for i := range order.Items {
+		it := &order.Items[i]
+		if _, rejected := rejectedSet[it.ID]; rejected {
+			it.Status = models.ItemRejected
+		} else {
+			it.Status = models.ItemQueued
+			allRejected = false
+		}
+	}
+
+	touchedMenuItems := make(map[uint]struct{})
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		if allRejected {
+			order.Status = models.OrderRejected
+			e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{"reason": "all items trimmed"})
+		} else {
+			total := 0
+			for _, it := range order.Items {
+				if it.Status != models.ItemRejected {
+					total += it.Qty * it.PriceEach
+					touchedMenuItems[it.MenuItemID] = struct{}{}
+				}
+			}
+			order.TotalPrice = total
+			now := time.Now()
+			order.AcceptedAt = &now
+			e.recomputeStatus(order)
+			e.logEvent(txCtx, order.ID, models.EventAccepted, map[string]any{})
+		}
+		
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
+		for i := range order.Items {
+			if err := e.orderRepo.SaveItem(txCtx, &order.Items[i]); err != nil {
+				return err
+			}
+		}
+
+		if !allRejected {
+			for menuItemID := range touchedMenuItems {
+				_, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	
+	if !allRejected {
+		_ = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+			order, _ = e.orderRepo.FindByID(txCtx, orderID)
+			e.recomputeStatus(order)
+			return e.orderRepo.Save(txCtx, order)
+		})
+	}
+
+	e.broadcast(orderID)
+	e.hub.NotifyShopOrdersUpdate()
+	e.hub.NotifyShopPrepUpdate()
+	
+	order, _ = e.orderRepo.FindByID(ctx, orderID)
+	return ToOrderResponse(*order, true), nil
+}
+
+func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	if order.Status != models.OrderSubmitted {
+		return OrderResponse{}, ErrConflict("order is not in submitted state")
+	}
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		order.Status = models.OrderRejected
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+		for i := range order.Items {
+			it := &order.Items[i]
+			it.Status = models.ItemRejected
+			if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
+				return err
+			}
+		}
+		e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{})
+		return nil
+	})
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	e.broadcast(orderID)
+	e.hub.NotifyShopOrdersUpdate()
+	e.hub.NotifyShopPrepUpdate()
+	
+	return ToOrderResponse(*order, true), nil
+}
+
+func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	if order.UserID != userID {
+		return OrderResponse{}, ErrForbidden("not your order")
+	}
+	if order.Status != models.OrderSubmitted {
+		return OrderResponse{}, ErrConflict("order was already accepted and can no longer be cancelled")
+	}
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		order.Status = models.OrderCancelled
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+		for i := range order.Items {
+			it := &order.Items[i]
+			it.Status = models.ItemRejected
+			if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
+				return err
+			}
+		}
+		e.logEvent(txCtx, order.ID, models.EventCancelled, map[string]any{})
+		return nil
+	})
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	e.broadcast(orderID)
+	e.hub.NotifyShopOrdersUpdate()
+	return ToOrderResponse(*order, false), nil
+}
+
+func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int) (OrderResponse, error) {
+	if qty <= 0 {
+		qty = 1
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	if order.Status == models.OrderSubmitted || order.Status == models.OrderRejected || order.Status == models.OrderCancelled || order.Status == models.OrderExpired || order.Status == models.OrderCompleted {
+		return OrderResponse{}, ErrConflict("order not in a valid state for handover")
+	}
+
+	var targetItem *models.OrderItem
+	for i := range order.Items {
+		if order.Items[i].ID == itemID {
+			targetItem = &order.Items[i]
+			break
+		}
+	}
+	if targetItem == nil {
+		return OrderResponse{}, ErrNotFound("item not found in order")
+	}
+
+	if targetItem.HandedQty+qty > targetItem.AllocatedQty {
+		return OrderResponse{}, ErrConflict("cannot hand over more than allocated")
+	}
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		targetItem.HandedQty += qty
+		if targetItem.HandedQty >= targetItem.Qty {
+			targetItem.Status = models.ItemHandedOver
+		}
+		if err := e.orderRepo.SaveItem(txCtx, targetItem); err != nil {
+			return err
+		}
+		
+		e.recomputeStatus(order)
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+
+		e.logEvent(txCtx, order.ID, models.EventItemHanded, map[string]any{"item_id": itemID, "qty": qty})
+		return nil
+	})
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	e.broadcast(orderID)
+	e.hub.NotifyShopOrdersUpdate()
+	return ToOrderResponse(*order, true), nil
+}
+
+// RemoveItem lets a shopkeeper drop a line from an already-accepted order.
+// Any prepared-but-unhanded units return to the pool and are re-allocated FCFS
+// to the next order waiting for that menu item (canttenapp re-pooling rule).
+// Removal is refused once the student has taken any unit of the line.
+func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (OrderResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	switch order.Status {
+	case models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady:
+		// accepted and not yet paid — trimming is allowed
+	default:
+		return OrderResponse{}, ErrConflict("order can no longer be modified")
+	}
+
+	var target *models.OrderItem
+	for i := range order.Items {
+		if order.Items[i].ID == itemID {
+			target = &order.Items[i]
+			break
+		}
+	}
+	if target == nil {
+		return OrderResponse{}, ErrNotFound("item not found in order")
+	}
+	if target.Status == models.ItemRejected {
+		return OrderResponse{}, ErrConflict("item was already removed")
+	}
+	if target.HandedQty > 0 {
+		return OrderResponse{}, ErrConflict("cannot remove an item the student has started collecting")
+	}
+
+	menuItemID := target.MenuItemID
+	returned := target.AllocatedQty
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		if returned > 0 {
+			if err := e.poolRepo.Add(txCtx, menuItemID, returned); err != nil {
+				return err
+			}
+		}
+		target.AllocatedQty = 0
+		target.Status = models.ItemRejected
+		if err := e.orderRepo.SaveItem(txCtx, target); err != nil {
+			return err
+		}
+
+		total := 0
+		anyActive := false
+		for _, it := range order.Items {
+			if it.Status != models.ItemRejected {
+				total += it.Qty * it.PriceEach
+				anyActive = true
+			}
+		}
+		order.TotalPrice = total
+		if !anyActive {
+			order.Status = models.OrderRejected // every line trimmed away
+		} else {
+			e.recomputeStatus(order)
+		}
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+
+		e.logEvent(txCtx, order.ID, models.EventItemTrimmed, map[string]any{
+			"item_id":          itemID,
+			"menu_item_id":     menuItemID,
+			"returned_to_pool": returned,
+		})
+
+		// Re-assign the freed units to the next FCFS order(s).
+		if returned > 0 {
+			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			if err != nil {
+				return err
+			}
+			for _, tid := range touched {
+				if tid == order.ID {
+					continue
+				}
+				ord, err := e.orderRepo.FindByID(txCtx, tid)
+				if err != nil {
+					return err
+				}
+				if ord != nil {
+					e.recomputeStatus(ord)
+					if err := e.orderRepo.Save(txCtx, ord); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	e.broadcast(orderID)
+	if returned > 0 {
+		// reallocation may have advanced other waiting orders
+		orders, _ := e.orderRepo.FindInProgress(ctx)
+		for _, o := range orders {
+			if o.ID != orderID {
+				e.broadcast(o.ID)
+			}
+		}
+	}
+	e.hub.NotifyShopOrdersUpdate()
+	e.hub.NotifyShopPrepUpdate()
+
+	order, _ = e.orderRepo.FindByID(ctx, orderID)
+	return ToOrderResponse(*order, true), nil
+}
+
+func (e *PoolEngine) Paid(ctx context.Context, orderID uint) (OrderResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if order == nil {
+		return OrderResponse{}, ErrNotFound("order not found")
+	}
+	if order.Status != models.OrderAwaitingPayment {
+		return OrderResponse{}, ErrConflict("hand over every item first before marking paid")
+	}
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		order.Status = models.OrderCompleted
+		order.Paid = true
+		now := time.Now()
+		order.PaidAt = &now
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+		e.logEvent(txCtx, order.ID, models.EventPaid, map[string]any{})
+		return nil
+	})
+
+	if err != nil {
+		return OrderResponse{}, err
+	}
+
+	e.broadcast(orderID)
+	e.hub.NotifyShopOrdersUpdate()
+	return ToOrderResponse(*order, true), nil
+}
+
+func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) error {
+	if qty < 1 {
+		qty = 1
+	}
+	if qty > 100 {
+		return ErrBadRequest("cannot mark more than 100 units done at once")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		mi, err := e.menuRepo.FindByID(txCtx, menuItemID)
+		if err != nil {
+			return err
+		}
+		if mi == nil {
+			return ErrNotFound("menu item not found")
+		}
+		if err := e.poolRepo.Add(txCtx, menuItemID, qty); err != nil {
+			return err
+		}
+		
+		touchedOrders, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+		if err != nil {
+			return err
+		}
+		
+		for _, orderID := range touchedOrders {
+			order, _ := e.orderRepo.FindByID(txCtx, orderID)
+			if order != nil {
+				e.recomputeStatus(order)
+				e.orderRepo.Save(txCtx, order)
+			}
+		}
+		return nil
+	})
+	
+	if err != nil {
+		return err
+	}
+
+	e.hub.NotifyShopPrepUpdate()
+	e.hub.NotifyShopOrdersUpdate()
+	
+	// Broadcast to all touched orders (lazy but safe outside tx)
+	orders, _ := e.orderRepo.FindInProgress(ctx)
+	for _, o := range orders {
+		e.broadcast(o.ID)
+	}
+	return nil
+}
+
+func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	orders, err := e.orderRepo.FindReadyExpired(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(orders) == 0 {
+		return nil
+	}
+
+	touchedMenuItems := make(map[uint]struct{})
+	touchedOrders := make([]uint, 0)
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		for i := range orders {
+			order := &orders[i]
+			handedTotal := 0
+			for _, it := range order.Items {
+				handedTotal += it.HandedQty
+			}
+			if handedTotal > 0 {
+				continue // Do not expire if anything handed
+			}
+			
+			order.Status = models.OrderExpired
+			if err := e.orderRepo.Save(txCtx, order); err != nil {
+				return err
+			}
+			e.logEvent(txCtx, order.ID, models.EventExpired, map[string]any{})
+			touchedOrders = append(touchedOrders, order.ID)
+
+			for j := range order.Items {
+				it := &order.Items[j]
+				if it.AllocatedQty > 0 {
+					if err := e.poolRepo.Add(txCtx, it.MenuItemID, it.AllocatedQty); err != nil {
+						return err
+					}
+					touchedMenuItems[it.MenuItemID] = struct{}{}
+					it.AllocatedQty = 0
+					if it.Status == models.ItemAllocated {
+						it.Status = models.ItemQueued
+					}
+					if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		for menuItemID := range touchedMenuItems {
+			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			if err != nil {
+				return err
+			}
+			for _, t := range touched {
+				touchedOrders = append(touchedOrders, t)
+				ord, _ := e.orderRepo.FindByID(txCtx, t)
+				if ord != nil {
+					e.recomputeStatus(ord)
+					e.orderRepo.Save(txCtx, ord)
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	for _, id := range touchedOrders {
+		e.broadcast(id)
+	}
+	if len(touchedOrders) > 0 {
+		e.hub.NotifyShopOrdersUpdate()
 	}
 	if len(touchedMenuItems) > 0 {
 		e.hub.NotifyShopPrepUpdate()
@@ -435,76 +743,40 @@ func (e *Engine) ExpiryTick() error {
 	return nil
 }
 
-// ---- Close order / close day --------------------------------------------
-
-// CloseOrder completes the counter handover: the last item is picked up,
-// the shopkeeper records payment, and the order closes (ready -> picked,
-// paid=true).
-func (e *Engine) CloseOrder(orderID uint) (OrderResponse, error) {
+func (e *PoolEngine) CloseDay(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var order models.Order
-	if err := e.db.First(&order, orderID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return OrderResponse{}, ErrNotFound("order not found")
-		}
-		return OrderResponse{}, err
-	}
-	if order.Status != models.OrderReady {
-		return OrderResponse{}, ErrConflict("order is not ready for handover")
-	}
-
-	now := time.Now()
-	order.Status = models.OrderPicked
-	order.Paid = true
-	order.PaidAt = &now
-	order.ClosedAt = &now
-	if err := e.db.Save(&order).Error; err != nil {
-		return OrderResponse{}, err
-	}
-
-	if err := e.db.Model(&models.OrderItem{}).
-		Where("order_id = ? AND status <> ?", orderID, models.ItemRejected).
-		Update("status", models.ItemHandedOver).Error; err != nil {
-		return OrderResponse{}, err
-	}
-
-	e.broadcastOrder(orderID)
-	e.hub.NotifyShopOrdersUpdate()
-	return e.orderResponseFor(orderID, true)
-}
-
-// CloseDay resets the canteen for a new day (rule 9).
-func (e *Engine) CloseDay() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	var openOrders []models.Order
-	if err := e.db.Where("status IN ?", activeStatuses()).Find(&openOrders).Error; err != nil {
+	openOrders, err := e.orderRepo.FindNonTerminal(ctx)
+	if err != nil {
 		return err
 	}
-	for i := range openOrders {
-		o := &openOrders[i]
-		o.Status = models.OrderExpired
-		if err := e.db.Save(o).Error; err != nil {
+
+	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		for i := range openOrders {
+			o := &openOrders[i]
+			o.Status = models.OrderExpired
+			if err := e.orderRepo.Save(txCtx, o); err != nil {
+				return err
+			}
+			e.logEvent(txCtx, o.ID, models.EventDayClosed, map[string]any{})
+		}
+
+		if err := e.poolRepo.ZeroAll(txCtx); err != nil {
 			return err
 		}
-	}
+		if err := e.menuRepo.ResetStock(txCtx); err != nil {
+			return err
+		}
+		return nil
+	})
 
-	if err := e.db.Model(&models.DonePool{}).
-		Where("qty_available >= ?", 0).
-		Update("qty_available", 0).Error; err != nil {
-		return err
-	}
-	if err := e.db.Model(&models.MenuItem{}).
-		Where("out_of_stock = ?", true).
-		Update("out_of_stock", false).Error; err != nil {
+	if err != nil {
 		return err
 	}
 
 	for _, o := range openOrders {
-		e.broadcastOrder(o.ID)
+		e.broadcast(o.ID)
 	}
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
@@ -512,9 +784,6 @@ func (e *Engine) CloseDay() error {
 	return nil
 }
 
-// ---- Prep list -----------------------------------------------------------
-
-// PrepItemResponse is one row of the aggregate prep list.
 type PrepItemResponse struct {
 	MenuItemID   uint   `json:"menu_item_id"`
 	Name         string `json:"name"`
@@ -522,37 +791,27 @@ type PrepItemResponse struct {
 	PoolQty      int    `json:"pool_qty"`
 }
 
-// PrepList computes the aggregate prep list (rule 1) plus each item's
-// unallocated pool count.
-func (e *Engine) PrepList() ([]PrepItemResponse, error) {
-	type remainingRow struct {
-		MenuItemID uint
-		Remaining  int
-	}
-	var remainingRows []remainingRow
-	if err := e.db.Model(&models.OrderItem{}).
-		Select("order_items.menu_item_id AS menu_item_id, COALESCE(SUM(order_items.qty - order_items.allocated_qty), 0) AS remaining").
-		Joins("JOIN orders ON orders.id = order_items.order_id").
-		Where("order_items.status = ? AND orders.status IN ?", models.ItemQueued, prepStatuses()).
-		Group("order_items.menu_item_id").
-		Scan(&remainingRows).Error; err != nil {
+func (e *PoolEngine) PrepList(ctx context.Context) ([]PrepItemResponse, error) {
+	orders, err := e.orderRepo.FindInProgress(ctx)
+	if err != nil {
 		return nil, err
 	}
-	remainingByItem := make(map[uint]int, len(remainingRows))
-	for _, r := range remainingRows {
-		remainingByItem[r.MenuItemID] = r.Remaining
+
+	remainingByItem := make(map[uint]int)
+	for _, o := range orders {
+		for _, it := range o.Items {
+			if it.Status == models.ItemQueued {
+				remainingByItem[it.MenuItemID] += (it.Qty - it.AllocatedQty)
+			}
+		}
 	}
 
-	var pools []models.DonePool
-	if err := e.db.Where("qty_available > 0").Find(&pools).Error; err != nil {
+	poolByItem, err := e.poolRepo.FindAll(ctx)
+	if err != nil {
 		return nil, err
 	}
-	poolByItem := make(map[uint]int, len(pools))
-	for _, p := range pools {
-		poolByItem[p.MenuItemID] = p.QtyAvailable
-	}
 
-	idSet := make(map[uint]struct{}, len(remainingByItem)+len(poolByItem))
+	idSet := make(map[uint]struct{})
 	for id := range remainingByItem {
 		idSet[id] = struct{}{}
 	}
@@ -568,49 +827,24 @@ func (e *Engine) PrepList() ([]PrepItemResponse, error) {
 		ids = append(ids, id)
 	}
 
-	var items []models.MenuItem
-	if err := e.db.Unscoped().Where("id IN ?", ids).Find(&items).Error; err != nil {
+	menuMap, err := e.menuRepo.FindMapByIDs(ctx, ids)
+	if err != nil {
 		return nil, err
-	}
-	nameByID := make(map[uint]string, len(items))
-	for _, it := range items {
-		nameByID[it.ID] = it.Name
 	}
 
 	out := make([]PrepItemResponse, 0, len(ids))
 	for _, id := range ids {
+		name := ""
+		if mi, ok := menuMap[id]; ok {
+			name = mi.Name
+		}
 		out = append(out, PrepItemResponse{
 			MenuItemID:   id,
-			Name:         nameByID[id],
+			Name:         name,
 			RemainingQty: remainingByItem[id],
 			PoolQty:      poolByItem[id],
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].MenuItemID < out[j].MenuItemID })
 	return out, nil
-}
-
-// ---- shared helpers -------------------------------------------------------
-
-// recomputeTotalPrice sums qty*price_each over an order's non-rejected
-// items and persists it.
-func (e *Engine) recomputeTotalPrice(orderID uint) error {
-	var total int64
-	if err := e.db.Model(&models.OrderItem{}).
-		Where("order_id = ? AND status <> ?", orderID, models.ItemRejected).
-		Select("COALESCE(SUM(qty * price_each), 0)").
-		Scan(&total).Error; err != nil {
-		return err
-	}
-	return e.db.Model(&models.Order{}).Where("id = ?", orderID).Update("total_price", int(total)).Error
-}
-
-// broadcastOrder loads the full order and pushes it to its owning student.
-func (e *Engine) broadcastOrder(orderID uint) {
-	resp, userID, err := e.loadOrderResponseWithOwner(orderID)
-	if err != nil {
-		log.Printf("khaao: broadcastOrder failed to load order %d: %v", orderID, err)
-		return
-	}
-	e.hub.NotifyOrderUpdate(userID, resp)
 }

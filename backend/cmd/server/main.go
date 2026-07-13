@@ -1,6 +1,3 @@
-// Command server boots the Khaao backend: loads config, opens the
-// database, seeds it, wires services and routes, starts the expiry ticker,
-// and serves HTTP until interrupted.
 package main
 
 import (
@@ -12,15 +9,20 @@ import (
 	"syscall"
 	"time"
 
+	"khaao/internal/authn"
 	"khaao/internal/config"
 	"khaao/internal/database"
 	"khaao/internal/realtime"
+	"khaao/internal/repository"
 	"khaao/internal/routes"
 	"khaao/internal/services"
 )
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("khaao: invalid configuration: %v", err)
+	}
 
 	db, err := database.Open(cfg)
 	if err != nil {
@@ -31,23 +33,48 @@ func main() {
 	}
 
 	hub := realtime.NewHub()
-	authSvc := services.NewAuthService(db, cfg)
-	menuSvc := services.NewMenuService(db, hub)
-	engine := services.NewEngine(db, hub, cfg)
+
+	uow := repository.NewUnitOfWork(db)
+	userRepo := repository.NewUserRepo(db)
+	orderRepo := repository.NewOrderRepo(db)
+	menuRepo := repository.NewMenuRepo(db)
+	poolRepo := repository.NewPoolRepo(db)
+	eventRepo := repository.NewEventRepo(db)
+	emailRepo := repository.NewShopkeeperEmailRepo(db)
+
+	var tokenVerifier authn.TokenVerifier
+	if cfg.AuthFake {
+		// Validate() already guarantees AppEnv is dev/test here.
+		log.Println(`khaao: WARNING — AUTH_FAKE enabled; "fake:<email>" tokens are accepted (dev/e2e only)`)
+		tokenVerifier = authn.NewFakeVerifier()
+	} else {
+		tokenVerifier = authn.NewFirebaseVerifier(cfg.FirebaseProjectID)
+	}
+
+	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
+	menuSvc := services.NewMenuService(menuRepo, hub)
+	orderSvc := services.NewOrderService(orderRepo)
+	alloc := &services.FCFSAllocation{}
+	poolEngine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, hub, cfg, alloc)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go runExpiryTicker(ctx, engine)
+	go runExpiryTicker(ctx, poolEngine)
 
-	router := routes.Setup(cfg, authSvc, menuSvc, engine, hub)
+	router := routes.Setup(cfg, authSvc, menuSvc, orderSvc, poolEngine, hub)
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: router,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second, // slowloris protection
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		// WriteTimeout intentionally unset: SSE streams are long-lived.
 	}
 
 	go func() {
-		log.Printf("khaao: listening on :%s (driver=%s)", cfg.Port, cfg.DBDriver)
+		log.Printf("khaao: listening on :%s (Postgres)", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("khaao: server error: %v", err)
 		}
@@ -64,7 +91,7 @@ func main() {
 }
 
 // runExpiryTicker expires ready orders past their hold window every 15s.
-func runExpiryTicker(ctx context.Context, engine *services.Engine) {
+func runExpiryTicker(ctx context.Context, engine *services.PoolEngine) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -72,7 +99,7 @@ func runExpiryTicker(ctx context.Context, engine *services.Engine) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := engine.ExpiryTick(); err != nil {
+			if err := engine.ExpiryTick(ctx); err != nil {
 				log.Printf("khaao: expiry tick error: %v", err)
 			}
 		}

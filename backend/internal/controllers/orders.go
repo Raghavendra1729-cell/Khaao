@@ -12,30 +12,27 @@ import (
 	"khaao/internal/services"
 )
 
-// OrderController handles the student-facing order endpoints and the
-// student SSE stream.
 type OrderController struct {
-	engine *services.Engine
-	hub    *realtime.Hub
+	orderService *services.OrderService
+	poolEngine   *services.PoolEngine
+	hub          *realtime.Hub
 }
 
-// NewOrderController builds an OrderController.
-func NewOrderController(engine *services.Engine, hub *realtime.Hub) *OrderController {
-	return &OrderController{engine: engine, hub: hub}
+func NewOrderController(os *services.OrderService, pe *services.PoolEngine, hub *realtime.Hub) *OrderController {
+	return &OrderController{orderService: os, poolEngine: pe, hub: hub}
 }
 
 type createOrderRequest struct {
 	Items []services.OrderItemInput `json:"items"`
 }
 
-// Create handles POST /api/orders.
 func (oc *OrderController) Create(c *gin.Context) {
 	var req createOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	order, err := oc.engine.CreateOrder(middleware.UserID(c), req.Items)
+	order, err := oc.poolEngine.CreateOrder(c.Request.Context(), middleware.UserID(c), req.Items)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -43,9 +40,8 @@ func (oc *OrderController) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"order": order})
 }
 
-// Active handles GET /api/orders/active.
 func (oc *OrderController) Active(c *gin.Context) {
-	order, err := oc.engine.ActiveOrder(middleware.UserID(c))
+	order, err := oc.orderService.ActiveOrder(c.Request.Context(), middleware.UserID(c))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -53,9 +49,8 @@ func (oc *OrderController) Active(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
-// History handles GET /api/orders.
 func (oc *OrderController) History(c *gin.Context) {
-	orders, err := oc.engine.OrderHistory(middleware.UserID(c))
+	orders, err := oc.orderService.OrderHistory(c.Request.Context(), middleware.UserID(c))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -63,40 +58,13 @@ func (oc *OrderController) History(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"orders": orders})
 }
 
-type addItemRequest struct {
-	MenuItemID uint `json:"menu_item_id"`
-	Qty        int  `json:"qty"`
-}
-
-// AddItem handles POST /api/orders/:id/items.
-func (oc *OrderController) AddItem(c *gin.Context) {
-	orderID, err := parseUintParam(c, "id")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-	var req addItemRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	order, err := oc.engine.AddItem(orderID, middleware.UserID(c), req.MenuItemID, req.Qty)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"order": order})
-}
-
-// Cancel handles POST /api/orders/:id/cancel — allowed only while the order
-// is still awaiting the shopkeeper's decision.
 func (oc *OrderController) Cancel(c *gin.Context) {
 	orderID, err := parseUintParam(c, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	order, err := oc.engine.Cancel(orderID, middleware.UserID(c))
+	order, err := oc.poolEngine.Cancel(c.Request.Context(), orderID, middleware.UserID(c))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -104,15 +72,10 @@ func (oc *OrderController) Cancel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
-// Stream handles GET /api/stream (student's own SSE events).
 func (oc *OrderController) Stream(c *gin.Context) {
 	streamSSE(c, oc.hub, middleware.UserID(c), "student")
 }
 
-// streamSSE is the shared SSE loop used by both the student and shop
-// streams: registers a hub client, writes each queued message as an SSE
-// "data:" frame, flushes immediately, sends a ": ping" heartbeat comment
-// every 25s, and cleans up when the client disconnects.
 func streamSSE(c *gin.Context, hub *realtime.Hub, userID uint, role string) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {

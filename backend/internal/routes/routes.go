@@ -1,5 +1,3 @@
-// Package routes registers every endpoint in SPEC.md's API contract onto a
-// Gin engine.
 package routes
 
 import (
@@ -18,42 +16,44 @@ func Setup(
 	cfg *config.Config,
 	authSvc *services.AuthService,
 	menuSvc *services.MenuService,
-	engine *services.Engine,
+	orderSvc *services.OrderService,
+	poolEngine *services.PoolEngine,
 	hub *realtime.Hub,
 ) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS(cfg))
+	r.Use(middleware.MaxBodyBytes(1 << 20)) // 1 MiB request-body cap
 
 	authCtrl := controllers.NewAuthController(authSvc)
 	menuCtrl := controllers.NewMenuController(menuSvc)
-	orderCtrl := controllers.NewOrderController(engine, hub)
-	shopCtrl := controllers.NewShopController(engine, hub)
+	orderCtrl := controllers.NewOrderController(orderSvc, poolEngine, hub)
+	shopCtrl := controllers.NewShopController(orderSvc, poolEngine, hub, cfg)
 
-	requireAuth := middleware.RequireAuth(cfg)
+	requireAuth := middleware.RequireAuth(cfg, authSvc)
+	requireStudent := middleware.RequireRole(string(models.RoleStudent))
 	requireShopkeeper := middleware.RequireRole(string(models.RoleShopkeeper))
 
 	api := r.Group("/api")
 
+	// The live menu is public — students can browse before signing in.
+	api.GET("/menu", menuCtrl.ListAvailable)
+
 	auth := api.Group("/auth")
 	{
 		auth.GET("/config", authCtrl.Config)
-		auth.POST("/signup", authCtrl.Signup)
-		auth.POST("/login", authCtrl.Login)
-		auth.POST("/google", authCtrl.Google)
-		auth.POST("/guest", authCtrl.Guest)
+		auth.POST("/firebase", authCtrl.Firebase)
 		auth.GET("/me", requireAuth, authCtrl.Me)
 	}
 
-	// Student-facing routes (all authenticated).
+	// Student-facing routes (authenticated + student role).
 	student := api.Group("")
-	student.Use(requireAuth)
+	student.Use(requireAuth, requireStudent)
 	{
-		student.GET("/menu", menuCtrl.ListAvailable)
 		student.POST("/orders", orderCtrl.Create)
 		student.GET("/orders/active", orderCtrl.Active)
 		student.GET("/orders", orderCtrl.History)
-		student.POST("/orders/:id/items", orderCtrl.AddItem)
 		student.POST("/orders/:id/cancel", orderCtrl.Cancel)
 		student.GET("/stream", orderCtrl.Stream)
 	}
@@ -76,7 +76,9 @@ func Setup(
 		shop.GET("/prep", shopCtrl.Prep)
 		shop.POST("/prep/:menu_item_id/done", shopCtrl.Done)
 
-		shop.POST("/orders/:id/close", shopCtrl.Close)
+		shop.POST("/orders/:id/items/:itemID/handover", shopCtrl.Handover)
+		shop.DELETE("/orders/:id/items/:itemID", shopCtrl.RemoveItem)
+		shop.POST("/orders/:id/paid", shopCtrl.Paid)
 		shop.POST("/day/close", shopCtrl.CloseDay)
 
 		shop.GET("/stream", shopCtrl.Stream)

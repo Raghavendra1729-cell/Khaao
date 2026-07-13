@@ -2,42 +2,41 @@ package controllers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"khaao/internal/config"
 	"khaao/internal/middleware"
+	"khaao/internal/models"
 	"khaao/internal/realtime"
 	"khaao/internal/services"
 )
 
-// ShopController handles the shopkeeper dashboard endpoints: incoming/
-// active/ready orders, accept/reject, prep list, done, close order, close
-// day, and the shop SSE stream.
 type ShopController struct {
-	engine *services.Engine
-	hub    *realtime.Hub
+	orderService *services.OrderService
+	poolEngine   *services.PoolEngine
+	hub          *realtime.Hub
+	cfg          *config.Config
 }
 
-// NewShopController builds a ShopController.
-func NewShopController(engine *services.Engine, hub *realtime.Hub) *ShopController {
-	return &ShopController{engine: engine, hub: hub}
+func NewShopController(os *services.OrderService, pe *services.PoolEngine, hub *realtime.Hub, cfg *config.Config) *ShopController {
+	return &ShopController{orderService: os, poolEngine: pe, hub: hub, cfg: cfg}
 }
 
-// Orders handles GET /api/shop/orders.
 func (sc *ShopController) Orders(c *gin.Context) {
-	incoming, active, ready, err := sc.engine.ShopOrders()
+	incoming, active, awaiting, err := sc.orderService.ShopOrders(c.Request.Context())
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"incoming": incoming, "active": active, "ready": ready})
+	c.JSON(http.StatusOK, gin.H{"incoming": incoming, "in_progress": active, "awaiting_payment": awaiting})
 }
 
 type acceptRequest struct {
 	RejectedItemIDs []uint `json:"rejected_item_ids"`
 }
 
-// Accept handles POST /api/shop/orders/:id/accept.
 func (sc *ShopController) Accept(c *gin.Context) {
 	orderID, err := parseUintParam(c, "id")
 	if err != nil {
@@ -51,7 +50,7 @@ func (sc *ShopController) Accept(c *gin.Context) {
 			return
 		}
 	}
-	order, err := sc.engine.Accept(orderID, req.RejectedItemIDs)
+	order, err := sc.poolEngine.Accept(c.Request.Context(), orderID, req.RejectedItemIDs)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -59,14 +58,13 @@ func (sc *ShopController) Accept(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
-// Reject handles POST /api/shop/orders/:id/reject.
 func (sc *ShopController) Reject(c *gin.Context) {
 	orderID, err := parseUintParam(c, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	order, err := sc.engine.Reject(orderID)
+	order, err := sc.poolEngine.Reject(c.Request.Context(), orderID)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -74,9 +72,8 @@ func (sc *ShopController) Reject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
-// Prep handles GET /api/shop/prep.
 func (sc *ShopController) Prep(c *gin.Context) {
-	items, err := sc.engine.PrepList()
+	items, err := sc.poolEngine.PrepList(c.Request.Context())
 	if err != nil {
 		respondError(c, err)
 		return
@@ -88,7 +85,6 @@ type doneRequest struct {
 	Qty int `json:"qty"`
 }
 
-// Done handles POST /api/shop/prep/:menu_item_id/done.
 func (sc *ShopController) Done(c *gin.Context) {
 	menuItemID, err := parseUintParam(c, "menu_item_id")
 	if err != nil {
@@ -102,21 +98,36 @@ func (sc *ShopController) Done(c *gin.Context) {
 			return
 		}
 	}
-	if err := sc.engine.MarkDone(menuItemID, req.Qty); err != nil {
+	if err := sc.poolEngine.MarkDone(c.Request.Context(), menuItemID, req.Qty); err != nil {
 		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// Close handles POST /api/shop/orders/:id/close.
-func (sc *ShopController) Close(c *gin.Context) {
+type handoverRequest struct {
+	Qty int `json:"qty"`
+}
+
+func (sc *ShopController) Handover(c *gin.Context) {
 	orderID, err := parseUintParam(c, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	order, err := sc.engine.CloseOrder(orderID)
+	itemID, err := parseUintParam(c, "itemID")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid item id"})
+		return
+	}
+	req := handoverRequest{Qty: 1}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+	}
+	order, err := sc.poolEngine.Handover(c.Request.Context(), orderID, itemID, req.Qty)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -124,10 +135,48 @@ func (sc *ShopController) Close(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"order": order})
 }
 
-// History handles GET /api/shop/history: today's finished orders plus the
-// paid total, for counter reconciliation.
+func (sc *ShopController) RemoveItem(c *gin.Context) {
+	orderID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	itemID, err := parseUintParam(c, "itemID")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid item id"})
+		return
+	}
+	order, err := sc.poolEngine.RemoveItem(c.Request.Context(), orderID, itemID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"order": order})
+}
+
+func (sc *ShopController) Paid(c *gin.Context) {
+	orderID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	order, err := sc.poolEngine.Paid(c.Request.Context(), orderID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"order": order})
+}
+
 func (sc *ShopController) History(c *gin.Context) {
-	orders, totalPaid, err := sc.engine.ShopHistory()
+	date := c.Query("date")
+	if date == "" {
+		date = models.DayOf(time.Now().In(sc.cfg.Location()))
+	} else if _, err := time.Parse("2006-01-02", date); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "date must be YYYY-MM-DD"})
+		return
+	}
+	orders, totalPaid, err := sc.orderService.ShopHistory(c.Request.Context(), date)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -135,16 +184,14 @@ func (sc *ShopController) History(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"orders": orders, "total_paid": totalPaid})
 }
 
-// CloseDay handles POST /api/shop/day/close.
 func (sc *ShopController) CloseDay(c *gin.Context) {
-	if err := sc.engine.CloseDay(); err != nil {
+	if err := sc.poolEngine.CloseDay(c.Request.Context()); err != nil {
 		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// Stream handles GET /api/shop/stream (shop dashboard SSE events).
 func (sc *ShopController) Stream(c *gin.Context) {
 	streamSSE(c, sc.hub, middleware.UserID(c), "shopkeeper")
 }
