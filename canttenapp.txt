@@ -137,6 +137,15 @@ Prices are integers in paise. Daily order token resets each business day
     collecting (409). Backend engine + controller + route + unit tests +
     frontend "Remove" button. Verified by unit tests (-race) and e2e smoke.
 
+## Small bug fixes (2026-07-13, follow-up pass)
+[x] Availability windows now evaluated in the BUSINESS_TIMEZONE (were using
+    the host's local zone) — fixed at BOTH the order-gate (itemOrderableNow)
+    and the menu-display (ToMenuItemResponse) so they stay consistent.
+[x] Checkout sheet now closes when tapping the backdrop (previously only the
+    ✕ button dismissed it; the inner stopPropagation had no outer handler).
+[x] Ready banner no longer hardcodes "within 15 min" (would be wrong if
+    HOLD_MINUTES is changed) — it now points at the live countdown instead.
+
 Verification available: scratchpad smoke.sh boots the server on a throwaway
 Postgres and asserts the whole lifecycle incl. trim/re-pool (20/20 pass);
 `go test ./... -race` and `npm run build` both green.
@@ -156,6 +165,20 @@ Postgres and asserts the whole lifecycle incl. trim/re-pool (20/20 pass);
 [ ] WP4 — Versioned SQL migrations: explicit FKs + ON DELETE, CHECKs, the
     partial unique index, indexes; verify schema in CI. Replace reliance on
     AutoMigrate + one raw index.
+
+## Small follow-ups found during the bug-fix pass (deferred, low-risk)
+[ ] SSE reconnects forever on an invalid/expired token (EventSource can't
+    read the HTTP status). Bound the retries or force a re-login after N
+    consecutive failures. (frontend/src/hooks/useSSE.ts)
+[ ] Menu availability validation is thin server-side: avail_from/avail_to can
+    be set independently (the frontend requires both), overnight from>to
+    windows aren't validated against intent, and there's no price upper bound
+    / name length / photo-URL scheme check. (services/menu.go
+    validateAndNormalize) — overlaps the P1 "input validation" item.
+[ ] Latent nil-deref: several engine methods do `order,_ = FindByID(...)` then
+    dereference / recomputeStatus without a nil guard. Safe today (orders are
+    never hard-deleted) but a guard would turn a would-be panic into a clean
+    error. (services/pool.go)
 
 ## P1 / correctness + security
 [ ] Reliable events/writes: logEvent currently swallows JSON/DB errors;
