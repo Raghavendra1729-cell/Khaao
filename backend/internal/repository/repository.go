@@ -34,7 +34,9 @@ type OrderRepo interface {
 	Create(ctx context.Context, order *models.Order) error
 	Save(ctx context.Context, order *models.Order) error
 	FindByID(ctx context.Context, id uint) (*models.Order, error)
+	FindByIDForUpdate(ctx context.Context, id uint) (*models.Order, error)
 	FindActiveByUserID(ctx context.Context, userID uint) (*models.Order, error)
+	FindActiveByUserIDForUpdate(ctx context.Context, userID uint) (*models.Order, error)
 	FindHistoryByUserID(ctx context.Context, userID uint) ([]models.Order, error)
 	FindIncoming(ctx context.Context) ([]models.Order, error)
 	FindInProgress(ctx context.Context) ([]models.Order, error)
@@ -42,13 +44,21 @@ type OrderRepo interface {
 	FindTerminalByDate(ctx context.Context, date string) ([]models.Order, error)
 	GetMaxOrderNo(ctx context.Context, date string) (int, error)
 	FindPreparingOldest(ctx context.Context) ([]models.Order, error)
+	FindPreparingOldestForUpdate(ctx context.Context) ([]models.Order, error)
 	FindReadyExpired(ctx context.Context) ([]models.Order, error)
+	FindReadyExpiredForUpdate(ctx context.Context) ([]models.Order, error)
 	FindNonTerminal(ctx context.Context) ([]models.Order, error)
+	FindNonTerminalForUpdate(ctx context.Context) ([]models.Order, error)
 	SaveItem(ctx context.Context, item *models.OrderItem) error
+	// HasActiveItemsForMenuItem returns true if any non-terminal order currently
+	// contains an active (non-rejected) item for the given menu item ID. Used to
+	// block menu-item deletion while it is referenced by an in-flight order.
+	HasActiveItemsForMenuItem(ctx context.Context, menuItemID uint) (bool, error)
 }
 
 type PoolRepo interface {
 	FindAll(ctx context.Context) (map[uint]int, error)
+	Lock(ctx context.Context, menuItemID uint) (int, error)
 	Add(ctx context.Context, menuItemID uint, qty int) error
 	ZeroAll(ctx context.Context) error
 }

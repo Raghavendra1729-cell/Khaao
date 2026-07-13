@@ -34,16 +34,16 @@ export function StudentRealtime() {
           }
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             new Notification('Khaao — order ready', {
-              body: `Order #${order.id} is ready. Pick up within 15 minutes.`,
+              body: `Token #${order.order_no} is ready. Pick up at the counter.`,
             });
           }
           if (!location.pathname.startsWith('/order')) {
-            showToast(`Order #${order.id} is ready — tap "Order status" to view.`, 'success');
+            showToast(`Token #${order.order_no} is ready — tap "Order status" to view.`, 'success');
           }
         } else if (order.status === 'rejected' && prevStatusRef.current !== 'rejected') {
-          showToast(`Order #${order.id} was rejected by the canteen.`, 'error');
+          showToast(`Token #${order.order_no} was rejected by the canteen.`, 'error');
         } else if (order.status === 'expired' && prevStatusRef.current !== 'expired') {
-          showToast(`Order #${order.id} expired — the pickup window was missed.`, 'error');
+          showToast(`Token #${order.order_no} expired — the pickup window was missed.`, 'error');
         }
         prevStatusRef.current = order.status;
       } else if (msg.type === 'menu_update') {

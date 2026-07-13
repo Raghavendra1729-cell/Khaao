@@ -10,12 +10,20 @@ export interface SSEMessage {
 
 const MAX_BACKOFF_MS = 15_000;
 const BASE_BACKOFF_MS = 1_000;
+/**
+ * After this many consecutive errors the hook stops retrying and dispatches
+ * `khaao:unauthorized` so the app redirects to login. This bounds the retry
+ * loop on expired / revoked tokens (EventSource can't read the HTTP status
+ * code, so we treat persistent failure as a session problem).
+ */
+const MAX_RETRIES = 8;
 
 /**
  * Subscribes to a Khaao SSE endpoint with the auth token as a query param
- * (required since EventSource cannot set an Authorization header). Silently
- * reconnects with exponential backoff on error/disconnect for as long as the
- * hook stays mounted and `path` is non-null.
+ * (required since EventSource cannot set an Authorization header). Reconnects
+ * with exponential backoff on error/disconnect for as long as the hook stays
+ * mounted and `path` is non-null. After MAX_RETRIES consecutive failures it
+ * gives up and forces a re-login via the khaao:unauthorized event.
  */
 export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void): void {
   const onMessageRef = useRef(onMessage);
@@ -31,12 +39,19 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
 
     function connect(): void {
       if (stopped) return;
+
+      if (attempt >= MAX_RETRIES) {
+        // Persistent failure — treat as expired session and force re-login.
+        window.dispatchEvent(new Event('khaao:unauthorized'));
+        return;
+      }
+
       const token = getToken();
       const separator = path!.includes('?') ? '&' : '?';
       source = new EventSource(`${path}${separator}token=${encodeURIComponent(token ?? '')}`);
 
       source.onopen = () => {
-        attempt = 0;
+        attempt = 0; // reset backoff on a successful connection
       };
 
       source.onmessage = (event: MessageEvent<string>) => {
@@ -67,3 +82,4 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
     };
   }, [path]);
 }
+

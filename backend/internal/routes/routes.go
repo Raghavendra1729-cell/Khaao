@@ -37,6 +37,9 @@ func Setup(
 
 	api := r.Group("/api")
 
+	// Liveness probe — no auth required.
+	api.GET("/health", controllers.Health)
+
 	// The live menu is public — students can browse before signing in.
 	api.GET("/menu", menuCtrl.ListAvailable)
 

@@ -13,16 +13,16 @@ type AllocationStrategy interface {
 type FCFSAllocation struct{}
 
 func (s *FCFSAllocation) Allocate(ctx context.Context, menuItemID uint, orderRepo repository.OrderRepo, poolRepo repository.PoolRepo) ([]uint, error) {
-	pools, err := poolRepo.FindAll(ctx)
+	qty, err := poolRepo.Lock(ctx, menuItemID)
 	if err != nil {
 		return nil, err
 	}
-	qty := pools[menuItemID]
 	if qty <= 0 {
 		return nil, nil
 	}
+	initialQty := qty
 
-	orders, err := orderRepo.FindPreparingOldest(ctx)
+	orders, err := orderRepo.FindPreparingOldestForUpdate(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +58,8 @@ func (s *FCFSAllocation) Allocate(ctx context.Context, menuItemID uint, orderRep
 			}
 		}
 	}
-	
-	used := pools[menuItemID] - qty
+
+	used := initialQty - qty
 	if used > 0 {
 		if err := poolRepo.Add(ctx, menuItemID, -used); err != nil {
 			return nil, err

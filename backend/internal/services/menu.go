@@ -95,13 +95,14 @@ type MenuItemInput struct {
 }
 
 type MenuService struct {
-	repo repository.MenuRepo
-	hub  *realtime.Hub
-	cfg  *config.Config
+	repo      repository.MenuRepo
+	orderRepo repository.OrderRepo
+	hub       *realtime.Hub
+	cfg       *config.Config
 }
 
-func NewMenuService(repo repository.MenuRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
-	return &MenuService{repo: repo, hub: hub, cfg: cfg}
+func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
+	return &MenuService{repo: repo, orderRepo: orderRepo, hub: hub, cfg: cfg}
 }
 
 // now returns the current time in the configured business timezone, so
@@ -140,8 +141,14 @@ func (s *MenuService) validateAndNormalize(input *MenuItemInput) error {
 	if input.Name == "" {
 		return ErrBadRequest("name is required")
 	}
-	if input.Price < 0 {
-		return ErrBadRequest("price must be >= 0")
+	if len(input.Name) > 100 {
+		return ErrBadRequest("name must be 100 characters or fewer")
+	}
+	if input.Price <= 0 {
+		return ErrBadRequest("price must be greater than 0")
+	}
+	if input.PhotoURL != "" && !strings.HasPrefix(input.PhotoURL, "https://") && !strings.HasPrefix(input.PhotoURL, "http://") {
+		return ErrBadRequest("photo_url must be an http:// or https:// URL")
 	}
 	input.AvailFrom = normalizeTimeStr(input.AvailFrom)
 	input.AvailTo = normalizeTimeStr(input.AvailTo)
@@ -150,6 +157,10 @@ func (s *MenuService) validateAndNormalize(input *MenuItemInput) error {
 	}
 	if input.AvailTo != nil && !hhmmRe.MatchString(*input.AvailTo) {
 		return ErrBadRequest("avail_to must be HH:MM")
+	}
+	// Require both or neither — a half-set window is always a mistake.
+	if (input.AvailFrom == nil) != (input.AvailTo == nil) {
+		return ErrBadRequest("set both avail_from and avail_to, or leave both empty")
 	}
 	return nil
 }
@@ -215,8 +226,16 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
-	err := s.repo.Delete(ctx, id)
+	// Block the delete if any in-flight order still references this item.
+	// This prevents orphaned order_items with a dangling menu_item_id.
+	active, err := s.orderRepo.HasActiveItemsForMenuItem(ctx, id)
 	if err != nil {
+		return err
+	}
+	if active {
+		return ErrConflict("cannot delete a menu item that is part of an active order")
+	}
+	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
 	s.hub.NotifyMenuUpdate()

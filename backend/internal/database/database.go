@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -24,6 +25,18 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+
+	// Tune the underlying sql.DB connection pool. For a single-instance server
+	// handling ~2000 students, 25 open connections is generous; Postgres
+	// default max_connections is 100 so this leaves headroom for migrations
+	// and other tools.
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get sql.DB: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS citext").Error; err != nil {
 		return nil, fmt.Errorf("create citext extension: %w", err)

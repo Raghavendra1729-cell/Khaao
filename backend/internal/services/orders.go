@@ -145,7 +145,6 @@ func (s *OrderService) ShopOrders(ctx context.Context) (incoming, active, awaiti
 	for _, o := range ap {
 		awaitingPayment = append(awaitingPayment, ToOrderResponse(o, true))
 	}
-	
 	return incoming, active, awaitingPayment, nil
 }
 

@@ -52,7 +52,7 @@ func main() {
 	}
 
 	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
-	menuSvc := services.NewMenuService(menuRepo, hub, cfg)
+	menuSvc := services.NewMenuService(menuRepo, orderRepo, hub, cfg)
 	orderSvc := services.NewOrderService(orderRepo)
 	alloc := &services.FCFSAllocation{}
 	poolEngine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, hub, cfg, alloc)

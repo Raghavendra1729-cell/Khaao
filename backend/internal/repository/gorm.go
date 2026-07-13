@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GormUnitOfWork struct {
@@ -19,6 +20,14 @@ func NewUnitOfWork(db *gorm.DB) UnitOfWork {
 
 func (u *GormUnitOfWork) WithTx(ctx context.Context, fn func(txCtx context.Context) error) error {
 	return u.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The application is deliberately deployed as a single replica, but this
+		// transaction-scoped lock is the database backstop for a brief overlap
+		// during deploys or an accidental second replica. Row locks below protect
+		// the individual records; this lock also makes allocation's multi-row FCFS
+		// scan deterministic across processes.
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(84202383174619)").Error; err != nil {
+			return err
+		}
 		txCtx := context.WithValue(ctx, txKey{}, tx)
 		return fn(txCtx)
 	})
@@ -166,11 +175,30 @@ func (r *GormOrderRepo) SaveItem(ctx context.Context, item *models.OrderItem) er
 
 func (r *GormOrderRepo) FindByID(ctx context.Context, id uint) (*models.Order, error) {
 	var order models.Order
-	err := getDB(ctx, r.db).Preload("Items").First(&order, id).Error
+	err := getDB(ctx, r.db).Preload("Items").Preload("User").First(&order, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &order, err
+}
+
+// FindByIDForUpdate locks the order and then its items in a stable order.
+// It must be called from a UnitOfWork transaction.
+func (r *GormOrderRepo) FindByIDForUpdate(ctx context.Context, id uint) (*models.Order, error) {
+	db := getDB(ctx, r.db)
+	var order models.Order
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("order_id = ?", order.ID).Order("created_at asc, id asc").Find(&order.Items).Error; err != nil {
+		return nil, err
+	}
+	return &order, nil
 }
 
 func (r *GormOrderRepo) FindActiveByUserID(ctx context.Context, userID uint) (*models.Order, error) {
@@ -184,6 +212,25 @@ func (r *GormOrderRepo) FindActiveByUserID(ctx context.Context, userID uint) (*m
 		return nil, nil
 	}
 	return &order, err
+}
+
+func (r *GormOrderRepo) FindActiveByUserIDForUpdate(ctx context.Context, userID uint) (*models.Order, error) {
+	db := getDB(ctx, r.db)
+	var order models.Order
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("user_id = ? AND status IN ?", userID, activeOrderStatuses()).
+		Order("created_at desc, id desc").First(&order).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("order_id = ?", order.ID).Order("created_at asc, id asc").Find(&order.Items).Error; err != nil {
+		return nil, err
+	}
+	return &order, nil
 }
 
 func (r *GormOrderRepo) FindHistoryByUserID(ctx context.Context, userID uint) ([]models.Order, error) {
@@ -245,12 +292,20 @@ func (r *GormOrderRepo) FindPreparingOldest(ctx context.Context) ([]models.Order
 	return orders, err
 }
 
+func (r *GormOrderRepo) FindPreparingOldestForUpdate(ctx context.Context) ([]models.Order, error) {
+	return r.findOrdersForUpdate(ctx, "status IN ?", "created_at asc, id asc", []models.OrderStatus{models.OrderPreparing, models.OrderPartiallyReady})
+}
+
 func (r *GormOrderRepo) FindReadyExpired(ctx context.Context) ([]models.Order, error) {
 	var orders []models.Order
 	err := getDB(ctx, r.db).Preload("Items").
 		Where("status = ? AND expires_at < ?", models.OrderReady, time.Now()).
 		Find(&orders).Error
 	return orders, err
+}
+
+func (r *GormOrderRepo) FindReadyExpiredForUpdate(ctx context.Context) ([]models.Order, error) {
+	return r.findOrdersForUpdate(ctx, "status = ? AND expires_at < ?", "created_at asc, id asc", models.OrderReady, time.Now())
 }
 
 func (r *GormOrderRepo) FindNonTerminal(ctx context.Context) ([]models.Order, error) {
@@ -261,6 +316,59 @@ func (r *GormOrderRepo) FindNonTerminal(ctx context.Context) ([]models.Order, er
 		}).
 		Find(&orders).Error
 	return orders, err
+}
+
+func (r *GormOrderRepo) FindNonTerminalForUpdate(ctx context.Context) ([]models.Order, error) {
+	return r.findOrdersForUpdate(ctx, "status IN ?", "created_at asc, id asc", []models.OrderStatus{
+		models.OrderSubmitted, models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady, models.OrderAwaitingPayment,
+	})
+}
+
+func (r *GormOrderRepo) findOrdersForUpdate(ctx context.Context, condition, orderBy string, args ...any) ([]models.Order, error) {
+	db := getDB(ctx, r.db)
+	var orders []models.Order
+	q := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where(condition, args...).Order(orderBy)
+	if err := q.Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	if len(orders) == 0 {
+		return orders, nil
+	}
+	ids := make([]uint, 0, len(orders))
+	byID := make(map[uint]*models.Order, len(orders))
+	for i := range orders {
+		ids = append(ids, orders[i].ID)
+		byID[orders[i].ID] = &orders[i]
+	}
+	var items []models.OrderItem
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id IN ?", ids).
+		Order("order_id asc, created_at asc, id asc").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		order := byID[item.OrderID]
+		order.Items = append(order.Items, item)
+	}
+	return orders, nil
+}
+
+func activeOrderStatuses() []models.OrderStatus {
+	return []models.OrderStatus{
+		models.OrderSubmitted, models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady, models.OrderAwaitingPayment,
+	}
+}
+
+// HasActiveItemsForMenuItem returns true if a non-terminal order contains a
+// non-rejected item for menuItemID. A single COUNT avoids loading whole orders.
+func (r *GormOrderRepo) HasActiveItemsForMenuItem(ctx context.Context, menuItemID uint) (bool, error) {
+	var count int64
+	err := getDB(ctx, r.db).
+		Model(&models.OrderItem{}).
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("order_items.menu_item_id = ? AND order_items.status != ? AND orders.status IN ?",
+			menuItemID, models.ItemRejected, activeOrderStatuses()).
+		Count(&count).Error
+	return count > 0, err
 }
 
 type GormPoolRepo struct {
@@ -281,6 +389,21 @@ func (r *GormPoolRepo) FindAll(ctx context.Context) (map[uint]int, error) {
 		m[it.MenuItemID] = it.Qty
 	}
 	return m, nil
+}
+
+// Lock ensures a pool row exists and holds it until the current transaction
+// commits. A zero row is valid: cooked units are added only after menu items
+// have been validated by the service layer.
+func (r *GormPoolRepo) Lock(ctx context.Context, menuItemID uint) (int, error) {
+	db := getDB(ctx, r.db)
+	if err := db.Exec(`INSERT INTO item_pool (menu_item_id, qty) VALUES (?, 0) ON CONFLICT (menu_item_id) DO NOTHING`, menuItemID).Error; err != nil {
+		return 0, err
+	}
+	var item models.ItemPool
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&item, "menu_item_id = ?", menuItemID).Error; err != nil {
+		return 0, err
+	}
+	return item.Qty, nil
 }
 
 // Add adjusts the pool by qty (may be negative). UPDATE-then-INSERT rather

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMenu } from '../../api/menu';
 import { getActiveOrder, createOrder, type OrderItemInput } from '../../api/orders';
@@ -13,7 +13,6 @@ import { MenuStatusBadge } from '../../components/StatusBadge';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
-import { useNavigate } from 'react-router-dom';
 
 function availabilityWindowText(item: MenuItem): string | null {
   if (!item.avail_from && !item.avail_to) return null;

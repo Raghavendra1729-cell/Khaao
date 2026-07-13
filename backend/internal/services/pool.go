@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -11,6 +13,8 @@ import (
 	"khaao/internal/models"
 	"khaao/internal/realtime"
 	"khaao/internal/repository"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type PoolEngine struct {
@@ -107,9 +111,12 @@ func (e *PoolEngine) recomputeStatus(order *models.Order) {
 	}
 }
 
-func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.EventType, payload any) {
-	b, _ := json.Marshal(payload)
-	_ = e.eventRepo.Log(ctx, &models.OrderEvent{
+func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.EventType, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return e.eventRepo.Log(ctx, &models.OrderEvent{
 		OrderID: orderID,
 		Type:    typ,
 		Payload: b,
@@ -118,7 +125,11 @@ func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.Even
 
 func (e *PoolEngine) broadcast(orderID uint) {
 	ctx := context.Background()
-	order, _ := e.orderRepo.FindByID(ctx, orderID)
+	order, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		log.Printf("khaao: broadcast: load order %d: %v", orderID, err)
+		return
+	}
 	if order != nil {
 		resp := ToOrderResponse(*order, false)
 		e.hub.NotifyOrderUpdate(order.UserID, resp)
@@ -129,137 +140,163 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 	if len(inputs) == 0 {
 		return OrderResponse{}, ErrBadRequest("order must contain at least one item")
 	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	active, err := e.orderRepo.FindActiveByUserID(ctx, userID)
-	if err != nil {
-		return OrderResponse{}, err
+	if len(inputs) > 30 {
+		return OrderResponse{}, ErrBadRequest("order cannot contain more than 30 lines")
 	}
-	if active != nil {
-		return OrderResponse{}, ErrConflict("you already have an active order")
-	}
-
-	today := models.DayOf(time.Now().In(e.cfg.Location()))
-	maxNo, err := e.orderRepo.GetMaxOrderNo(ctx, today)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-
-	order := &models.Order{
-		UserID:    userID,
-		OrderNo:   maxNo + 1,
-		OrderDate: today,
-		Status:    models.OrderSubmitted,
-	}
-
-	var items []models.OrderItem
-	total := 0
-
+	seenMenuItems := make(map[uint]struct{}, len(inputs))
 	for _, in := range inputs {
 		if in.Qty < 1 || in.Qty > 20 {
 			return OrderResponse{}, ErrBadRequest("qty must be between 1 and 20")
 		}
-		mi, err := e.menuRepo.FindByID(ctx, in.MenuItemID)
-		if err != nil {
-			return OrderResponse{}, err
+		if _, exists := seenMenuItems[in.MenuItemID]; exists {
+			return OrderResponse{}, ErrBadRequest("each menu item may appear only once")
 		}
-		if mi == nil {
-			return OrderResponse{}, ErrUnorderable("menu item not found")
-		}
-		if !itemOrderableNow(*mi, time.Now().In(e.cfg.Location())) {
-			return OrderResponse{}, ErrUnorderable(mi.Name + " is not orderable right now")
-		}
-		
-		items = append(items, models.OrderItem{
-			MenuItemID: mi.ID,
-			Name:       mi.Name,
-			PriceEach:  mi.Price,
-			Qty:        in.Qty,
-			Status:     models.ItemPending,
-		})
-		total += mi.Price * in.Qty
+		seenMenuItems[in.MenuItemID] = struct{}{}
 	}
-	order.TotalPrice = total
 
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
-		if err := e.orderRepo.Create(txCtx, order); err != nil {
-			return err
-		}
-		for i := range items {
-			items[i].OrderID = order.ID
-			if err := e.orderRepo.SaveItem(txCtx, &items[i]); err != nil {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var order *models.Order
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		order = nil
+		err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+			active, err := e.orderRepo.FindActiveByUserIDForUpdate(txCtx, userID)
+			if err != nil {
 				return err
 			}
+			if active != nil {
+				return ErrConflict("you already have an active order")
+			}
+
+			today := models.DayOf(time.Now().In(e.cfg.Location()))
+			maxNo, err := e.orderRepo.GetMaxOrderNo(txCtx, today)
+			if err != nil {
+				return err
+			}
+			candidate := &models.Order{UserID: userID, OrderNo: maxNo + 1, OrderDate: today, Status: models.OrderSubmitted}
+			items := make([]models.OrderItem, 0, len(inputs))
+			for _, in := range inputs {
+				mi, err := e.menuRepo.FindByID(txCtx, in.MenuItemID)
+				if err != nil {
+					return err
+				}
+				if mi == nil {
+					return ErrUnorderable("menu item not found")
+				}
+				if !itemOrderableNow(*mi, time.Now().In(e.cfg.Location())) {
+					return ErrUnorderable(mi.Name + " is not orderable right now")
+				}
+				items = append(items, models.OrderItem{MenuItemID: mi.ID, Name: mi.Name, PriceEach: mi.Price, Qty: in.Qty, Status: models.ItemPending})
+				candidate.TotalPrice += mi.Price * in.Qty
+			}
+			if err := e.orderRepo.Create(txCtx, candidate); err != nil {
+				return err
+			}
+			for i := range items {
+				items[i].OrderID = candidate.ID
+				if err := e.orderRepo.SaveItem(txCtx, &items[i]); err != nil {
+					return err
+				}
+			}
+			if err := e.logEvent(txCtx, candidate.ID, models.EventPlaced, map[string]any{}); err != nil {
+				return err
+			}
+			order = candidate
+			return nil
+		})
+		if err == nil {
+			break
 		}
-		e.logEvent(txCtx, order.ID, models.EventPlaced, map[string]any{})
-		return nil
-	})
-	
-	if err != nil {
-		return OrderResponse{}, err
+		if !isOrderNumberConflict(err) || attempt == 1 {
+			if isActiveOrderConflict(err) {
+				return OrderResponse{}, ErrConflict("you already have an active order")
+			}
+			return OrderResponse{}, err
+		}
 	}
 
 	e.broadcast(order.ID)
 	e.hub.NotifyShopOrdersUpdate()
-	
-	order, _ = e.orderRepo.FindByID(ctx, order.ID)
-	return ToOrderResponse(*order, false), nil
+
+	stored, err := e.orderRepo.FindByID(ctx, order.ID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("created order could not be reloaded")
+	}
+	return ToOrderResponse(*stored, false), nil
+}
+
+func isOrderNumberConflict(err error) bool { return postgresConstraint(err, "idx_orders_date_no") }
+func isActiveOrderConflict(err error) bool {
+	return postgresConstraint(err, "uniq_active_order_per_user")
+}
+
+func postgresConstraint(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
 func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs []uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	if order.Status != models.OrderSubmitted {
-		return OrderResponse{}, ErrConflict("order is not in submitted state")
-	}
-
 	rejectedSet := make(map[uint]struct{})
 	for _, id := range rejectedItemIDs {
 		rejectedSet[id] = struct{}{}
 	}
 
-	allRejected := true
-	for i := range order.Items {
-		it := &order.Items[i]
-		if _, rejected := rejectedSet[it.ID]; rejected {
-			it.Status = models.ItemRejected
-		} else {
-			it.Status = models.ItemQueued
-			allRejected = false
+	var order *models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
 		}
-	}
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		if order.Status != models.OrderSubmitted {
+			return ErrConflict("order is not in submitted state")
+		}
 
-	touchedMenuItems := make(map[uint]struct{})
+		allRejected := true
+		touchedMenuItems := make(map[uint]struct{})
+		for i := range order.Items {
+			it := &order.Items[i]
+			if _, rejected := rejectedSet[it.ID]; rejected {
+				it.Status = models.ItemRejected
+			} else {
+				it.Status = models.ItemQueued
+				allRejected = false
+				touchedMenuItems[it.MenuItemID] = struct{}{}
+			}
+		}
 
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
 		if allRejected {
 			order.Status = models.OrderRejected
-			e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{"reason": "all items trimmed"})
+			if err := e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{"reason": "all items trimmed"}); err != nil {
+				return err
+			}
 		} else {
 			total := 0
 			for _, it := range order.Items {
 				if it.Status != models.ItemRejected {
 					total += it.Qty * it.PriceEach
-					touchedMenuItems[it.MenuItemID] = struct{}{}
 				}
 			}
 			order.TotalPrice = total
 			now := time.Now()
 			order.AcceptedAt = &now
 			e.recomputeStatus(order)
-			e.logEvent(txCtx, order.ID, models.EventAccepted, map[string]any{})
+			if err := e.logEvent(txCtx, order.ID, models.EventAccepted, map[string]any{}); err != nil {
+				return err
+			}
 		}
-		
+
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
@@ -271,9 +308,21 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 
 		if !allRejected {
 			for menuItemID := range touchedMenuItems {
-				_, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+				touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
 				if err != nil {
 					return err
+				}
+				for _, touchedOrderID := range touched {
+					touchedOrder, err := e.orderRepo.FindByIDForUpdate(txCtx, touchedOrderID)
+					if err != nil {
+						return err
+					}
+					if touchedOrder != nil {
+						e.recomputeStatus(touchedOrder)
+						if err := e.orderRepo.Save(txCtx, touchedOrder); err != nil {
+							return err
+						}
+					}
 				}
 			}
 		}
@@ -283,39 +332,38 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 	if err != nil {
 		return OrderResponse{}, err
 	}
-	
-	if !allRejected {
-		_ = e.uow.WithTx(ctx, func(txCtx context.Context) error {
-			order, _ = e.orderRepo.FindByID(txCtx, orderID)
-			e.recomputeStatus(order)
-			return e.orderRepo.Save(txCtx, order)
-		})
-	}
 
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
-	
-	order, _ = e.orderRepo.FindByID(ctx, orderID)
-	return ToOrderResponse(*order, true), nil
+
+	stored, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("accepted order could not be reloaded")
+	}
+	return ToOrderResponse(*stored, true), nil
 }
 
 func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	if order.Status != models.OrderSubmitted {
-		return OrderResponse{}, ErrConflict("order is not in submitted state")
-	}
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+	var order *models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
+		}
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		if order.Status != models.OrderSubmitted {
+			return ErrConflict("order is not in submitted state")
+		}
 		order.Status = models.OrderRejected
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
@@ -327,8 +375,7 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 				return err
 			}
 		}
-		e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{})
-		return nil
+		return e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{})
 	})
 
 	if err != nil {
@@ -338,7 +385,7 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
-	
+
 	return ToOrderResponse(*order, true), nil
 }
 
@@ -346,21 +393,22 @@ func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderRes
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	if order.UserID != userID {
-		return OrderResponse{}, ErrForbidden("not your order")
-	}
-	if order.Status != models.OrderSubmitted {
-		return OrderResponse{}, ErrConflict("order was already accepted and can no longer be cancelled")
-	}
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+	var order *models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
+		}
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		if order.UserID != userID {
+			return ErrForbidden("not your order")
+		}
+		if order.Status != models.OrderSubmitted {
+			return ErrConflict("order was already accepted and can no longer be cancelled")
+		}
 		order.Status = models.OrderCancelled
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
@@ -372,8 +420,7 @@ func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderRes
 				return err
 			}
 		}
-		e.logEvent(txCtx, order.ID, models.EventCancelled, map[string]any{})
-		return nil
+		return e.logEvent(txCtx, order.ID, models.EventCancelled, map[string]any{})
 	})
 
 	if err != nil {
@@ -393,33 +440,35 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	if order.Status == models.OrderSubmitted || order.Status == models.OrderRejected || order.Status == models.OrderCancelled || order.Status == models.OrderExpired || order.Status == models.OrderCompleted {
-		return OrderResponse{}, ErrConflict("order not in a valid state for handover")
-	}
-
-	var targetItem *models.OrderItem
-	for i := range order.Items {
-		if order.Items[i].ID == itemID {
-			targetItem = &order.Items[i]
-			break
+	var order *models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
 		}
-	}
-	if targetItem == nil {
-		return OrderResponse{}, ErrNotFound("item not found in order")
-	}
-
-	if targetItem.HandedQty+qty > targetItem.AllocatedQty {
-		return OrderResponse{}, ErrConflict("cannot hand over more than allocated")
-	}
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		if order.Status == models.OrderSubmitted || order.Status == models.OrderRejected || order.Status == models.OrderCancelled || order.Status == models.OrderExpired || order.Status == models.OrderCompleted {
+			return ErrConflict("order not in a valid state for handover")
+		}
+		var targetItem *models.OrderItem
+		for i := range order.Items {
+			if order.Items[i].ID == itemID {
+				targetItem = &order.Items[i]
+				break
+			}
+		}
+		if targetItem == nil {
+			return ErrNotFound("item not found in order")
+		}
+		if targetItem.Status == models.ItemRejected {
+			return ErrConflict("item was removed from this order")
+		}
+		if targetItem.HandedQty+qty > targetItem.AllocatedQty {
+			return ErrConflict("cannot hand over more than allocated")
+		}
 		targetItem.HandedQty += qty
 		if targetItem.HandedQty >= targetItem.Qty {
 			targetItem.Status = models.ItemHandedOver
@@ -427,14 +476,13 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 		if err := e.orderRepo.SaveItem(txCtx, targetItem); err != nil {
 			return err
 		}
-		
+
 		e.recomputeStatus(order)
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
 
-		e.logEvent(txCtx, order.ID, models.EventItemHanded, map[string]any{"item_id": itemID, "qty": qty})
-		return nil
+		return e.logEvent(txCtx, order.ID, models.EventItemHanded, map[string]any{"item_id": itemID, "qty": qty})
 	})
 
 	if err != nil {
@@ -454,41 +502,41 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	switch order.Status {
-	case models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady:
-		// accepted and not yet paid — trimming is allowed
-	default:
-		return OrderResponse{}, ErrConflict("order can no longer be modified")
-	}
-
-	var target *models.OrderItem
-	for i := range order.Items {
-		if order.Items[i].ID == itemID {
-			target = &order.Items[i]
-			break
+	var order *models.Order
+	var menuItemID uint
+	returned := 0
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
 		}
-	}
-	if target == nil {
-		return OrderResponse{}, ErrNotFound("item not found in order")
-	}
-	if target.Status == models.ItemRejected {
-		return OrderResponse{}, ErrConflict("item was already removed")
-	}
-	if target.HandedQty > 0 {
-		return OrderResponse{}, ErrConflict("cannot remove an item the student has started collecting")
-	}
-
-	menuItemID := target.MenuItemID
-	returned := target.AllocatedQty
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		switch order.Status {
+		case models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady:
+		default:
+			return ErrConflict("order can no longer be modified")
+		}
+		var target *models.OrderItem
+		for i := range order.Items {
+			if order.Items[i].ID == itemID {
+				target = &order.Items[i]
+				break
+			}
+		}
+		if target == nil {
+			return ErrNotFound("item not found in order")
+		}
+		if target.Status == models.ItemRejected {
+			return ErrConflict("item was already removed")
+		}
+		if target.HandedQty > 0 {
+			return ErrConflict("cannot remove an item the student has started collecting")
+		}
+		menuItemID = target.MenuItemID
+		returned = target.AllocatedQty
 		if returned > 0 {
 			if err := e.poolRepo.Add(txCtx, menuItemID, returned); err != nil {
 				return err
@@ -518,11 +566,13 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 			return err
 		}
 
-		e.logEvent(txCtx, order.ID, models.EventItemTrimmed, map[string]any{
+		if err := e.logEvent(txCtx, order.ID, models.EventItemTrimmed, map[string]any{
 			"item_id":          itemID,
 			"menu_item_id":     menuItemID,
 			"returned_to_pool": returned,
-		})
+		}); err != nil {
+			return err
+		}
 
 		// Re-assign the freed units to the next FCFS order(s).
 		if returned > 0 {
@@ -534,7 +584,7 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 				if tid == order.ID {
 					continue
 				}
-				ord, err := e.orderRepo.FindByID(txCtx, tid)
+				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, tid)
 				if err != nil {
 					return err
 				}
@@ -565,26 +615,33 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
 
-	order, _ = e.orderRepo.FindByID(ctx, orderID)
-	return ToOrderResponse(*order, true), nil
+	stored, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("modified order could not be reloaded")
+	}
+	return ToOrderResponse(*stored, true), nil
 }
 
 func (e *PoolEngine) Paid(ctx context.Context, orderID uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	order, err := e.orderRepo.FindByID(ctx, orderID)
-	if err != nil {
-		return OrderResponse{}, err
-	}
-	if order == nil {
-		return OrderResponse{}, ErrNotFound("order not found")
-	}
-	if order.Status != models.OrderAwaitingPayment {
-		return OrderResponse{}, ErrConflict("hand over every item first before marking paid")
-	}
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+	var order *models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return err
+		}
+		if order == nil {
+			return ErrNotFound("order not found")
+		}
+		if order.Status != models.OrderAwaitingPayment {
+			return ErrConflict("hand over every item first before marking paid")
+		}
 		order.Status = models.OrderCompleted
 		order.Paid = true
 		now := time.Now()
@@ -592,8 +649,7 @@ func (e *PoolEngine) Paid(ctx context.Context, orderID uint) (OrderResponse, err
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
-		e.logEvent(txCtx, order.ID, models.EventPaid, map[string]any{})
-		return nil
+		return e.logEvent(txCtx, order.ID, models.EventPaid, map[string]any{})
 	})
 
 	if err != nil {
@@ -627,29 +683,38 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 		if err := e.poolRepo.Add(txCtx, menuItemID, qty); err != nil {
 			return err
 		}
-		
+
 		touchedOrders, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
 		if err != nil {
 			return err
 		}
-		
+
 		for _, orderID := range touchedOrders {
-			order, _ := e.orderRepo.FindByID(txCtx, orderID)
-			if order != nil {
-				e.recomputeStatus(order)
-				e.orderRepo.Save(txCtx, order)
+			order, err := e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+			if err != nil {
+				return err
+			}
+			if order == nil {
+				return ErrInternal("allocated order could not be reloaded")
+			}
+			e.recomputeStatus(order)
+			if err := e.orderRepo.Save(txCtx, order); err != nil {
+				return err
+			}
+			if err := e.logEvent(txCtx, order.ID, models.EventItemReady, map[string]any{"menu_item_id": menuItemID}); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return err
 	}
 
 	e.hub.NotifyShopPrepUpdate()
 	e.hub.NotifyShopOrdersUpdate()
-	
+
 	// Broadcast to all touched orders (lazy but safe outside tx)
 	orders, _ := e.orderRepo.FindInProgress(ctx)
 	for _, o := range orders {
@@ -662,19 +727,14 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	orders, err := e.orderRepo.FindReadyExpired(ctx)
-	if err != nil {
-		return err
-	}
-
-	if len(orders) == 0 {
-		return nil
-	}
-
 	touchedMenuItems := make(map[uint]struct{})
 	touchedOrders := make([]uint, 0)
 
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		orders, err := e.orderRepo.FindReadyExpiredForUpdate(txCtx)
+		if err != nil {
+			return err
+		}
 		for i := range orders {
 			order := &orders[i]
 			handedTotal := 0
@@ -684,12 +744,14 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 			if handedTotal > 0 {
 				continue // Do not expire if anything handed
 			}
-			
+
 			order.Status = models.OrderExpired
 			if err := e.orderRepo.Save(txCtx, order); err != nil {
 				return err
 			}
-			e.logEvent(txCtx, order.ID, models.EventExpired, map[string]any{})
+			if err := e.logEvent(txCtx, order.ID, models.EventExpired, map[string]any{}); err != nil {
+				return err
+			}
 			touchedOrders = append(touchedOrders, order.ID)
 
 			for j := range order.Items {
@@ -717,10 +779,16 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 			}
 			for _, t := range touched {
 				touchedOrders = append(touchedOrders, t)
-				ord, _ := e.orderRepo.FindByID(txCtx, t)
-				if ord != nil {
-					e.recomputeStatus(ord)
-					e.orderRepo.Save(txCtx, ord)
+				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, t)
+				if err != nil {
+					return err
+				}
+				if ord == nil {
+					return ErrInternal("reallocated order could not be reloaded")
+				}
+				e.recomputeStatus(ord)
+				if err := e.orderRepo.Save(txCtx, ord); err != nil {
+					return err
 				}
 			}
 		}
@@ -747,19 +815,22 @@ func (e *PoolEngine) CloseDay(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	openOrders, err := e.orderRepo.FindNonTerminal(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+	var openOrders []models.Order
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		openOrders, err = e.orderRepo.FindNonTerminalForUpdate(txCtx)
+		if err != nil {
+			return err
+		}
 		for i := range openOrders {
 			o := &openOrders[i]
 			o.Status = models.OrderExpired
 			if err := e.orderRepo.Save(txCtx, o); err != nil {
 				return err
 			}
-			e.logEvent(txCtx, o.ID, models.EventDayClosed, map[string]any{})
+			if err := e.logEvent(txCtx, o.ID, models.EventDayClosed, map[string]any{}); err != nil {
+				return err
+			}
 		}
 
 		if err := e.poolRepo.ZeroAll(txCtx); err != nil {
