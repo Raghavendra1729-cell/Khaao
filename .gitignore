@@ -3,9 +3,14 @@
 
 # Go
 backend/khaao
+backend/khaao-server
 backend/server
 backend/*.db
 backend/tmp/
+
+# Secrets / scratch (never commit)
+keys.txt
+.claude/settings.local.json
 
 # Node
 frontend/node_modules/
