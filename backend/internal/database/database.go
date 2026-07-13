@@ -1,15 +1,13 @@
-// Package database opens the GORM connection (sqlite or postgres, chosen by
-// DB_DRIVER), runs AutoMigrate, and seeds the shopkeeper account + sample
-// menu on boot.
+// Package database opens the GORM connection, sets up postgres extensions,
+// runs AutoMigrate, and seeds on boot.
 package database
 
 import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
-	"github.com/glebarez/sqlite"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -18,24 +16,17 @@ import (
 	"khaao/internal/models"
 )
 
-// Open opens the configured database driver and runs AutoMigrate.
+// Open opens the postgres connection, creates extensions, and runs AutoMigrate.
 func Open(cfg *config.Config) (*gorm.DB, error) {
 	gormCfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
 
-	var (
-		db  *gorm.DB
-		err error
-	)
-	switch cfg.DBDriver {
-	case "postgres":
-		db, err = gorm.Open(postgres.Open(cfg.DBDSN), gormCfg)
-	case "sqlite", "":
-		db, err = gorm.Open(sqlite.Open(cfg.DBDSN), gormCfg)
-	default:
-		return nil, fmt.Errorf("unsupported DB_DRIVER %q (want sqlite or postgres)", cfg.DBDriver)
-	}
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
+	}
+
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS citext").Error; err != nil {
+		return nil, fmt.Errorf("create citext extension: %w", err)
 	}
 
 	if err := db.AutoMigrate(
@@ -43,19 +34,27 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&models.MenuItem{},
 		&models.Order{},
 		&models.OrderItem{},
-		&models.DonePool{},
+		&models.ItemPool{},
+		&models.OrderEvent{},
+		&models.ShopkeeperEmail{},
 	); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
+	}
+
+	idxSQL := `CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_order_per_user 
+		ON orders(user_id) 
+		WHERE status IN ('submitted','preparing','partially_ready','ready','awaiting_payment');`
+	if err := db.Exec(idxSQL).Error; err != nil {
+		return nil, fmt.Errorf("create partial index: %w", err)
 	}
 
 	return db, nil
 }
 
-// Seed creates the shopkeeper account (if missing) and a sample menu (if the
-// menu is empty and SEED_SAMPLE_MENU=true).
+// Seed upserts shopkeeper emails and seeds sample menu.
 func Seed(db *gorm.DB, cfg *config.Config) error {
-	if err := seedShopkeeper(db, cfg); err != nil {
-		return fmt.Errorf("seed shopkeeper: %w", err)
+	if err := seedShopkeeperEmails(db, cfg.ShopkeeperEmails); err != nil {
+		return fmt.Errorf("seed shopkeeper emails: %w", err)
 	}
 	if cfg.SeedSampleMenu {
 		if err := seedSampleMenu(db); err != nil {
@@ -65,31 +64,28 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	return nil
 }
 
-func seedShopkeeper(db *gorm.DB, cfg *config.Config) error {
-	var existing models.User
-	err := db.Where("email = ?", cfg.ShopkeeperEmail).First(&existing).Error
-	if err == nil {
-		return nil // already seeded
+func seedShopkeeperEmails(db *gorm.DB, raw string) error {
+	if raw == "" {
+		return nil
 	}
-	if !isNotFound(err) {
-		return err
+	parts := strings.Split(raw, ",")
+	for _, p := range parts {
+		email := strings.TrimSpace(p)
+		if email == "" {
+			continue
+		}
+		var se models.ShopkeeperEmail
+		err := db.Where("email = ?", email).First(&se).Error
+		if isNotFound(err) {
+			se = models.ShopkeeperEmail{Email: email, Note: "Seeded from env"}
+			if err := db.Create(&se).Error; err != nil {
+				return err
+			}
+			log.Printf("khaao: seeded shopkeeper email %s", email)
+		} else if err != nil {
+			return err
+		}
 	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.ShopkeeperPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	user := models.User{
-		Name:         cfg.ShopkeeperName,
-		Email:        cfg.ShopkeeperEmail,
-		PasswordHash: string(hash),
-		Role:         models.RoleShopkeeper,
-		Provider:     models.ProviderPassword,
-	}
-	if err := db.Create(&user).Error; err != nil {
-		return err
-	}
-	log.Printf("khaao: seeded shopkeeper account %s", cfg.ShopkeeperEmail)
 	return nil
 }
 

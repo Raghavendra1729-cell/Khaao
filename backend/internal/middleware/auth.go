@@ -31,7 +31,9 @@ func extractToken(c *gin.Context) string {
 }
 
 // RequireAuth validates the JWT and stashes user_id/role in the context.
-func RequireAuth(cfg *config.Config) gin.HandlerFunc {
+// The role comes from a DB lookup, not the token claim, so allowlist or role
+// changes take effect on the user's next request rather than at token expiry.
+func RequireAuth(cfg *config.Config, authSvc *services.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
 		if token == "" {
@@ -48,8 +50,13 @@ func RequireAuth(cfg *config.Config) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token subject"})
 			return
 		}
+		user, err := authSvc.GetUser(c.Request.Context(), uint(userID))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
+			return
+		}
 		c.Set(ContextUserID, uint(userID))
-		c.Set(ContextRole, claims.Role)
+		c.Set(ContextRole, string(user.Role))
 		c.Next()
 	}
 }
