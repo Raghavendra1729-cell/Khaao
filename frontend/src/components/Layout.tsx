@@ -1,11 +1,16 @@
 import type { ReactNode } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { getActiveOrder } from '../api/orders';
 import { getPrep, getShopOrders } from '../api/shop';
 import { StudentRealtime } from './StudentRealtime';
 import { ShopRealtime } from './ShopRealtime';
+import { ShopStatusControl } from './ShopStatusControl';
+import { useShopNotification, clearShopNotification } from './shopNotifications';
+import { InstallPrompt } from './InstallPrompt';
+import { PushNotificationSetup } from './PushNotificationSetup';
 
 function Icon({ d }: { d: string }) {
   return (
@@ -37,6 +42,7 @@ const ICONS = {
 interface Tab {
   to: string;
   label: string;
+  labelHi?: string;
   end: boolean;
   icon: keyof typeof ICONS;
 }
@@ -47,10 +53,10 @@ const STUDENT_TABS: Tab[] = [
 ];
 
 const SHOP_TABS: Tab[] = [
-  { to: '/shop', label: 'Orders', end: true, icon: 'inbox' },
-  { to: '/shop/prep', label: 'Prep', end: false, icon: 'flame' },
-  { to: '/shop/history', label: 'History', end: false, icon: 'clock' },
-  { to: '/shop/menu', label: 'Menu', end: false, icon: 'tag' },
+  { to: '/shop', label: 'Orders', labelHi: 'ऑर्डर', end: true, icon: 'inbox' },
+  { to: '/shop/prep', label: 'Prep', labelHi: 'तैयारी', end: false, icon: 'flame' },
+  { to: '/shop/history', label: 'History', labelHi: 'इतिहास', end: false, icon: 'clock' },
+  { to: '/shop/menu', label: 'Menu', labelHi: 'मेन्यू', end: false, icon: 'tag' },
 ];
 
 function TabBadge({ children }: { children: ReactNode }) {
@@ -61,15 +67,133 @@ function TabBadge({ children }: { children: ReactNode }) {
   );
 }
 
+/** Bell icon for the shop notification dot. */
+function BellIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+/**
+ * Reads the notification dot state and clears it automatically when the
+ * shopkeeper is on the Orders page (/shop exact match).
+ */
+function ShopBell() {
+  const hasNotification = useShopNotification();
+  const location = useLocation();
+  const isOnOrders = location.pathname === '/shop';
+
+  useEffect(() => {
+    if (isOnOrders && hasNotification) {
+      clearShopNotification();
+    }
+  }, [isOnOrders, hasNotification]);
+
+  return (
+    <div className="relative flex items-center" aria-label={hasNotification ? 'New activity — tap Orders to view' : undefined}>
+      <BellIcon />
+      {hasNotification && (
+        <span
+          className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-turmeric ring-2 ring-paper"
+          aria-hidden
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Avatar button (shows first initial of the user's name) that opens a small
+ * dropdown with the full name and a Log out action. Closes on outside click or
+ * Escape. Width on screen: 36×36px — well within the mobile header budget.
+ */
+function AvatarMenu({ name, onLogout }: { name: string; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const initial = name.trim().charAt(0).toUpperCase() || '?';
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        id="avatar-menu-btn"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`Account menu for ${name}`}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink/20 bg-ink/10 font-display text-sm font-bold text-ink transition hover:bg-ink/15 active:scale-95"
+      >
+        {initial}
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-2 min-w-[160px] rounded-xl border border-edge bg-paper shadow-ticket"
+        >
+          {/* Full name — read-only label */}
+          <div className="border-b border-edge px-4 py-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">Signed in as</p>
+            <p className="mt-0.5 truncate text-sm font-semibold text-ink">{name}</p>
+          </div>
+          {/* Logout action */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+            className="flex w-full min-h-[44px] items-center px-4 py-2.5 text-sm font-semibold text-stamp-dark transition hover:bg-stamp-light/60 rounded-b-xl"
+          >
+            <div className="flex flex-col items-start leading-tight">
+              <span>Log out</span>
+              <span className="text-[10px] font-medium opacity-80 mt-0.5">लॉग आउट</span>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Layout() {
   const { user, logout } = useAuth();
   const isShop = user?.role === 'shopkeeper';
   const tabs = isShop ? SHOP_TABS : STUDENT_TABS;
   // Students use this on a phone: a narrow single-column shell fits perfectly.
-  // Shopkeepers run a multi-column kanban board (Orders) and grids (Prep,
-  // History, Menu) meant for a counter tablet/laptop — max-w-md (28rem) was
-  // capping them to phone width even on a wide screen, squeezing the "New"
-  // column's Accept button until it visually overlapped "Cooking".
+  // Shopkeepers are mobile-first (375-430px target) but also need to work on a
+  // counter tablet — max-w-6xl gives room on wider screens without capping mobile.
   const contentMaxWidth = isShop ? 'max-w-6xl' : 'max-w-md';
 
   // Badge data rides the same query keys the pages use, so SSE invalidation
@@ -101,23 +225,29 @@ export function Layout() {
 
       <header className="sticky top-0 z-20 border-b border-edge bg-steel/95 pt-safe backdrop-blur">
         <div className={`mx-auto flex h-14 ${contentMaxWidth} items-center justify-between px-4`}>
-          <div className="flex items-center gap-2">
+          {/* Left: K mark only on mobile — wordmark hidden to preserve header space */}
+          <div className="flex shrink-0 items-center">
             <span className="flex h-8 w-8 items-center justify-center rounded-md border-2 border-ink bg-paper font-display text-sm font-bold text-ink">
               K
             </span>
-            <span className="font-display text-lg font-bold uppercase tracking-[0.15em] text-ink">
+            {/* Wordmark shown only when there's room (md breakpoint and above) */}
+            <span className="ml-2 hidden font-display text-lg font-bold uppercase tracking-[0.15em] text-ink md:block">
               Khaao
             </span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="max-w-[9rem] truncate text-sm text-ink/60">{user?.name}</span>
-            <button
-              type="button"
-              onClick={logout}
-              className="flex min-h-[44px] items-center rounded-lg px-2.5 text-sm font-semibold text-ink/70 transition hover:bg-ink/5 hover:text-ink"
-            >
-              Log out
-            </button>
+
+          {/* Right cluster: status pill + bell (shop only) + avatar — must not wrap at 375px */}
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Shop status pill — highest-stakes control, always visible for shopkeepers */}
+            {isShop && <ShopStatusControl />}
+            {/* Notification bell — always visible for shopkeepers */}
+            {isShop && (
+              <span className="flex items-center px-0.5">
+                <ShopBell />
+              </span>
+            )}
+            {/* Avatar + name/logout collapsed into a single 36px button */}
+            <AvatarMenu name={user?.name ?? ''} onLogout={logout} />
           </div>
         </div>
       </header>
@@ -125,6 +255,9 @@ export function Layout() {
       <main className={`mx-auto w-full ${contentMaxWidth} flex-1 px-4 pb-24 pt-4`}>
         <Outlet />
       </main>
+
+      <InstallPrompt />
+      {isShop && <PushNotificationSetup />}
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-paper/95 pb-safe shadow-bar backdrop-blur">
         <div className={`mx-auto grid ${contentMaxWidth} ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
@@ -147,7 +280,10 @@ export function Layout() {
                   <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-turmeric" />
                 )}
               </span>
-              {tab.label}
+              <span className="flex flex-col items-center leading-none mt-0.5 gap-0.5">
+                <span>{tab.label}</span>
+                {tab.labelHi && <span className="text-[9px] font-medium opacity-80">{tab.labelHi}</span>}
+              </span>
             </NavLink>
           ))}
         </div>

@@ -8,15 +8,16 @@ import { Button } from './Button';
 import { Modal } from './Modal';
 import { useToast } from './Toast';
 
-const STATE_META: Record<ShopState, { label: string; dot: string; text: string; chip: string }> = {
-  open: { label: 'Open', dot: 'bg-brand', text: 'text-brand-dark', chip: 'border-brand/40 bg-brand-light' },
+const STATE_META: Record<ShopState, { label: string; labelHi: string; dot: string; text: string; chip: string }> = {
+  open: { label: 'Open', labelHi: 'खुला', dot: 'bg-brand', text: 'text-brand-dark', chip: 'border-brand/40 bg-brand-light' },
   paused: {
     label: 'Paused',
+    labelHi: 'रुका हुआ',
     dot: 'bg-turmeric',
     text: 'text-turmeric-deep',
     chip: 'border-turmeric/40 bg-turmeric-pale',
   },
-  closed: { label: 'Closed', dot: 'bg-stamp', text: 'text-stamp-dark', chip: 'border-stamp/40 bg-stamp-light' },
+  closed: { label: 'Closed', labelHi: 'बंद', dot: 'bg-stamp', text: 'text-stamp-dark', chip: 'border-stamp/40 bg-stamp-light' },
 };
 
 const OPTIONS: ShopState[] = ['open', 'paused', 'closed'];
@@ -95,7 +96,10 @@ export function ShopStatusControl() {
         aria-label={`Canteen status: ${meta.label}. Tap to change.`}
       >
         <span className={`h-2 w-2 rounded-full ${meta.dot} ${current !== 'open' ? 'animate-soft-pulse' : ''}`} />
-        {meta.label}
+        <div className="flex flex-col items-start leading-none gap-0.5">
+          <span>{meta.label}</span>
+          <span className="text-[9px] font-medium opacity-80">{meta.labelHi}</span>
+        </div>
       </button>
 
       <Modal
@@ -122,7 +126,10 @@ export function ShopStatusControl() {
                 }`}
               >
                 <span className={`h-2.5 w-2.5 rounded-full ${m.dot}`} />
-                {m.label}
+                <div className="flex flex-col items-center leading-none gap-1 mt-0.5">
+                  <span>{m.label}</span>
+                  <span className="text-[10px] font-medium opacity-80">{m.labelHi}</span>
+                </div>
               </button>
             );
           })}
@@ -132,7 +139,9 @@ export function ShopStatusControl() {
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-edge bg-steel/20 p-3">
             {target === 'paused' && (
               <label className="block">
-                <span className="mb-1 block text-sm font-semibold text-ink/70">Reopens at</span>
+                <span className="mb-1 block text-sm font-semibold text-ink/70">
+                  Reopens at <span className="font-normal opacity-80">(फिर से खुलेगा)</span>
+                </span>
                 <input
                   type="time"
                   value={reopenTime}
@@ -157,7 +166,7 @@ export function ShopStatusControl() {
 
             {(target === 'paused' || target === 'closed') && (
               <p className="text-xs text-ink/50">
-                You can only pause or close once every active order is finished or cancelled.
+                Pending orders will be automatically declined. Already-accepted orders must be finished or cancelled first.
               </p>
             )}
 
@@ -178,14 +187,21 @@ export function ShopStatusControl() {
                 loading={mutation.isPending}
                 onClick={() => mutation.mutate(target)}
               >
-                {target === 'open' ? 'Reopen' : target === 'paused' ? 'Pause' : 'Close'}
+                <div className="flex flex-col items-center leading-tight">
+                  <span>{target === 'open' ? 'Reopen' : target === 'paused' ? 'Pause' : 'Close'}</span>
+                  <span className="text-[10px] font-medium opacity-80 mt-0.5">
+                    {target === 'open' ? 'खुला' : target === 'paused' ? 'रुका हुआ' : 'बंद'}
+                  </span>
+                </div>
               </Button>
             </div>
           </div>
         )}
 
         {target && target === current && (
-          <p className="mt-4 text-center text-sm text-ink/50">Already {STATE_META[current].label.toLowerCase()}.</p>
+          <div className="mt-4 rounded-xl border border-edge bg-steel/30 px-4 py-3 text-center text-sm text-ink/50">
+            Already {STATE_META[current].label.toLowerCase()}.
+          </div>
         )}
       </Modal>
     </>

@@ -10,17 +10,20 @@ import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 
+// PrepRow is only ever rendered for items where remaining_qty > 0 (filtered at
+// the page level). The "Not needed right now" / canPrep===false branch has been
+// removed: it was dead code once the filter was in place, and showing a 0-qty
+// row at all conflicts with the product goal of "show only things still to cook".
 function PrepRow({ item }: { item: PrepItem }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const canPrep = item.remaining_qty > 0;
   const [selected, setSelected] = useState(() => Math.min(1, item.remaining_qty));
 
   // remaining_qty can shift under us (another shopkeeper action, an order
   // getting trimmed, an SSE refetch) — keep the selection in range rather
   // than letting it submit a qty that's no longer valid.
   useEffect(() => {
-    setSelected((prev) => Math.max(1, Math.min(prev, Math.max(item.remaining_qty, 1))));
+    setSelected((prev) => Math.max(1, Math.min(prev, item.remaining_qty)));
   }, [item.remaining_qty]);
 
   const doneMutation = useMutation({
@@ -43,21 +46,20 @@ function PrepRow({ item }: { item: PrepItem }) {
       </div>
       <div className="flex-1">
         <p className="font-bold text-ink">{item.name}</p>
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">left to cook</p>
-        <p className="tabular mt-1 text-sm text-ink/50">{item.pool_qty} waiting in pool</p>
-      </div>
-      {canPrep ? (
-        <div className="flex shrink-0 flex-col items-center gap-2">
-          <QtyStepper value={selected} onChange={setSelected} min={1} max={item.remaining_qty} />
-          <Button size="md" fullWidth loading={doneMutation.isPending} onClick={() => doneMutation.mutate()}>
-            Done
-          </Button>
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink/40">
+          <span>left to cook</span>
+          <span className="normal-case text-[10px] opacity-80">पकाना बाकी</span>
         </div>
-      ) : (
-        <span className="w-20 shrink-0 text-center text-[11px] font-semibold uppercase leading-tight tracking-wide text-ink/35">
-          Not needed right now
-        </span>
-      )}
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-2">
+        <QtyStepper value={selected} onChange={setSelected} min={1} max={item.remaining_qty} />
+        <Button size="md" fullWidth loading={doneMutation.isPending} onClick={() => doneMutation.mutate()}>
+          <div className="flex flex-col items-center leading-tight">
+            <span>Done</span>
+            <span className="text-[10px] font-medium opacity-80 mt-0.5">पूर्ण</span>
+          </div>
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -76,7 +78,10 @@ export function ShopPrepPage() {
     );
   }
 
-  const items = prepQuery.data ?? [];
+  // Defensive: only show items that still need cooking. The backend should
+  // already filter this, but a stale response or a backend transition period
+  // could surface 0-qty items — drop them here before they reach the renderer.
+  const items = (prepQuery.data ?? []).filter((item) => item.remaining_qty > 0);
 
   return (
     <div>

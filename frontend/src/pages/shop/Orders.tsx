@@ -1,22 +1,103 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   acceptOrder,
-  handoverItem,
-  markPaid,
-  markPrepDone,
   getShopOrders,
   rejectOrder,
-  removeOrderItem,
+  setMenuItemStock,
 } from '../../api/shop';
 import { ApiError } from '../../api/client';
-import type { Order, OrderItem } from '../../api/types';
+import type { Order } from '../../api/types';
 import { formatPrice, formatTime } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
+import { OrderModal } from '../../components/OrderModal';
+import { clearShopNotification } from '../../components/shopNotifications';
+
+// ─── New orders subpage ───────────────────────────────────────────────────────
+
+/**
+ * Reject dialog: shows a checklist of this order's items so the shopkeeper
+ * can flag which ones are unavailable before confirming. Checked = unavailable.
+ */
+function RejectDialog({
+  order,
+  onCancel,
+  onConfirm,
+  busy,
+}: {
+  order: Order;
+  onCancel: () => void;
+  onConfirm: (unavailableItemIds: number[]) => void;
+  busy: boolean;
+}) {
+  const items = order.items.filter((i) => i.status !== 'rejected');
+  const [checked, setChecked] = useState<Record<number, boolean>>(() =>
+    Object.fromEntries(items.map((i) => [i.menu_item_id, false])),
+  );
+
+  const unavailableMenuItemIds = items
+    .filter((i) => checked[i.menu_item_id])
+    .map((i) => i.menu_item_id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-sm rounded-t-2xl bg-paper p-5 shadow-2xl sm:rounded-2xl">
+        <h2 className="mb-1 font-display text-lg font-bold text-ink">Reject order #{order.order_no}</h2>
+        <p className="mb-4 text-sm text-ink/60">
+          Tick any items that are unavailable — they'll be marked out of stock automatically.
+        </p>
+        <div className="mb-5 flex flex-col gap-2">
+          {items.map((item) => (
+            <label
+              key={item.menu_item_id}
+              className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
+            >
+              <input
+                type="checkbox"
+                checked={checked[item.menu_item_id] ?? false}
+                onChange={(e) =>
+                  setChecked((prev) => ({ ...prev, [item.menu_item_id]: e.target.checked }))
+                }
+                className="h-5 w-5 accent-stamp"
+              />
+              {item.photo_url && (
+                <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-edge">
+                  <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                </div>
+              )}
+              <span className="flex-1 text-sm font-medium text-ink">
+                {item.name} ×{item.qty}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="ghost" className="flex-1" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            className="flex-1"
+            disabled={busy}
+            loading={busy}
+            onClick={() => onConfirm(unavailableMenuItemIds)}
+          >
+            <div className="flex flex-col items-center leading-tight">
+              <span>Reject order</span>
+              <span className="text-[10px] font-medium opacity-80 mt-0.5">अस्वीकार करें</span>
+            </div>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function IncomingOrderCard({ order }: { order: Order }) {
   const queryClient = useQueryClient();
@@ -26,6 +107,7 @@ function IncomingOrderCard({ order }: { order: Order }) {
   const [checked, setChecked] = useState<Record<number, boolean>>(() =>
     Object.fromEntries(pendingItems.map((i) => [i.id, true])),
   );
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
 
@@ -39,289 +121,225 @@ function IncomingOrderCard({ order }: { order: Order }) {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: () => rejectOrder(order.id),
-    onSuccess: invalidate,
+    mutationFn: async (unavailableMenuItemIds: number[]) => {
+      // Mark each flagged item out of stock before rejecting.
+      await Promise.allSettled(
+        unavailableMenuItemIds.map((menuItemId) => setMenuItemStock(menuItemId, true)),
+      );
+      return rejectOrder(order.id);
+    },
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
+      setShowRejectDialog(false);
+    },
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not reject order.', 'error'),
   });
-
-  function handleReject() {
-    // Rejecting loses the whole order with no undo — worth a confirm tap,
-    // same as Remove/Delete/Close day elsewhere in the shop views.
-    if (window.confirm(`Reject order #${order.order_no} from ${order.student_name || 'this student'}? This can't be undone.`)) {
-      rejectMutation.mutate();
-    }
-  }
 
   const busy = acceptMutation.isPending || rejectMutation.isPending;
 
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
-          <p className="tabular font-display text-xs text-ink/50">
-            #{order.order_no} · {formatTime(order.created_at)}
-          </p>
+    <>
+      <Card className="p-4">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
+            <p className="tabular font-display text-xs text-ink/50">
+              #{order.order_no} · {formatTime(order.created_at)}
+            </p>
+          </div>
+          <span className="tabular font-display text-sm font-semibold text-brand-dark">
+            {formatPrice(order.total_price)}
+          </span>
         </div>
-        <span className="tabular font-display text-sm font-semibold text-brand-dark">
-          {formatPrice(order.total_price)}
-        </span>
-      </div>
 
-      {lockedItems.length > 0 && (
-        <div className="mb-3 flex flex-col gap-1.5 rounded-lg bg-ink/5 p-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">Already accepted</p>
-          {lockedItems.map((item) => (
-            <div key={item.id} className="flex items-center justify-between text-sm text-ink/50">
-              <span>
+        {lockedItems.length > 0 && (
+          <div className="mb-3 flex flex-col gap-1.5 rounded-lg bg-ink/5 p-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">Already accepted</p>
+            {lockedItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between text-sm text-ink/50">
+                <span>
+                  {item.name} ×{item.qty}
+                </span>
+                <span className="tabular">
+                  {item.allocated_qty}/{item.qty}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pendingItems.length > 1 && (
+          <p className="mb-1.5 text-xs text-ink/50">Uncheck anything you're out of, then Accept the rest.</p>
+        )}
+        <div className="mb-4 flex flex-col gap-2">
+          {pendingItems.map((item) => (
+            <label
+              key={item.id}
+              className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
+            >
+              <input
+                type="checkbox"
+                checked={checked[item.id] ?? true}
+                onChange={(e) => setChecked((prev) => ({ ...prev, [item.id]: e.target.checked }))}
+                className="h-5 w-5 accent-brand"
+              />
+              {item.photo_url && (
+                <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-edge">
+                  <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                </div>
+              )}
+              <span className="flex-1 text-sm font-medium text-ink">
                 {item.name} ×{item.qty}
               </span>
-              <span className="tabular">
-                {item.allocated_qty}/{item.qty}
-              </span>
-            </div>
+              <span className="tabular text-sm text-ink/50">{formatPrice(item.price_each * item.qty)}</span>
+            </label>
           ))}
         </div>
-      )}
 
-      {pendingItems.length > 1 && (
-        <p className="mb-1.5 text-xs text-ink/50">Uncheck anything you're out of, then Accept the rest.</p>
-      )}
-      <div className="mb-4 flex flex-col gap-2">
-        {pendingItems.map((item) => (
-          <label
-            key={item.id}
-            className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
+        <div className="flex gap-2">
+          <Button
+            variant="danger"
+            className="flex-1"
+            disabled={busy}
+            onClick={() => setShowRejectDialog(true)}
           >
-            <input
-              type="checkbox"
-              checked={checked[item.id] ?? true}
-              onChange={(e) => setChecked((prev) => ({ ...prev, [item.id]: e.target.checked }))}
-              className="h-5 w-5 accent-brand"
-            />
-            {item.photo_url && (
-              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-edge">
-                <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
-              </div>
+            <div className="flex flex-col items-center leading-tight">
+              <span>Reject</span>
+              <span className="text-[10px] font-medium opacity-80 mt-0.5">अस्वीकार करें</span>
+            </div>
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={busy}
+            loading={acceptMutation.isPending}
+            onClick={() => acceptMutation.mutate()}
+          >
+            <div className="flex flex-col items-center leading-tight">
+              <span>Accept</span>
+              <span className="text-[10px] font-medium opacity-80 mt-0.5">स्वीकारें</span>
+            </div>
+          </Button>
+        </div>
+      </Card>
+
+      {showRejectDialog && (
+        <RejectDialog
+          order={order}
+          onCancel={() => setShowRejectDialog(false)}
+          onConfirm={(ids) => rejectMutation.mutate(ids)}
+          busy={rejectMutation.isPending}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── In-progress subpage ──────────────────────────────────────────────────────
+
+/** True if every non-rejected item has been fully handed over (awaiting_payment logic). */
+function isFullyReady(order: Order): boolean {
+  const active = order.items.filter((i) => i.status !== 'rejected');
+  return active.length > 0 && active.every((i) => i.handed_qty >= i.qty);
+}
+
+/** Compact per-item status dots shown on the collapsed In-progress card. */
+function ItemStatusDots({ order }: { order: Order }) {
+  const items = order.items.filter((i) => i.status !== 'rejected');
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+      {items.map((item) => {
+        const handedOver = item.handed_qty >= item.qty;
+        const readyToGive = item.allocated_qty >= item.qty && !handedOver;
+        return (
+          <span
+            key={item.id}
+            className="flex items-center gap-1.5 text-xs text-ink/60"
+            aria-label={`${item.name} — ${
+              handedOver ? 'handed over' : readyToGive ? 'ready to give' : 'cooking'
+            }`}
+          >
+            {handedOver ? (
+              <span className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-brand text-[7px] font-bold text-white">
+                ✓
+              </span>
+            ) : (
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  readyToGive ? 'bg-turmeric' : 'border border-ink/30'
+                }`}
+              />
             )}
-            <span className="flex-1 text-sm font-medium text-ink">
-              {item.name} ×{item.qty}
+            <span className={handedOver ? 'text-ink/40 line-through' : ''}>
+              {item.name}
+              {item.qty > 1 ? ` ×${item.qty}` : ''}
             </span>
-            <span className="tabular text-sm text-ink/50">{formatPrice(item.price_each * item.qty)}</span>
-          </label>
-        ))}
-      </div>
-
-      <div className="flex gap-2">
-        <Button
-          variant="danger"
-          className="flex-1"
-          disabled={busy}
-          loading={rejectMutation.isPending}
-          onClick={handleReject}
-        >
-          Reject
-        </Button>
-        <Button
-          className="flex-1"
-          disabled={busy}
-          loading={acceptMutation.isPending}
-          onClick={() => acceptMutation.mutate()}
-        >
-          Accept
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-function itemProgress(item: OrderItem): string {
-  return `ready ${item.allocated_qty}/${item.qty} · picked ${item.handed_qty ?? 0}`;
-}
-
-function CookingOrderCard({ order }: { order: Order }) {
-  const queryClient = useQueryClient();
-  const { showToast } = useToast();
-
-  const handleHandover = async (itemId: number, qty: number) => {
-    try {
-      await handoverItem(order.id, itemId, qty);
-      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : 'Could not hand over item.', 'error');
-    }
-  };
-
-  const handleRemove = async (itemId: number, name: string) => {
-    if (!window.confirm(`Remove "${name}" from this order? Any prepared units go back to the pool.`)) return;
-    try {
-      await removeOrderItem(order.id, itemId);
-      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-      queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
-      showToast('Item removed.', 'success');
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : 'Could not remove item.', 'error');
-    }
-  };
-
-  // Lets a shopkeeper mark a unit cooked without leaving the Cooking tab —
-  // it's the same shared per-dish pool the Prep tab uses (FCFS across every
-  // order waiting on that dish), just surfaced here too for a one-person counter.
-  const handleMarkDone = async (menuItemId: number) => {
-    try {
-      await markPrepDone(menuItemId, 1);
-      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-      queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
-    } catch (err) {
-      showToast(err instanceof ApiError ? err.message : 'Could not mark item done.', 'error');
-    }
-  };
-
-  return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
-          <p className="tabular font-display text-xs text-ink/50">#{order.order_no}</p>
-        </div>
-      </div>
-      <div className="flex flex-col gap-3 border-t border-edge pt-3">
-        {order.items
-          .filter((i) => i.status !== 'rejected')
-          .map((item) => {
-            const readyToGive = item.allocated_qty - (item.handed_qty ?? 0);
-            const stillToCook = item.qty - item.allocated_qty;
-            return (
-              <div key={item.id} className="flex flex-col gap-2 rounded-lg border border-edge/70 p-2.5 text-sm">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {item.photo_url && (
-                      <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-edge">
-                        <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
-                      </div>
-                    )}
-                    <div className="flex flex-col">
-                      <span className="font-medium text-ink">
-                        {item.name} ×{item.qty}
-                      </span>
-                      <span className="text-[11px] text-ink/50">{itemProgress(item)}</span>
-                    </div>
-                  </div>
-                  {(item.handed_qty ?? 0) === 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(item.id, item.name)}
-                      className="shrink-0 text-[11px] font-semibold text-stamp/70 hover:text-stamp"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  {stillToCook > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleMarkDone(item.menu_item_id)}
-                      className="rounded-lg border border-brand/30 px-3 py-2 text-xs font-semibold text-brand transition hover:bg-brand-light"
-                    >
-                      +1 done ({stillToCook} left)
-                    </button>
-                  )}
-                  {readyToGive > 1 && (
-                    <Button size="md" onClick={() => handleHandover(item.id, readyToGive)}>
-                      Give all {readyToGive}
-                    </Button>
-                  )}
-                  <Button
-                    size="md"
-                    variant="secondary"
-                    disabled={readyToGive <= 0}
-                    onClick={() => handleHandover(item.id, 1)}
-                  >
-                    Give 1
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-      </div>
-    </Card>
-  );
-}
-
-function AwaitingPaymentCard({ order }: { order: Order }) {
-  const queryClient = useQueryClient();
-  const { showToast } = useToast();
-
-  const markPaidMutation = useMutation({
-    mutationFn: () => markPaid(order.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-      queryClient.invalidateQueries({ queryKey: ['shop', 'history'] });
-      showToast(`Order #${order.order_no} paid.`, 'success');
-    },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not collect payment.', 'error'),
-  });
-
-  return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div className="flex items-start justify-between">
-        <div>
-          <span className="font-display text-xl font-bold text-ink">#{order.order_no}</span>
-          <p className="font-semibold text-ink">{order.student_name || 'Student'}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 text-sm text-ink/70">
-        {order.items.filter(i => i.status !== 'rejected').map((item) => (
-          <div key={item.id} className="flex items-center gap-2">
-            {item.photo_url && (
-              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-edge">
-                <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
-              </div>
-            )}
-            <span>{item.name} ×{item.qty}</span>
-          </div>
-        ))}
-      </div>
-
-      <Button size="lg" fullWidth loading={markPaidMutation.isPending} onClick={() => markPaidMutation.mutate()}>
-        Paid {formatPrice(order.total_price)}
-      </Button>
-    </Card>
-  );
-}
-
-function Column({
-  title,
-  count,
-  emptyTitle,
-  emptyHint,
-  children,
-}: {
-  title: string;
-  count: number;
-  emptyTitle: string;
-  emptyHint: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative flex flex-col gap-3 pt-3">
-      {/* A bulldog clip pinning this stack of chits to the counter. */}
-      <div className="absolute left-1/2 top-0 h-3 w-9 -translate-x-1/2 rounded-[3px] border border-ink/50 bg-steel-dark" />
-      <h2 className="flex items-center justify-center gap-2 font-display text-sm font-bold uppercase tracking-widest text-ink/70">
-        {title}
-        <span className="tabular rounded-md border border-edge bg-paper px-1.5 py-0.5 text-xs font-bold text-ink/60">
-          {count}
-        </span>
-      </h2>
-      {count === 0 ? <EmptyState title={emptyTitle} hint={emptyHint} /> : <div className="flex flex-col gap-3">{children}</div>}
+          </span>
+        );
+      })}
     </div>
   );
 }
 
+function InProgressOrderCard({
+  order,
+  onOpenModal,
+}: {
+  order: Order;
+  onOpenModal: (order: Order) => void;
+}) {
+  const activeItems = order.items.filter((i) => i.status !== 'rejected');
+  const ready = isFullyReady(order) || order.status === 'awaiting_payment';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenModal(order)}
+      className={`w-full rounded-2xl border p-4 text-left transition active:scale-[0.98] ${
+        ready
+          ? 'border-brand/40 bg-brand-light/50 shadow-sm'
+          : 'border-edge bg-paper hover:border-brand/30'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            {ready && (
+              <span className="shrink-0 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                Ready
+              </span>
+            )}
+            <p className="truncate font-bold text-ink">{order.student_name || 'Student'}</p>
+          </div>
+          <p className="tabular mt-0.5 font-display text-xs text-ink/50">
+            #{order.order_no} · {activeItems.length} item{activeItems.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <span className="tabular shrink-0 font-display text-sm font-semibold text-brand-dark">
+          {formatPrice(order.total_price)}
+        </span>
+      </div>
+
+      <ItemStatusDots order={order} />
+
+      <p className="mt-2 text-xs font-medium text-brand-dark/70">Tap to manage →</p>
+    </button>
+  );
+}
+
+// ─── Page root ────────────────────────────────────────────────────────────────
+
+type Subpage = 'new' | 'inprogress';
+
 export function ShopOrdersPage() {
   const ordersQuery = useQuery({ queryKey: ['shop', 'orders'], queryFn: getShopOrders });
+  const [subpage, setSubpage] = useState<Subpage>('new');
+  const [modalOrder, setModalOrder] = useState<Order | null>(null);
+
+  // When the shopkeeper lands on this page, clear the notification dot.
+  useEffect(() => {
+    clearShopNotification();
+  }, []);
 
   if (ordersQuery.isLoading) return <FullPageSpinner />;
 
@@ -334,42 +352,122 @@ export function ShopOrdersPage() {
     );
   }
 
-  const { incoming, in_progress, awaiting_payment } = ordersQuery.data ?? { incoming: [], in_progress: [], awaiting_payment: [] };
+  const { incoming, in_progress, awaiting_payment } = ordersQuery.data ?? {
+    incoming: [],
+    in_progress: [],
+    awaiting_payment: [],
+  };
+
+  // Combine in_progress and awaiting_payment into one "In progress" list.
+  // awaiting_payment orders are fully ready — sort them to the top.
+  const allInProgress: Order[] = [
+    ...awaiting_payment,
+    ...in_progress.filter((o) => isFullyReady(o)),
+    ...in_progress.filter((o) => !isFullyReady(o)),
+  ];
+
+  const inProgressCount = allInProgress.length;
+  const newCount = incoming.length;
 
   return (
-    <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-      <Column
-        title="New"
-        count={incoming.length}
-        emptyTitle="No incoming orders"
-        emptyHint="New orders will appear here for you to accept or reject."
-      >
-        {incoming.map((order) => (
-          <IncomingOrderCard key={order.id} order={order} />
-        ))}
-      </Column>
+    <div className="flex flex-col gap-4">
+      {/* Segmented control */}
+      <div className="flex rounded-xl border border-edge bg-paper p-1">
+        <button
+          type="button"
+          id="tab-new-orders"
+          onClick={() => setSubpage('new')}
+          className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+            subpage === 'new'
+              ? 'bg-brand text-white shadow-sm'
+              : 'text-ink/60 hover:text-ink'
+          }`}
+        >
+          <div className="flex flex-col items-center leading-none gap-0.5">
+            <span>New orders</span>
+            <span className="text-[10px] font-medium opacity-80">नए ऑर्डर</span>
+          </div>
+          {newCount > 0 && (
+            <span
+              className={`flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+                subpage === 'new' ? 'bg-white/25 text-white' : 'bg-turmeric text-white'
+              }`}
+            >
+              {newCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          id="tab-in-progress"
+          onClick={() => setSubpage('inprogress')}
+          className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+            subpage === 'inprogress'
+              ? 'bg-brand text-white shadow-sm'
+              : 'text-ink/60 hover:text-ink'
+          }`}
+        >
+          <div className="flex flex-col items-center leading-none gap-0.5">
+            <span>In progress</span>
+            <span className="text-[10px] font-medium opacity-80">प्रगति में</span>
+          </div>
+          {inProgressCount > 0 && (
+            <span
+              className={`flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+                subpage === 'inprogress' ? 'bg-white/25 text-white' : 'bg-ink/15 text-ink/70'
+              }`}
+            >
+              {inProgressCount}
+            </span>
+          )}
+        </button>
+      </div>
 
-      <Column
-        title="Cooking"
-        count={in_progress.length}
-        emptyTitle="Nothing cooking right now"
-        emptyHint="Accepted orders being prepared will show up here."
-      >
-        {in_progress.map((order) => (
-          <CookingOrderCard key={order.id} order={order} />
-        ))}
-      </Column>
+      {/* Subpage content */}
+      {subpage === 'new' && (
+        <div className="flex flex-col gap-3">
+          {newCount === 0 ? (
+            <EmptyState
+              title="No new orders"
+              hint="New orders will appear here for you to accept or reject."
+            />
+          ) : (
+            incoming.map((order) => <IncomingOrderCard key={order.id} order={order} />)
+          )}
+        </div>
+      )}
 
-      <Column
-        title="Collect payment"
-        count={awaiting_payment.length}
-        emptyTitle="No payments pending"
-        emptyHint="Orders that are fully handed over will show up here for payment."
-      >
-        {awaiting_payment.map((order) => (
-          <AwaitingPaymentCard key={order.id} order={order} />
-        ))}
-      </Column>
+      {subpage === 'inprogress' && (
+        <div className="flex flex-col gap-3">
+          {inProgressCount === 0 ? (
+            <EmptyState
+              title="Nothing in progress"
+              hint="Accepted orders appear here. Tap an order to manage handover and payment."
+            />
+          ) : (
+            allInProgress.map((order) => (
+              <InProgressOrderCard
+                key={order.id}
+                order={order}
+                onOpenModal={setModalOrder}
+              />
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Order modal — rendered outside the subpage so it survives subpage switches */}
+      {modalOrder && (
+        <OrderModal
+          order={
+            // Keep the modal's order data live: prefer the freshest copy from
+            // the query (which re-fetches on every SSE orders_update) so the
+            // modal reflects handover / payment state in real time.
+            allInProgress.find((o) => o.id === modalOrder.id) ?? modalOrder
+          }
+          onClose={() => setModalOrder(null)}
+        />
+      )}
     </div>
   );
 }

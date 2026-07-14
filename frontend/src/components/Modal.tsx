@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   open: boolean;
@@ -39,7 +40,14 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
 
   if (!open) return null;
 
-  return (
+  // Rendered via a portal straight into <body> — this component is used from
+  // inside the sticky header, which has backdrop-blur applied. backdrop-filter
+  // (like filter and transform) creates a new containing block for descendant
+  // `position: fixed` elements, so without a portal this modal's "fixed inset-0"
+  // would be sized/positioned relative to the ~56px header instead of the
+  // viewport (confirmed live: the overlay rendered as a 390×56px box instead of
+  // covering the screen). Escaping to <body> sidesteps that entirely.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink/50 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
@@ -70,6 +78,7 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="border-t border-edge bg-paper px-5 py-4 pb-safe">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
