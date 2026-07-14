@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"sync"
@@ -18,15 +19,16 @@ import (
 )
 
 type PoolEngine struct {
-	uow       repository.UnitOfWork
-	orderRepo repository.OrderRepo
-	menuRepo  repository.MenuRepo
-	poolRepo  repository.PoolRepo
-	eventRepo repository.EventRepo
-	hub       *realtime.Hub
-	cfg       *config.Config
-	alloc     AllocationStrategy
-	mu        sync.Mutex
+	uow            repository.UnitOfWork
+	orderRepo      repository.OrderRepo
+	menuRepo       repository.MenuRepo
+	poolRepo       repository.PoolRepo
+	eventRepo      repository.EventRepo
+	shopStatusRepo repository.ShopStatusRepo
+	hub            *realtime.Hub
+	cfg            *config.Config
+	alloc          AllocationStrategy
+	mu             sync.Mutex
 }
 
 func NewPoolEngine(
@@ -35,20 +37,40 @@ func NewPoolEngine(
 	menuRepo repository.MenuRepo,
 	poolRepo repository.PoolRepo,
 	eventRepo repository.EventRepo,
+	shopStatusRepo repository.ShopStatusRepo,
 	hub *realtime.Hub,
 	cfg *config.Config,
 	alloc AllocationStrategy,
 ) *PoolEngine {
 	return &PoolEngine{
-		uow:       uow,
-		orderRepo: orderRepo,
-		menuRepo:  menuRepo,
-		poolRepo:  poolRepo,
-		eventRepo: eventRepo,
-		hub:       hub,
-		cfg:       cfg,
-		alloc:     alloc,
+		uow:            uow,
+		orderRepo:      orderRepo,
+		menuRepo:       menuRepo,
+		poolRepo:       poolRepo,
+		eventRepo:      eventRepo,
+		shopStatusRepo: shopStatusRepo,
+		hub:            hub,
+		cfg:            cfg,
+		alloc:          alloc,
 	}
+}
+
+// ensureShopOpen rejects order placement while the canteen is paused or closed.
+func (e *PoolEngine) ensureShopOpen(ctx context.Context) error {
+	status, err := e.shopStatusRepo.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if status == nil {
+		return nil // unseeded singleton is treated as open
+	}
+	switch models.ShopState(status.State) {
+	case models.ShopClosed:
+		return ErrConflict("The canteen is closed.")
+	case models.ShopPaused:
+		return ErrConflict("The canteen is on a break.")
+	}
+	return nil
 }
 
 func activeStatuses() []models.OrderStatus {
@@ -137,6 +159,9 @@ func (e *PoolEngine) broadcast(orderID uint) {
 }
 
 func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []OrderItemInput) (OrderResponse, error) {
+	if err := e.ensureShopOpen(ctx); err != nil {
+		return OrderResponse{}, err
+	}
 	if len(inputs) == 0 {
 		return OrderResponse{}, ErrBadRequest("order must contain at least one item")
 	}
@@ -188,7 +213,7 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 				if !itemOrderableNow(*mi, time.Now().In(e.cfg.Location())) {
 					return ErrUnorderable(mi.Name + " is not orderable right now")
 				}
-				items = append(items, models.OrderItem{MenuItemID: mi.ID, Name: mi.Name, PriceEach: mi.Price, Qty: in.Qty, Status: models.ItemPending})
+				items = append(items, models.OrderItem{MenuItemID: mi.ID, Name: mi.Name, PhotoURL: mi.PhotoURL, PriceEach: mi.Price, Qty: in.Qty, Status: models.ItemPending})
 				candidate.TotalPrice += mi.Price * in.Qty
 			}
 			if err := e.orderRepo.Create(txCtx, candidate); err != nil {
@@ -278,6 +303,7 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 
 		if allRejected {
 			order.Status = models.OrderRejected
+			order.TotalPrice = 0 // nothing accepted; matches RemoveItem's full-trim invariant
 			if err := e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{"reason": "all items trimmed"}); err != nil {
 				return err
 			}
@@ -365,6 +391,7 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 			return ErrConflict("order is not in submitted state")
 		}
 		order.Status = models.OrderRejected
+		order.TotalPrice = 0 // every item rejected; nothing owed
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
@@ -410,6 +437,7 @@ func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderRes
 			return ErrConflict("order was already accepted and can no longer be cancelled")
 		}
 		order.Status = models.OrderCancelled
+		order.TotalPrice = 0 // every item rejected; nothing owed
 		if err := e.orderRepo.Save(txCtx, order); err != nil {
 			return err
 		}
@@ -433,8 +461,8 @@ func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderRes
 }
 
 func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int) (OrderResponse, error) {
-	if qty <= 0 {
-		qty = 1
+	if qty < 1 {
+		return OrderResponse{}, ErrBadRequest("qty must be at least 1")
 	}
 
 	e.mu.Lock()
@@ -661,9 +689,15 @@ func (e *PoolEngine) Paid(ctx context.Context, orderID uint) (OrderResponse, err
 	return ToOrderResponse(*order, true), nil
 }
 
+// MarkDone records qty freshly-cooked units of a menu item and immediately
+// FCFS-allocates them to whichever accepted orders are still waiting on it.
+// qty is capped at that item's current remaining_qty (the same number the
+// Prep screen shows as "left to cook") — a shopkeeper cooks to the orders
+// actually on hand, not speculatively ahead of any demand. This is enforced
+// here, not just in the UI, so a direct API call can't bypass it either.
 func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) error {
 	if qty < 1 {
-		qty = 1
+		return ErrBadRequest("qty must be at least 1")
 	}
 	if qty > 100 {
 		return ErrBadRequest("cannot mark more than 100 units done at once")
@@ -680,6 +714,19 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 		if mi == nil {
 			return ErrNotFound("menu item not found")
 		}
+
+		remainingByItem, err := e.remainingByMenuItem(txCtx)
+		if err != nil {
+			return err
+		}
+		remaining := remainingByItem[menuItemID]
+		if qty > remaining {
+			if remaining == 0 {
+				return ErrConflict(mi.Name + " isn't needed right now — no accepted order is waiting on it")
+			}
+			return ErrConflict(fmt.Sprintf("only %d more %s needed right now", remaining, mi.Name))
+		}
+
 		if err := e.poolRepo.Add(txCtx, menuItemID, qty); err != nil {
 			return err
 		}
@@ -811,50 +858,6 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 	return nil
 }
 
-func (e *PoolEngine) CloseDay(ctx context.Context) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	var openOrders []models.Order
-	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
-		var err error
-		openOrders, err = e.orderRepo.FindNonTerminalForUpdate(txCtx)
-		if err != nil {
-			return err
-		}
-		for i := range openOrders {
-			o := &openOrders[i]
-			o.Status = models.OrderExpired
-			if err := e.orderRepo.Save(txCtx, o); err != nil {
-				return err
-			}
-			if err := e.logEvent(txCtx, o.ID, models.EventDayClosed, map[string]any{}); err != nil {
-				return err
-			}
-		}
-
-		if err := e.poolRepo.ZeroAll(txCtx); err != nil {
-			return err
-		}
-		if err := e.menuRepo.ResetStock(txCtx); err != nil {
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	for _, o := range openOrders {
-		e.broadcast(o.ID)
-	}
-	e.hub.NotifyShopOrdersUpdate()
-	e.hub.NotifyShopPrepUpdate()
-	e.hub.NotifyMenuUpdate()
-	return nil
-}
-
 type PrepItemResponse struct {
 	MenuItemID   uint   `json:"menu_item_id"`
 	Name         string `json:"name"`
@@ -862,12 +865,15 @@ type PrepItemResponse struct {
 	PoolQty      int    `json:"pool_qty"`
 }
 
-func (e *PoolEngine) PrepList(ctx context.Context) ([]PrepItemResponse, error) {
+// remainingByMenuItem sums (qty - allocated_qty) across every queued item in
+// every in-progress order, per menu item — the actual unmet demand right
+// now. Shared by PrepList (display) and MarkDone (the cap on how much a
+// shopkeeper can mark cooked in one go — see MarkDone's doc comment).
+func (e *PoolEngine) remainingByMenuItem(ctx context.Context) (map[uint]int, error) {
 	orders, err := e.orderRepo.FindInProgress(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	remainingByItem := make(map[uint]int)
 	for _, o := range orders {
 		for _, it := range o.Items {
@@ -875,6 +881,14 @@ func (e *PoolEngine) PrepList(ctx context.Context) ([]PrepItemResponse, error) {
 				remainingByItem[it.MenuItemID] += (it.Qty - it.AllocatedQty)
 			}
 		}
+	}
+	return remainingByItem, nil
+}
+
+func (e *PoolEngine) PrepList(ctx context.Context) ([]PrepItemResponse, error) {
+	remainingByItem, err := e.remainingByMenuItem(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	poolByItem, err := e.poolRepo.FindAll(ctx)

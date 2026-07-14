@@ -371,6 +371,39 @@ func (r *GormOrderRepo) HasActiveItemsForMenuItem(ctx context.Context, menuItemI
 	return count > 0, err
 }
 
+// CountActive returns how many orders are currently in an active status.
+func (r *GormOrderRepo) CountActive(ctx context.Context) (int, error) {
+	var count int64
+	err := getDB(ctx, r.db).Model(&models.Order{}).
+		Where("status IN ?", activeOrderStatuses()).Count(&count).Error
+	return int(count), err
+}
+
+// SumOrderedQtyByDate sums order_items.qty per menu item for a given order_date,
+// across every order whose status is not 'rejected'.
+func (r *GormOrderRepo) SumOrderedQtyByDate(ctx context.Context, date string) (map[uint]int, error) {
+	type row struct {
+		MenuItemID uint
+		Total      int
+	}
+	var rows []row
+	err := getDB(ctx, r.db).
+		Model(&models.OrderItem{}).
+		Select("order_items.menu_item_id AS menu_item_id, COALESCE(SUM(order_items.qty), 0) AS total").
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("orders.order_date = ? AND orders.status <> ?", date, models.OrderRejected).
+		Group("order_items.menu_item_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[uint]int, len(rows))
+	for _, rw := range rows {
+		m[rw.MenuItemID] = rw.Total
+	}
+	return m, nil
+}
+
 type GormPoolRepo struct {
 	db *gorm.DB
 }
@@ -436,4 +469,28 @@ func NewEventRepo(db *gorm.DB) EventRepo {
 
 func (r *GormEventRepo) Log(ctx context.Context, event *models.OrderEvent) error {
 	return getDB(ctx, r.db).Create(event).Error
+}
+
+type GormShopStatusRepo struct {
+	db *gorm.DB
+}
+
+func NewShopStatusRepo(db *gorm.DB) ShopStatusRepo {
+	return &GormShopStatusRepo{db: db}
+}
+
+func (r *GormShopStatusRepo) Get(ctx context.Context) (*models.ShopStatus, error) {
+	var s models.ShopStatus
+	err := getDB(ctx, r.db).First(&s, 1).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *GormShopStatusRepo) Save(ctx context.Context, status *models.ShopStatus) error {
+	return getDB(ctx, r.db).Save(status).Error
 }

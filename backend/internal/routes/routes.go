@@ -17,6 +17,7 @@ func Setup(
 	authSvc *services.AuthService,
 	menuSvc *services.MenuService,
 	orderSvc *services.OrderService,
+	shopStatusSvc *services.ShopStatusService,
 	poolEngine *services.PoolEngine,
 	hub *realtime.Hub,
 ) *gin.Engine {
@@ -30,6 +31,7 @@ func Setup(
 	menuCtrl := controllers.NewMenuController(menuSvc)
 	orderCtrl := controllers.NewOrderController(orderSvc, poolEngine, hub)
 	shopCtrl := controllers.NewShopController(orderSvc, poolEngine, hub, cfg)
+	shopStatusCtrl := controllers.NewShopStatusController(shopStatusSvc)
 
 	requireAuth := middleware.RequireAuth(cfg, authSvc)
 	requireStudent := middleware.RequireRole(string(models.RoleStudent))
@@ -42,6 +44,10 @@ func Setup(
 
 	// The live menu is public — students can browse before signing in.
 	api.GET("/menu", menuCtrl.ListAvailable)
+
+	// The shop's open/paused/closed status is public so the student menu can
+	// show a closed/on-a-break banner without authenticating.
+	api.GET("/shop-status", shopStatusCtrl.Get)
 
 	auth := api.Group("/auth")
 	{
@@ -82,7 +88,8 @@ func Setup(
 		shop.POST("/orders/:id/items/:itemID/handover", shopCtrl.Handover)
 		shop.DELETE("/orders/:id/items/:itemID", shopCtrl.RemoveItem)
 		shop.POST("/orders/:id/paid", shopCtrl.Paid)
-		shop.POST("/day/close", shopCtrl.CloseDay)
+
+		shop.POST("/status", shopStatusCtrl.Set)
 
 		shop.GET("/stream", shopCtrl.Stream)
 	}

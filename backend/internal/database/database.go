@@ -50,6 +50,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&models.ItemPool{},
 		&models.OrderEvent{},
 		&models.ShopkeeperEmail{},
+		&models.ShopStatus{},
 	); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
@@ -74,6 +75,27 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 			return fmt.Errorf("seed sample menu: %w", err)
 		}
 	}
+	if err := seedShopStatus(db); err != nil {
+		return fmt.Errorf("seed shop status: %w", err)
+	}
+	return nil
+}
+
+// seedShopStatus ensures the singleton shop-status row (id=1) exists, defaulting
+// to open. It never overwrites an existing row.
+func seedShopStatus(db *gorm.DB) error {
+	var count int64
+	if err := db.Model(&models.ShopStatus{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	status := models.ShopStatus{ID: 1, State: string(models.ShopOpen)}
+	if err := db.Create(&status).Error; err != nil {
+		return err
+	}
+	log.Printf("khaao: seeded shop status (open)")
 	return nil
 }
 

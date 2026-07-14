@@ -41,6 +41,7 @@ func main() {
 	poolRepo := repository.NewPoolRepo(db)
 	eventRepo := repository.NewEventRepo(db)
 	emailRepo := repository.NewShopkeeperEmailRepo(db)
+	shopStatusRepo := repository.NewShopStatusRepo(db)
 
 	var tokenVerifier authn.TokenVerifier
 	if cfg.AuthFake {
@@ -54,15 +55,16 @@ func main() {
 	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
 	menuSvc := services.NewMenuService(menuRepo, orderRepo, hub, cfg)
 	orderSvc := services.NewOrderService(orderRepo)
+	shopStatusSvc := services.NewShopStatusService(shopStatusRepo, orderRepo, hub)
 	alloc := &services.FCFSAllocation{}
-	poolEngine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, hub, cfg, alloc)
+	poolEngine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, shopStatusRepo, hub, cfg, alloc)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go runExpiryTicker(ctx, poolEngine)
 
-	router := routes.Setup(cfg, authSvc, menuSvc, orderSvc, poolEngine, hub)
+	router := routes.Setup(cfg, authSvc, menuSvc, orderSvc, shopStatusSvc, poolEngine, hub)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           router,

@@ -11,24 +11,29 @@ import (
 	"khaao/internal/models"
 	"khaao/internal/realtime"
 	"khaao/internal/repository"
+
+	"gorm.io/datatypes"
 )
 
 var hhmmRe = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
 
 type MenuItemResponse struct {
-	ID          uint    `json:"id"`
-	Name        string  `json:"name"`
-	Price       int     `json:"price"`
-	PhotoURL    string  `json:"photo_url"`
-	IsAvailable bool    `json:"is_available"`
-	AvailFrom   *string `json:"avail_from"`
-	AvailTo     *string `json:"avail_to"`
-	OutOfStock  bool    `json:"out_of_stock"`
-	Status      string  `json:"status"`
-	Orderable   bool    `json:"orderable"`
+	ID              uint     `json:"id"`
+	Name            string   `json:"name"`
+	Price           int      `json:"price"`
+	PhotoURL        string   `json:"photo_url"`
+	Diet            string   `json:"diet"`
+	Tags            []string `json:"tags"`
+	IsAvailable     bool     `json:"is_available"`
+	AvailFrom       *string  `json:"avail_from"`
+	AvailTo         *string  `json:"avail_to"`
+	OutOfStock      bool     `json:"out_of_stock"`
+	Status          string   `json:"status"`
+	Orderable       bool     `json:"orderable"`
+	OrderCountToday int      `json:"order_count_today"`
 }
 
-func ToMenuItemResponse(item models.MenuItem, now time.Time) MenuItemResponse {
+func ToMenuItemResponse(item models.MenuItem, now time.Time, orderCountToday int) MenuItemResponse {
 	status := "available"
 	switch {
 	case item.OutOfStock:
@@ -39,17 +44,29 @@ func ToMenuItemResponse(item models.MenuItem, now time.Time) MenuItemResponse {
 		status = "time_limited"
 	}
 	orderable := item.IsAvailable && !item.OutOfStock && withinWindow(item.AvailFrom, item.AvailTo, now)
+	// Never emit null for tags — an item with no tags is an empty array.
+	tags := []string(item.Tags)
+	if tags == nil {
+		tags = []string{}
+	}
+	diet := item.Diet
+	if diet == "" {
+		diet = "veg"
+	}
 	return MenuItemResponse{
-		ID:          item.ID,
-		Name:        item.Name,
-		Price:       item.Price,
-		PhotoURL:    item.PhotoURL,
-		IsAvailable: item.IsAvailable,
-		AvailFrom:   item.AvailFrom,
-		AvailTo:     item.AvailTo,
-		OutOfStock:  item.OutOfStock,
-		Status:      status,
-		Orderable:   orderable,
+		ID:              item.ID,
+		Name:            item.Name,
+		Price:           item.Price,
+		PhotoURL:        item.PhotoURL,
+		Diet:            diet,
+		Tags:            tags,
+		IsAvailable:     item.IsAvailable,
+		AvailFrom:       item.AvailFrom,
+		AvailTo:         item.AvailTo,
+		OutOfStock:      item.OutOfStock,
+		Status:          status,
+		Orderable:       orderable,
+		OrderCountToday: orderCountToday,
 	}
 }
 
@@ -86,12 +103,14 @@ func hhmmToMinutes(s string) int {
 }
 
 type MenuItemInput struct {
-	Name        string  `json:"name"`
-	Price       int     `json:"price"`
-	PhotoURL    string  `json:"photo_url"`
-	AvailFrom   *string `json:"avail_from"`
-	AvailTo     *string `json:"avail_to"`
-	IsAvailable *bool   `json:"is_available"`
+	Name        string   `json:"name"`
+	Price       int      `json:"price"`
+	PhotoURL    string   `json:"photo_url"`
+	Diet        string   `json:"diet"`
+	Tags        []string `json:"tags"`
+	AvailFrom   *string  `json:"avail_from"`
+	AvailTo     *string  `json:"avail_to"`
+	IsAvailable *bool    `json:"is_available"`
 }
 
 type MenuService struct {
@@ -117,7 +136,11 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items, s.now()), nil
+	counts, err := s.orderCountsToday(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toMenuResponses(items, s.now(), counts), nil
 }
 
 func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
@@ -125,13 +148,24 @@ func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items, s.now()), nil
+	counts, err := s.orderCountsToday(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toMenuResponses(items, s.now(), counts), nil
 }
 
-func toMenuResponses(items []models.MenuItem, now time.Time) []MenuItemResponse {
+// orderCountsToday returns per-menu-item ordered qty for the current business
+// day, used to populate each item's order_count_today (trending).
+func (s *MenuService) orderCountsToday(ctx context.Context) (map[uint]int, error) {
+	today := models.DayOf(s.now())
+	return s.orderRepo.SumOrderedQtyByDate(ctx, today)
+}
+
+func toMenuResponses(items []models.MenuItem, now time.Time, counts map[uint]int) []MenuItemResponse {
 	out := make([]MenuItemResponse, 0, len(items))
 	for _, it := range items {
-		out = append(out, ToMenuItemResponse(it, now))
+		out = append(out, ToMenuItemResponse(it, now, counts[it.ID]))
 	}
 	return out
 }
@@ -147,6 +181,14 @@ func (s *MenuService) validateAndNormalize(input *MenuItemInput) error {
 	if input.Price <= 0 {
 		return ErrBadRequest("price must be greater than 0")
 	}
+	input.Diet = strings.TrimSpace(input.Diet)
+	if input.Diet == "" {
+		return ErrBadRequest("diet is required")
+	}
+	if input.Diet != "veg" && input.Diet != "non_veg" {
+		return ErrBadRequest("diet must be 'veg' or 'non_veg'")
+	}
+	input.Tags = normalizeTags(input.Tags)
 	if input.PhotoURL != "" && !strings.HasPrefix(input.PhotoURL, "https://") && !strings.HasPrefix(input.PhotoURL, "http://") {
 		return ErrBadRequest("photo_url must be an http:// or https:// URL")
 	}
@@ -176,6 +218,30 @@ func normalizeTimeStr(s *string) *string {
 	return &trimmed
 }
 
+// normalizeTags trims each tag, drops blanks, and de-dupes case-insensitively
+// (first occurrence wins for casing). The result is always non-nil so it is
+// stored — and later serialized — as [] rather than null.
+func normalizeTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if len(t) > 40 {
+			t = t[:40]
+		}
+		key := strings.ToLower(t)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, t)
+	}
+	return out
+}
+
 func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItemResponse, error) {
 	if err := s.validateAndNormalize(&input); err != nil {
 		return MenuItemResponse{}, err
@@ -188,6 +254,8 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 		Name:        input.Name,
 		Price:       input.Price,
 		PhotoURL:    input.PhotoURL,
+		Diet:        input.Diet,
+		Tags:        datatypes.NewJSONSlice(input.Tags),
 		AvailFrom:   input.AvailFrom,
 		AvailTo:     input.AvailTo,
 		IsAvailable: isAvailable,
@@ -196,7 +264,8 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 		return MenuItemResponse{}, err
 	}
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(item, s.now()), nil
+	// A brand-new item has no orders today.
+	return ToMenuItemResponse(item, s.now(), 0), nil
 }
 
 func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) (MenuItemResponse, error) {
@@ -213,6 +282,8 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 	item.Name = input.Name
 	item.Price = input.Price
 	item.PhotoURL = input.PhotoURL
+	item.Diet = input.Diet
+	item.Tags = datatypes.NewJSONSlice(input.Tags)
 	item.AvailFrom = input.AvailFrom
 	item.AvailTo = input.AvailTo
 	if input.IsAvailable != nil {
@@ -222,7 +293,11 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 		return MenuItemResponse{}, err
 	}
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(*item, s.now()), nil
+	counts, err := s.orderCountsToday(ctx)
+	if err != nil {
+		return MenuItemResponse{}, err
+	}
+	return ToMenuItemResponse(*item, s.now(), counts[item.ID]), nil
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
@@ -255,7 +330,11 @@ func (s *MenuService) SetStock(ctx context.Context, id uint, outOfStock bool) (M
 	}
 	item.OutOfStock = outOfStock
 	s.hub.NotifyMenuUpdate()
-	return ToMenuItemResponse(*item, s.now()), nil
+	counts, err := s.orderCountsToday(ctx)
+	if err != nil {
+		return MenuItemResponse{}, err
+	}
+	return ToMenuItemResponse(*item, s.now(), counts[item.ID]), nil
 }
 
 func (s *MenuService) GetByID(ctx context.Context, id uint) (models.MenuItem, error) {

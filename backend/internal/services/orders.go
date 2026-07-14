@@ -18,6 +18,7 @@ type OrderItemResponse struct {
 	ID           uint   `json:"id"`
 	MenuItemID   uint   `json:"menu_item_id"`
 	Name         string `json:"name"`
+	PhotoURL     string `json:"photo_url"`
 	Qty          int    `json:"qty"`
 	AllocatedQty int    `json:"allocated_qty"`
 	HandedQty    int    `json:"handed_qty"`
@@ -40,6 +41,17 @@ type OrderResponse struct {
 	Items        []OrderItemResponse `json:"items"`
 }
 
+// normalizeDate trims a Postgres `date` column back down to "YYYY-MM-DD".
+// database/sql scans a DATE column into a Go string via time.Time.Format,
+// which yields an RFC3339 timestamp ("2026-07-13T00:00:00Z") rather than a
+// bare date; the API contract (SPEC.md) promises "YYYY-MM-DD".
+func normalizeDate(s string) string {
+	if len(s) >= 10 {
+		return s[:10]
+	}
+	return s
+}
+
 func ToOrderResponse(order models.Order, includeStudent bool) OrderResponse {
 	sortedItems := append([]models.OrderItem(nil), order.Items...)
 	sort.Slice(sortedItems, func(i, j int) bool { return sortedItems[i].ID < sortedItems[j].ID })
@@ -50,6 +62,7 @@ func ToOrderResponse(order models.Order, includeStudent bool) OrderResponse {
 			ID:           it.ID,
 			MenuItemID:   it.MenuItemID,
 			Name:         it.Name,
+			PhotoURL:     it.PhotoURL,
 			Qty:          it.Qty,
 			AllocatedQty: it.AllocatedQty,
 			HandedQty:    it.HandedQty,
@@ -61,7 +74,7 @@ func ToOrderResponse(order models.Order, includeStudent bool) OrderResponse {
 	resp := OrderResponse{
 		ID:         order.ID,
 		OrderNo:    order.OrderNo,
-		OrderDate:  order.OrderDate,
+		OrderDate:  normalizeDate(order.OrderDate),
 		Status:     string(order.Status),
 		TotalPrice: order.TotalPrice,
 		Paid:       order.Paid,
@@ -148,19 +161,82 @@ func (s *OrderService) ShopOrders(ctx context.Context) (incoming, active, awaiti
 	return incoming, active, awaitingPayment, nil
 }
 
-func (s *OrderService) ShopHistory(ctx context.Context, date string) ([]OrderResponse, int, error) {
+// HistoryItemCount is one row of the "items sold" breakdown.
+type HistoryItemCount struct {
+	Name string `json:"name"`
+	Qty  int    `json:"qty"`
+}
+
+// HistoryCustomer is one row of the "who ordered" breakdown.
+type HistoryCustomer struct {
+	Name       string `json:"name"`
+	OrderCount int    `json:"order_count"`
+}
+
+// HistoryInsights aggregates a day's completed orders for the shop's History
+// panel. Computed over completed (paid) orders only, so it stays consistent
+// with total_paid, which also counts only paid orders.
+type HistoryInsights struct {
+	OrderCount int                `json:"order_count"`
+	ItemCounts []HistoryItemCount `json:"item_counts"`
+	Customers  []HistoryCustomer  `json:"customers"`
+}
+
+func (s *OrderService) ShopHistory(ctx context.Context, date string) ([]OrderResponse, int, HistoryInsights, error) {
 	orders, err := s.orderRepo.FindTerminalByDate(ctx, date)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, HistoryInsights{}, err
 	}
-	
+
 	out := make([]OrderResponse, 0, len(orders))
 	totalPaid := 0
+	itemQty := make(map[string]int)
+	custOrders := make(map[string]int)
+	insights := HistoryInsights{
+		ItemCounts: []HistoryItemCount{},
+		Customers:  []HistoryCustomer{},
+	}
 	for _, o := range orders {
 		out = append(out, ToOrderResponse(o, true))
 		if o.Paid {
 			totalPaid += o.TotalPrice
 		}
+		if o.Status != models.OrderCompleted {
+			continue
+		}
+		insights.OrderCount++
+		name := o.User.Name
+		if name == "" {
+			name = o.User.Email
+		}
+		custOrders[name]++
+		for _, it := range o.Items {
+			if it.Status == models.ItemRejected {
+				continue
+			}
+			itemQty[it.Name] += it.Qty
+		}
 	}
-	return out, totalPaid, nil
+
+	for name, qty := range itemQty {
+		insights.ItemCounts = append(insights.ItemCounts, HistoryItemCount{Name: name, Qty: qty})
+	}
+	sort.Slice(insights.ItemCounts, func(i, j int) bool {
+		if insights.ItemCounts[i].Qty != insights.ItemCounts[j].Qty {
+			return insights.ItemCounts[i].Qty > insights.ItemCounts[j].Qty
+		}
+		return insights.ItemCounts[i].Name < insights.ItemCounts[j].Name
+	})
+
+	for name, n := range custOrders {
+		insights.Customers = append(insights.Customers, HistoryCustomer{Name: name, OrderCount: n})
+	}
+	sort.Slice(insights.Customers, func(i, j int) bool {
+		if insights.Customers[i].OrderCount != insights.Customers[j].OrderCount {
+			return insights.Customers[i].OrderCount > insights.Customers[j].OrderCount
+		}
+		return insights.Customers[i].Name < insights.Customers[j].Name
+	})
+
+	return out, totalPaid, insights, nil
 }

@@ -176,20 +176,12 @@ func (sc *ShopController) History(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "date must be YYYY-MM-DD"})
 		return
 	}
-	orders, totalPaid, err := sc.orderService.ShopHistory(c.Request.Context(), date)
+	orders, totalPaid, insights, err := sc.orderService.ShopHistory(c.Request.Context(), date)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"orders": orders, "total_paid": totalPaid})
-}
-
-func (sc *ShopController) CloseDay(c *gin.Context) {
-	if err := sc.poolEngine.CloseDay(c.Request.Context()); err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"orders": orders, "total_paid": totalPaid, "insights": insights})
 }
 
 func (sc *ShopController) Stream(c *gin.Context) {

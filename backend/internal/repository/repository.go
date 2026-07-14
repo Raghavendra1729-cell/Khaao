@@ -54,6 +54,20 @@ type OrderRepo interface {
 	// contains an active (non-rejected) item for the given menu item ID. Used to
 	// block menu-item deletion while it is referenced by an in-flight order.
 	HasActiveItemsForMenuItem(ctx context.Context, menuItemID uint) (bool, error)
+	// CountActive returns the number of orders in an active status
+	// (submitted / preparing / partially_ready / ready / awaiting_payment).
+	// Used by the shop-status guard.
+	CountActive(ctx context.Context) (int, error)
+	// SumOrderedQtyByDate returns, per menu item id, the total ordered qty for
+	// the given business-day date across all non-rejected orders. Powers the
+	// public menu's order_count_today (trending) figure.
+	SumOrderedQtyByDate(ctx context.Context, date string) (map[uint]int, error)
+}
+
+type ShopStatusRepo interface {
+	// Get returns the singleton shop-status row, or (nil, nil) if unseeded.
+	Get(ctx context.Context) (*models.ShopStatus, error)
+	Save(ctx context.Context, status *models.ShopStatus) error
 }
 
 type PoolRepo interface {

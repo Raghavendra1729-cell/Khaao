@@ -18,6 +18,11 @@ func (m *mockUoW) WithTx(ctx context.Context, fn func(context.Context) error) er
 
 type mockOrderRepo struct {
 	orders map[uint]*models.Order
+	// terminalByDate lets a test stub FindTerminalByDate directly.
+	terminalByDate map[string][]models.Order
+	// sumOverride lets a test stub SumOrderedQtyByDate directly, bypassing the
+	// in-memory computation over orders.
+	sumOverride map[uint]int
 }
 
 func (m *mockOrderRepo) Create(ctx context.Context, o *models.Order) error {
@@ -59,6 +64,9 @@ func (m *mockOrderRepo) FindAwaitingPayment(ctx context.Context) ([]models.Order
 	return nil, nil
 }
 func (m *mockOrderRepo) FindTerminalByDate(ctx context.Context, date string) ([]models.Order, error) {
+	if m.terminalByDate != nil {
+		return m.terminalByDate[date], nil
+	}
 	return nil, nil
 }
 func (m *mockOrderRepo) GetMaxOrderNo(ctx context.Context, date string) (int, error) { return 0, nil }
@@ -87,11 +95,46 @@ func (m *mockOrderRepo) FindNonTerminalForUpdate(ctx context.Context) ([]models.
 func (m *mockOrderRepo) HasActiveItemsForMenuItem(_ context.Context, _ uint) (bool, error) {
 	return false, nil
 }
+func (m *mockOrderRepo) CountActive(_ context.Context) (int, error) {
+	n := 0
+	for _, o := range m.orders {
+		if models.IsActiveOrderStatus(o.Status) {
+			n++
+		}
+	}
+	return n, nil
+}
+func (m *mockOrderRepo) SumOrderedQtyByDate(_ context.Context, date string) (map[uint]int, error) {
+	if m.sumOverride != nil {
+		return m.sumOverride, nil
+	}
+	out := make(map[uint]int)
+	for _, o := range m.orders {
+		if o.Status == models.OrderRejected || o.OrderDate != date {
+			continue
+		}
+		for _, it := range o.Items {
+			out[it.MenuItemID] += it.Qty
+		}
+	}
+	return out, nil
+}
 
-type mockMenuRepo struct{}
+type mockMenuRepo struct {
+	items []models.MenuItem
+}
 
 func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuItem, error) {
-	return nil, nil
+	if avail {
+		out := make([]models.MenuItem, 0, len(m.items))
+		for _, it := range m.items {
+			if it.IsAvailable {
+				out = append(out, it)
+			}
+		}
+		return out, nil
+	}
+	return m.items, nil
 }
 func (m *mockMenuRepo) FindByID(ctx context.Context, id uint) (*models.MenuItem, error) {
 	return &models.MenuItem{ID: id, Name: "Test Item", Price: 1000, IsAvailable: true}, nil
@@ -122,17 +165,30 @@ type mockEventRepo struct{}
 
 func (m *mockEventRepo) Log(ctx context.Context, ev *models.OrderEvent) error { return nil }
 
+type mockShopStatusRepo struct {
+	status *models.ShopStatus
+}
+
+func (m *mockShopStatusRepo) Get(_ context.Context) (*models.ShopStatus, error) {
+	return m.status, nil
+}
+func (m *mockShopStatusRepo) Save(_ context.Context, s *models.ShopStatus) error {
+	m.status = s
+	return nil
+}
+
 func setupEngine() (*services.PoolEngine, *mockOrderRepo, *mockPoolRepo) {
 	uow := &mockUoW{}
 	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
 	menuRepo := &mockMenuRepo{}
 	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
 	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
 	hub := realtime.NewHub()
 	cfg := &config.Config{HoldMinutes: 10}
 	alloc := &services.FCFSAllocation{}
 
-	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, hub, cfg, alloc)
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
 	return engine, orderRepo, poolRepo
 }
 
@@ -223,6 +279,38 @@ func TestAllocation(t *testing.T) {
 	}
 }
 
+func TestMarkDoneCappedAtRemainingDemand(t *testing.T) {
+	engine, repo, pool := setupEngine()
+
+	order := &models.Order{
+		ID:     1,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, Status: models.ItemQueued},
+		},
+	}
+	repo.Create(context.Background(), order)
+
+	// Only 2 are actually needed — asking to mark 3 done must be refused,
+	// not silently accepted into an unclaimed pool.
+	if err := engine.MarkDone(context.Background(), 10, 3); err == nil {
+		t.Fatal("expected an error when marking more done than is currently needed")
+	}
+	if pool.pool[10] != 0 {
+		t.Errorf("pool must be untouched after a rejected MarkDone, got %d", pool.pool[10])
+	}
+
+	// Exactly the remaining amount is fine.
+	if err := engine.MarkDone(context.Background(), 10, 2); err != nil {
+		t.Fatalf("expected qty == remaining to succeed, got: %v", err)
+	}
+
+	// Now nothing is left to cook — even qty=1 must be refused.
+	if err := engine.MarkDone(context.Background(), 10, 1); err == nil {
+		t.Fatal("expected an error when marking done with zero remaining demand")
+	}
+}
+
 func TestCreateOrderRejectsDuplicateMenuItems(t *testing.T) {
 	engine, _, _ := setupEngine()
 	_, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{
@@ -231,6 +319,36 @@ func TestCreateOrderRejectsDuplicateMenuItems(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected duplicate menu item to be rejected")
+	}
+}
+
+func TestAcceptFullTrimZeroesTotalPrice(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	order := &models.Order{
+		ID:         1,
+		Status:     models.OrderSubmitted,
+		TotalPrice: 6000,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, PriceEach: 1500, Status: models.ItemPending},
+			{ID: 2, MenuItemID: 11, Qty: 3, PriceEach: 1000, Status: models.ItemPending},
+		},
+	}
+	repo.Create(context.Background(), order)
+
+	// Rejecting every line at accept time must behave like RemoveItem's
+	// full-trim path: order rejected and TotalPrice reset to 0, not left at
+	// the pre-trim sum.
+	_, err := engine.Accept(context.Background(), 1, []uint{1, 2})
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	o, _ := repo.FindByID(context.Background(), 1)
+	if o.Status != models.OrderRejected {
+		t.Errorf("expected rejected, got %v", o.Status)
+	}
+	if o.TotalPrice != 0 {
+		t.Errorf("expected TotalPrice 0 after full trim, got %d", o.TotalPrice)
 	}
 }
 
@@ -320,6 +438,58 @@ func TestHandoverGuards(t *testing.T) {
 	_, err = engine.Handover(context.Background(), 1, 1, 1)
 	if err != nil {
 		t.Errorf("unexpected err: %v", err)
+	}
+}
+
+func TestRejectZeroesTotalPrice(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	order := &models.Order{
+		ID:         1,
+		Status:     models.OrderSubmitted,
+		TotalPrice: 6000,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, PriceEach: 1500, Status: models.ItemPending},
+			{ID: 2, MenuItemID: 11, Qty: 3, PriceEach: 1000, Status: models.ItemPending},
+		},
+	}
+	repo.Create(context.Background(), order)
+
+	if _, err := engine.Reject(context.Background(), 1); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+
+	o, _ := repo.FindByID(context.Background(), 1)
+	if o.Status != models.OrderRejected {
+		t.Errorf("expected rejected, got %v", o.Status)
+	}
+	if o.TotalPrice != 0 {
+		t.Errorf("expected TotalPrice 0 after reject, got %d", o.TotalPrice)
+	}
+}
+
+func TestCancelZeroesTotalPrice(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	order := &models.Order{
+		ID:         1,
+		UserID:     42,
+		Status:     models.OrderSubmitted,
+		TotalPrice: 4000,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, PriceEach: 2000, Status: models.ItemPending},
+		},
+	}
+	repo.Create(context.Background(), order)
+
+	if _, err := engine.Cancel(context.Background(), 1, 42); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	o, _ := repo.FindByID(context.Background(), 1)
+	if o.Status != models.OrderCancelled {
+		t.Errorf("expected cancelled, got %v", o.Status)
+	}
+	if o.TotalPrice != 0 {
+		t.Errorf("expected TotalPrice 0 after cancel, got %d", o.TotalPrice)
 	}
 }
 

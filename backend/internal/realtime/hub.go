@@ -127,3 +127,9 @@ func (h *Hub) NotifyShopOrdersUpdate() {
 func (h *Hub) NotifyShopPrepUpdate() {
 	h.broadcastRole("shopkeeper", marshal(event{Type: "prep_update"}))
 }
+
+// NotifyShopStatusUpdate tells every connected client (student and shop) to
+// refetch the shop's open/paused/closed status.
+func (h *Hub) NotifyShopStatusUpdate() {
+	h.broadcastAll(marshal(event{Type: "shop_status"}))
+}
