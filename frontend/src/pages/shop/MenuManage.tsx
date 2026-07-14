@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  closeDay,
   createMenuItem,
   deleteMenuItem,
   getShopMenu,
@@ -95,9 +94,11 @@ function MenuItemForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-sage bg-brand-light/40 p-4">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-edge bg-brand-light/40 p-4">
       {validationError && (
-        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{validationError}</div>
+        <div className="rounded-lg border border-stamp/40 bg-stamp-light px-3 py-2 text-sm font-medium text-stamp-dark">
+          {validationError}
+        </div>
       )}
 
       <label className="block">
@@ -107,7 +108,7 @@ function MenuItemForm({
           required
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className="min-h-[44px] w-full rounded-xl border border-sage px-3 text-base focus:border-brand"
+          className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
           placeholder="e.g. Masala Dosa"
         />
       </label>
@@ -121,7 +122,7 @@ function MenuItemForm({
           step="0.01"
           value={form.price}
           onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-          className="min-h-[44px] w-full rounded-xl border border-sage px-3 text-base focus:border-brand"
+          className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
           placeholder="40.00"
         />
       </label>
@@ -132,7 +133,7 @@ function MenuItemForm({
           type="url"
           value={form.photo_url}
           onChange={(e) => setForm((f) => ({ ...f, photo_url: e.target.value }))}
-          className="min-h-[44px] w-full rounded-xl border border-sage px-3 text-base focus:border-brand"
+          className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
           placeholder="https://..."
         />
       </label>
@@ -144,7 +145,7 @@ function MenuItemForm({
             type="time"
             value={form.avail_from}
             onChange={(e) => setForm((f) => ({ ...f, avail_from: e.target.value }))}
-            className="min-h-[44px] w-full rounded-xl border border-sage px-3 text-base focus:border-brand"
+            className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
           />
         </label>
         <label className="block">
@@ -153,7 +154,7 @@ function MenuItemForm({
             type="time"
             value={form.avail_to}
             onChange={(e) => setForm((f) => ({ ...f, avail_to: e.target.value }))}
-            className="min-h-[44px] w-full rounded-xl border border-sage px-3 text-base focus:border-brand"
+            className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
           />
         </label>
       </div>
@@ -282,27 +283,6 @@ export function ShopMenuManagePage() {
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not add item.', 'error'),
   });
 
-  const closeDayMutation = useMutation({
-    mutationFn: closeDay,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
-      queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
-      queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
-      showToast('Day closed — availability reset.', 'success');
-    },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not close the day.', 'error'),
-  });
-
-  function handleCloseDay() {
-    if (
-      window.confirm(
-        'Close the day? Open orders will expire, the done pool clears, and all items go back in stock.',
-      )
-    ) {
-      closeDayMutation.mutate();
-    }
-  }
-
   if (menuQuery.isLoading) return <FullPageSpinner />;
 
   if (menuQuery.isError) {
@@ -320,17 +300,12 @@ export function ShopMenuManagePage() {
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-ink">Menu</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-ink">Menu</h1>
           <p className="text-sm text-ink/60">Add, edit, and manage stock.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setShowAddForm((v) => !v)}>
-            {showAddForm ? 'Close form' : 'Add item'}
-          </Button>
-          <Button variant="danger" loading={closeDayMutation.isPending} onClick={handleCloseDay}>
-            Close day
-          </Button>
-        </div>
+        <Button variant="secondary" onClick={() => setShowAddForm((v) => !v)}>
+          {showAddForm ? 'Close form' : 'Add item'}
+        </Button>
       </div>
 
       {showAddForm && (
