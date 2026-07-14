@@ -1,36 +1,70 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMenu } from '../../api/menu';
 import { getActiveOrder, createOrder, type OrderItemInput } from '../../api/orders';
+import { getShopStatus } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { MenuItem } from '../../api/types';
 import { formatPrice } from '../../lib/format';
-import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
-import { MenuStatusBadge } from '../../components/StatusBadge';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 
-function availabilityWindowText(item: MenuItem): string | null {
-  if (!item.avail_from && !item.avail_to) return null;
-  return `${item.avail_from ?? '00:00'} – ${item.avail_to ?? '23:59'}`;
+import { TrendingRail } from '../../components/TrendingRail';
+import { DietFilter, type DietFilterValue } from '../../components/DietFilter';
+import { MenuItemCard } from '../../components/MenuItemCard';
+
+function formatReopenTime(isoString: string | null): string {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'Asia/Kolkata',
+    });
+  } catch (e) {
+    return '';
+  }
 }
 
 export function Menu() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const [cart, setCart] = useState<Record<number, number>>({});
+  const [cart, setCart] = useState<Record<number, number>>(() => {
+    try {
+      const saved = sessionStorage.getItem('khaao_cart');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
   const [showCheckout, setShowCheckout] = useState(false);
+  const [dietFilter, setDietFilter] = useState<DietFilterValue>('all');
+  const [activeCategory, setActiveCategory] = useState<string>('');
+
+  useEffect(() => {
+    const hasItems = Object.values(cart).some((qty) => qty > 0);
+    if (!hasItems) {
+      sessionStorage.removeItem('khaao_cart');
+    } else {
+      sessionStorage.setItem('khaao_cart', JSON.stringify(cart));
+    }
+  }, [cart]);
 
   const menuQuery = useQuery({ queryKey: ['menu'], queryFn: getMenu });
   const activeOrderQuery = useQuery({ queryKey: ['orders', 'active'], queryFn: getActiveOrder });
+  const shopStatusQuery = useQuery({ queryKey: ['shop-status'], queryFn: getShopStatus });
 
   const activeOrder = activeOrderQuery.data ?? null;
   const hasActiveOrder = activeOrder !== null;
+  const shopStatus = shopStatusQuery.data ?? { state: 'open', reopen_at: null };
+  const isShopOpen = shopStatus.state === 'open';
 
   const cartEntries = useMemo(
     () =>
@@ -60,6 +94,7 @@ export function Menu() {
     },
     onSuccess: () => {
       setCart({});
+      sessionStorage.removeItem('khaao_cart');
       setShowCheckout(false);
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
       queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
@@ -72,7 +107,109 @@ export function Menu() {
     },
   });
 
-  if (menuQuery.isLoading) return <FullPageSpinner />;
+  const items = menuQuery.data ?? [];
+
+  const hasRealCounts = useMemo(() => {
+    return items.some((item) => item.order_count_today > 0);
+  }, [items]);
+
+  const trendingItems = useMemo(() => {
+    const sorted = [...items];
+    if (hasRealCounts) {
+      sorted.sort((a, b) => {
+        if (b.order_count_today !== a.order_count_today) {
+          return b.order_count_today - a.order_count_today;
+        }
+        return b.id - a.id;
+      });
+    } else {
+      sorted.sort((a, b) => b.id - a.id);
+    }
+    return sorted.slice(0, 5);
+  }, [items, hasRealCounts]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (dietFilter === 'all') return true;
+      return item.diet === dietFilter;
+    });
+  }, [items, dietFilter]);
+
+  const categories = useMemo(() => {
+    const tagsSet = new Set<string>();
+    filteredItems.forEach((item) => {
+      if (item.tags) {
+        item.tags.forEach((tag) => {
+          const trimmed = tag.trim();
+          if (trimmed) {
+            tagsSet.add(trimmed);
+          }
+        });
+      }
+    });
+
+    const sortedTags = Array.from(tagsSet).sort((a, b) => a.localeCompare(b));
+    const hasUntagged = filteredItems.some((item) => !item.tags || item.tags.length === 0);
+
+    return {
+      tags: sortedTags,
+      hasUntagged,
+    };
+  }, [filteredItems]);
+
+  const allCategories = useMemo(() => {
+    const list: { name: string; items: MenuItem[] }[] = [];
+    categories.tags.forEach((tag) => {
+      const matching = filteredItems.filter((item) => item.tags.includes(tag));
+      if (matching.length > 0) {
+        list.push({ name: tag, items: matching });
+      }
+    });
+    if (categories.hasUntagged) {
+      const untagged = filteredItems.filter((item) => !item.tags || item.tags.length === 0);
+      if (untagged.length > 0) {
+        list.push({ name: 'Others', items: untagged });
+      }
+    }
+    return list;
+  }, [categories, filteredItems]);
+
+  useEffect(() => {
+    if (allCategories.length === 0) return;
+
+    if (!activeCategory || !allCategories.some((c) => c.name === activeCategory)) {
+      setActiveCategory(allCategories[0].name);
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntry = entries.find((entry) => entry.isIntersecting);
+        if (visibleEntry) {
+          const catName = visibleEntry.target.id.replace('category-', '');
+          setActiveCategory(catName);
+        }
+      },
+      {
+        rootMargin: '-100px 0px -60% 0px',
+      }
+    );
+
+    allCategories.forEach((cat) => {
+      const el = document.getElementById(`category-${cat.name}`);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [allCategories, activeCategory]);
+
+  const scrollToCategory = (name: string) => {
+    const element = document.getElementById(`category-${name}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  if (menuQuery.isLoading || shopStatusQuery.isLoading) return <FullPageSpinner />;
 
   if (menuQuery.isError) {
     return (
@@ -88,12 +225,22 @@ export function Menu() {
     );
   }
 
-  const items = menuQuery.data ?? [];
-
   return (
     <div className="pb-28">
       <h1 className="mb-1 font-display text-2xl font-bold tracking-tight text-ink">Today's menu</h1>
       <p className="mb-4 text-sm text-ink/60">Order now, pick up when it's ready.</p>
+
+      {shopStatus.state === 'paused' && (
+        <div className="mb-5 rounded-2xl border border-dashed border-turmeric bg-turmeric-pale/40 px-4 py-3 text-sm font-semibold text-turmeric-deep shadow-card">
+          On a break — back at {formatReopenTime(shopStatus.reopen_at) || '--:--'}
+        </div>
+      )}
+
+      {shopStatus.state === 'closed' && (
+        <div className="mb-5 rounded-2xl border border-dashed border-stamp bg-stamp-light/40 px-4 py-3 text-sm font-semibold text-stamp-dark shadow-card">
+          The canteen is closed — no new orders right now
+        </div>
+      )}
 
       {activeOrder && (
         <Link
@@ -113,48 +260,86 @@ export function Menu() {
           hint="Check back soon — the canteen updates this list throughout the day."
         />
       ) : (
-        <Card className="divide-y divide-edge p-0">
-          {items.map((item) => {
-            const canAdd = item.orderable && !hasActiveOrder;
-            const qty = cart[item.id] ?? 0;
-            // If the item went unorderable (out of stock, time window closed)
-            // after it was already added to the cart, still allow decreasing
-            // it to zero — only block increasing past what's already there.
-            const disableStepper = hasActiveOrder;
-            const disableIncrease = !canAdd;
-            const availWindow = availabilityWindowText(item);
-            return (
-              <div key={item.id} className="flex items-center gap-3 p-3">
-                {item.photo_url && (
-                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md border border-edge">
-                    <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
-                  </div>
-                )}
+        <>
+          <TrendingRail
+            items={trendingItems}
+            hasRealCounts={hasRealCounts}
+            qtyFor={(id) => cart[id] ?? 0}
+            onQtyChange={setQty}
+            hasActiveOrder={hasActiveOrder}
+            canOrder={isShopOpen}
+          />
 
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-ink">{item.name}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="tabular font-display text-sm font-semibold text-ink/70">
-                      {formatPrice(item.price)}
-                    </span>
-                    <MenuStatusBadge status={item.status} />
-                  </div>
-                  {availWindow && <p className="mt-0.5 text-xs text-ink/45">Available {availWindow}</p>}
+          <div className="mb-4 mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-edge pb-2">
+            <h2 className="font-display text-sm font-bold uppercase tracking-[0.18em] text-ink">
+              Main Menu
+            </h2>
+            <DietFilter value={dietFilter} onChange={setDietFilter} />
+          </div>
+
+          {filteredItems.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-ink/60">No items match your filter.</p>
+            </div>
+          ) : (
+            <>
+              {allCategories.length > 0 && (
+                <div className="sticky top-14 z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
+                  {allCategories.map((cat) => {
+                    const isActive = activeCategory === cat.name;
+                    return (
+                      <button
+                        key={cat.name}
+                        type="button"
+                        onClick={() => scrollToCategory(cat.name)}
+                        className={`shrink-0 rounded-full border px-3.5 py-1 text-xs font-semibold uppercase tracking-wider transition ${
+                          isActive
+                            ? 'bg-brand text-white border-brand shadow-sm'
+                            : 'bg-paper text-ink/75 border-edge hover:bg-edge/40'
+                        }`}
+                      >
+                        {cat.name}
+                      </button>
+                    );
+                  })}
                 </div>
+              )}
 
-                <QtyStepper
-                  value={qty}
-                  onChange={(next) => setQty(item.id, next)}
-                  disabled={disableStepper}
-                  disableIncrease={disableIncrease}
-                />
-              </div>
-            );
-          })}
-        </Card>
+              {allCategories.map((cat) => (
+                <section
+                  key={cat.name}
+                  id={`category-${cat.name}`}
+                  className="mb-8 scroll-mt-28 animate-rail-in"
+                >
+                  <h3 className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-ink/50">
+                    {cat.name} ({cat.items.length})
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {cat.items.map((item) => {
+                      const qty = cart[item.id] ?? 0;
+                      const canAdd = item.orderable && !hasActiveOrder && isShopOpen;
+                      const disableStepper = hasActiveOrder;
+                      const disableIncrease = !canAdd;
+                      return (
+                        <MenuItemCard
+                          key={item.id}
+                          item={item}
+                          qty={qty}
+                          onQtyChange={(next) => setQty(item.id, next)}
+                          disableStepper={disableStepper}
+                          disableIncrease={disableIncrease}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </>
+          )}
+        </>
       )}
 
-      {cartCount > 0 && !hasActiveOrder && !showCheckout && (
+      {cartCount > 0 && !hasActiveOrder && !showCheckout && isShopOpen && (
         <div
           className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-20 border-t border-edge bg-paper/95 px-4 py-3 backdrop-blur cursor-pointer hover:bg-paper"
           onClick={() => setShowCheckout(true)}
@@ -200,7 +385,9 @@ export function Menu() {
                 return (
                   <div key={item.id} className="flex items-center justify-between py-3">
                     <div className="flex flex-col">
-                      <span className="font-semibold text-ink">{item.name}</span>
+                      <span className="font-semibold text-ink">
+                        {item.name}
+                      </span>
                       <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -226,9 +413,8 @@ export function Menu() {
               size="lg"
               fullWidth
               loading={submitMutation.isPending}
+              disabled={!isShopOpen}
               onClick={() => {
-                // Ask for notification permission from within the click gesture
-                // (browsers ignore the request once the gesture activation lapses).
                 if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
                   void Notification.requestPermission();
                 }

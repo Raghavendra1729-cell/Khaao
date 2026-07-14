@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getActiveOrder, getOrderHistory, cancelOrder } from '../../api/orders';
+import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
 import { ApiError } from '../../api/client';
 import type { Order, OrderStatus as OrderStatusType } from '../../api/types';
 import { formatCountdown, formatDateTime, formatPrice, secondsUntil } from '../../lib/format';
@@ -37,6 +37,8 @@ function ReadyBanner({ order }: { order: Order }) {
 }
 
 function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => void }) {
+  const droppedItems = order.items.filter((i) => i.status === 'rejected');
+
   return (
     <Card className="p-5">
       {order.status === 'ready' && <ReadyBanner order={order} />}
@@ -44,6 +46,15 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
         <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-turmeric px-4 py-5 text-center text-white shadow-ticket">
           <p className="text-xl font-bold tracking-tight">Pay {formatPrice(order.total_price)} at the counter</p>
           <p className="text-sm font-semibold text-white/90">All items are ready.</p>
+        </div>
+      )}
+      {droppedItems.length > 0 && (
+        <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-stamp px-4 py-5 text-center text-white shadow-ticket">
+          <p className="text-lg font-bold tracking-tight">Some items were dropped from your order</p>
+          <p className="text-sm font-semibold text-white/90">
+            {droppedItems.map((i) => `${i.name} ×${i.qty}`).join(', ')}
+          </p>
+          <p className="text-xs text-white/80">Current total: {formatPrice(order.total_price)}</p>
         </div>
       )}
 
@@ -94,6 +105,65 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
           </Button>
         </div>
       )}
+    </Card>
+  );
+}
+
+function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => void }) {
+  const { showToast } = useToast();
+  const rateableItems = order.items.filter((i) => i.status !== 'rejected');
+  const [ratings, setRatings] = useState<Record<number, number>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (rateableItems.length === 0) return null;
+
+  const handleSubmit = async () => {
+    const payload = Object.entries(ratings).map(([id, stars]) => ({
+      order_item_id: parseInt(id, 10),
+      stars,
+    }));
+    if (payload.length === 0) return;
+
+    setIsSubmitting(true);
+    try {
+      await submitRatings(order.id, payload);
+      showToast('Thanks for your feedback!', 'success');
+      onDismiss();
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : 'Could not submit ratings', 'error');
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4 border-2 border-brand-dark bg-paper p-4">
+      <h3 className="mb-3 font-display text-lg font-bold text-ink">Rate your recent order</h3>
+      <div className="flex flex-col gap-4">
+        {rateableItems.map((item) => (
+          <div key={item.id} className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-ink">{item.name}</span>
+            <div className="flex gap-1 text-2xl">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => setRatings((prev) => ({ ...prev, [item.id]: star }))}
+                  className={`transition-colors ${(ratings[item.id] || 0) >= star ? 'text-turmeric-deep' : 'text-edge'}`}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 flex items-center justify-between border-t border-edge pt-4">
+        <button onClick={onDismiss} className="text-sm font-medium text-ink/60 underline underline-offset-2">
+          Skip
+        </button>
+        <Button onClick={handleSubmit} disabled={isSubmitting || Object.keys(ratings).length === 0}>
+          {isSubmitting ? 'Submitting...' : 'Submit'}
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -175,6 +245,20 @@ export function OrderStatusPage() {
     }
   };
 
+  const [ratedOrders, setRatedOrders] = useState<number[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('khaao_rated_orders') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const markAsRated = (orderId: number) => {
+    const next = [...ratedOrders, orderId];
+    setRatedOrders(next);
+    localStorage.setItem('khaao_rated_orders', JSON.stringify(next));
+  };
+
   if (activeOrderQuery.isLoading || historyQuery.isLoading) return <FullPageSpinner />;
 
   if (activeOrderQuery.isError) {
@@ -190,6 +274,11 @@ export function OrderStatusPage() {
   const activeOrder = activeOrderQuery.data ?? null;
   const history = historyQuery.data ?? [];
   const hasPastOrders = history.some((o) => o.id !== activeOrder?.id);
+
+  const pastOrders = history.filter((o) => o.id !== activeOrder?.id);
+  const mostRecentCompleted = pastOrders.find((o) => o.status === 'completed');
+  const showRatingPrompt =
+    mostRecentCompleted && !ratedOrders.includes(mostRecentCompleted.id);
 
   // A student who has never ordered has neither an active order nor any
   // history — show one welcoming prompt instead of two stacked empty states.
@@ -231,6 +320,9 @@ export function OrderStatusPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-bold text-ink">History</h2>
+        {showRatingPrompt && mostRecentCompleted && (
+          <RatingPrompt order={mostRecentCompleted} onDismiss={() => markAsRated(mostRecentCompleted.id)} />
+        )}
         <HistoryList orders={history} activeOrderId={activeOrder?.id ?? null} />
       </section>
     </div>

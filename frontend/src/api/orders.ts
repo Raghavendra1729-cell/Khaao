@@ -36,3 +36,13 @@ export async function cancelOrder(orderId: number): Promise<Order> {
   });
   return res.order;
 }
+
+export async function submitRatings(
+  orderId: number,
+  ratings: { order_item_id: number; stars: number }[]
+): Promise<void> {
+  await apiFetch(`/orders/${orderId}/ratings`, {
+    method: 'POST',
+    body: { ratings },
+  });
+}
