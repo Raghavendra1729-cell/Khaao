@@ -34,6 +34,8 @@ export interface MenuItem {
   status: MenuItemStatus;
   orderable: boolean;
   order_count_today: number; // ordered qty today (non-rejected orders); trending
+  avg_rating: number;
+  rating_count: number;
 }
 
 /** Whether the canteen is accepting orders (GET /api/shop-status). */

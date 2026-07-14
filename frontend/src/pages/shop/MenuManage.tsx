@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createMenuItem,
@@ -6,10 +6,11 @@ import {
   getShopMenu,
   setMenuItemStock,
   updateMenuItem,
+  uploadMenuItemPhoto,
   type MenuItemInput,
 } from '../../api/shop';
 import { ApiError } from '../../api/client';
-import type { MenuItem } from '../../api/types';
+import type { Diet, MenuItem } from '../../api/types';
 import { formatPrice, paiseToRupeesInput, rupeesToPaise } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
@@ -25,6 +26,8 @@ interface FormState {
   avail_from: string;
   avail_to: string;
   is_available: boolean;
+  diet: Diet;
+  tags: string[];
 }
 
 const EMPTY_FORM: FormState = {
@@ -34,6 +37,8 @@ const EMPTY_FORM: FormState = {
   avail_from: '',
   avail_to: '',
   is_available: true,
+  diet: 'veg',
+  tags: [],
 };
 
 function toFormState(item: MenuItem): FormState {
@@ -44,6 +49,8 @@ function toFormState(item: MenuItem): FormState {
     avail_from: item.avail_from ?? '',
     avail_to: item.avail_to ?? '',
     is_available: item.is_available,
+    diet: item.diet ?? 'veg',
+    tags: item.tags ?? [],
   };
 }
 
@@ -55,22 +62,61 @@ function toInput(form: FormState): MenuItemInput {
     avail_from: form.avail_from ? form.avail_from : null,
     avail_to: form.avail_to ? form.avail_to : null,
     is_available: form.is_available,
+    diet: form.diet,
+    tags: form.tags,
   };
 }
 
 function MenuItemForm({
   initial,
+  allTags,
   onCancel,
   onSubmit,
   submitting,
 }: {
   initial: FormState;
+  allTags: string[];
   onCancel: () => void;
   onSubmit: (input: MenuItemInput) => void;
   submitting: boolean;
 }) {
   const [form, setForm] = useState<FormState>(initial);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState('');
+
+  const addTag = (tag: string) => {
+    const t = tag.trim();
+    if (t && !form.tags.includes(t)) {
+      setForm((f) => ({ ...f, tags: [...f.tags, t] }));
+    }
+    setTagInput('');
+  };
+
+  const removeTag = (tag: string) => {
+    setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }));
+  };
+
+  const { showToast } = useToast();
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const previewUrl = URL.createObjectURL(file);
+    setForm((f) => ({ ...f, photo_url: previewUrl }));
+
+    setUploadingPhoto(true);
+    try {
+      const url = await uploadMenuItemPhoto(file);
+      setForm((f) => ({ ...f, photo_url: url }));
+    } catch (err) {
+      showToast('Photo upload failed.', 'error');
+      setForm((f) => ({ ...f, photo_url: '' }));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -126,16 +172,87 @@ function MenuItemForm({
           placeholder="40.00"
         />
       </label>
+      
+      <label className="block">
+        <span className="mb-1 block text-sm font-semibold text-ink/70">Diet</span>
+        <select
+          value={form.diet}
+          onChange={(e) => setForm((f) => ({ ...f, diet: e.target.value as Diet }))}
+          className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
+        >
+          <option value="veg">Vegetarian</option>
+          <option value="non_veg">Non-Vegetarian</option>
+        </select>
+      </label>
+
+      <div className="block">
+        <span className="mb-1 block text-sm font-semibold text-ink/70">Tags (optional)</span>
+        <div className="mb-2 flex flex-wrap gap-2">
+          {form.tags.map((tag) => (
+            <span
+              key={tag}
+              className="flex items-center gap-1 rounded-full bg-brand/10 px-3 py-1 text-sm font-medium text-brand-dark"
+            >
+              {tag}
+              <button
+                type="button"
+                onClick={() => removeTag(tag)}
+                className="text-brand-dark/50 hover:text-brand-dark"
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {allTags
+            .filter((t) => !form.tags.includes(t))
+            .map((tag) => (
+              <button
+                type="button"
+                key={tag}
+                onClick={() => addTag(tag)}
+                className="rounded-full border border-edge px-3 py-1 text-sm text-ink/60 hover:bg-steel/30"
+              >
+                + {tag}
+              </button>
+            ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addTag(tagInput);
+              }
+            }}
+            className="min-h-[44px] flex-1 rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
+            placeholder="Add new tag"
+          />
+          <Button type="button" variant="secondary" onClick={() => addTag(tagInput)}>
+            Add
+          </Button>
+        </div>
+      </div>
 
       <label className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Photo URL (optional)</span>
-        <input
-          type="url"
-          value={form.photo_url}
-          onChange={(e) => setForm((f) => ({ ...f, photo_url: e.target.value }))}
-          className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
-          placeholder="https://..."
-        />
+        <span className="mb-1 block text-sm font-semibold text-ink/70">Photo (optional)</span>
+        <div className="flex items-center gap-3">
+          {form.photo_url && (
+            <img src={form.photo_url} alt="Preview" className="h-11 w-11 rounded-lg object-cover" />
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handlePhotoSelected}
+            disabled={uploadingPhoto}
+            className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-brand/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-dark hover:file:bg-brand/20"
+          />
+        </div>
+        {uploadingPhoto && <p className="mt-1 text-sm text-ink/60">Uploading...</p>}
       </label>
 
       <div className="grid grid-cols-2 gap-3">
@@ -166,7 +283,10 @@ function MenuItemForm({
           onChange={(e) => setForm((f) => ({ ...f, is_available: e.target.checked }))}
           className="h-5 w-5 accent-brand"
         />
-        <span className="text-sm font-semibold text-ink/70">Available on the menu</span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-semibold text-ink/70">Available on the menu</span>
+          <span className="text-[10px] text-ink/50 mt-0.5">उपलब्ध</span>
+        </div>
       </label>
 
       <div className="flex gap-2">
@@ -181,10 +301,23 @@ function MenuItemForm({
   );
 }
 
-function MenuItemRow({ item }: { item: MenuItem }) {
+function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [editing, setEditing] = useState(false);
+  const [armed, setArmed] = useState(false);
+  
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(false), 3000);
+    const clickHandler = () => setArmed(false);
+    const addListener = setTimeout(() => window.addEventListener('click', clickHandler), 0);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(addListener);
+      window.removeEventListener('click', clickHandler);
+    };
+  }, [armed]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
 
@@ -213,9 +346,23 @@ function MenuItemRow({ item }: { item: MenuItem }) {
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not delete item.', 'error'),
   });
 
-  function handleDelete() {
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
     if (window.confirm(`Delete "${item.name}"? This cannot be undone.`)) {
       deleteMutation.mutate();
+    }
+  }
+
+  function handleCardClick() {
+    if (item.out_of_stock) {
+      stockMutation.mutate();
+    } else {
+      if (armed) {
+        stockMutation.mutate();
+        setArmed(false);
+      } else {
+        setArmed(true);
+      }
     }
   }
 
@@ -224,6 +371,7 @@ function MenuItemRow({ item }: { item: MenuItem }) {
       <Card className="p-4">
         <MenuItemForm
           initial={toFormState(item)}
+          allTags={allTags}
           onCancel={() => setEditing(false)}
           onSubmit={(input) => updateMutation.mutate(input)}
           submitting={updateMutation.isPending}
@@ -233,36 +381,70 @@ function MenuItemRow({ item }: { item: MenuItem }) {
   }
 
   return (
-    <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3">
-        <div>
+    <Card
+      className={`relative overflow-hidden flex h-full flex-col p-4 transition-colors ${
+        item.out_of_stock ? 'opacity-60 grayscale-[0.3]' : 'hover:bg-steel/10 cursor-pointer'
+      } ${armed ? 'ring-2 ring-red-500' : ''}`}
+      onClick={handleCardClick}
+    >
+      <div className="flex-1">
+        <div className="mb-2 flex items-start justify-between gap-2">
           <p className="font-bold text-ink">{item.name}</p>
-          <p className="tabular text-sm text-ink/60">{formatPrice(item.price)}</p>
-          {(item.avail_from || item.avail_to) && (
-            <p className="text-xs text-ink/40">
-              {item.avail_from ?? '00:00'} – {item.avail_to ?? '23:59'}
-            </p>
-          )}
+          <div className="flex flex-col items-end gap-0.5">
+            <MenuStatusBadge status={item.status} />
+            <span className="text-[10px] font-medium text-ink/50">
+              {item.out_of_stock ? 'स्टॉक में नहीं' : 'उपलब्ध'}
+            </span>
+          </div>
         </div>
-        <MenuStatusBadge status={item.status} />
+        <p className="tabular text-sm text-ink/60">{formatPrice(item.price)}</p>
+        {item.rating_count > 0 && (
+          <p className="mt-0.5 flex items-center gap-0.5 text-xs font-semibold text-ink/70">
+            <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} ({item.rating_count})
+          </p>
+        )}
+        {(item.avail_from || item.avail_to) && (
+          <p className="text-xs text-ink/40">
+            {item.avail_from ?? '00:00'} – {item.avail_to ?? '23:59'}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-1">
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+              item.diet === 'veg' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+            }`}
+          >
+            {item.diet === 'veg' ? 'Veg' : 'Non-veg'}
+          </span>
+          {item.tags?.map((tag) => (
+            <span key={tag} className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-dark">
+              {tag}
+            </span>
+          ))}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="md"
-          variant={item.out_of_stock ? 'primary' : 'secondary'}
-          loading={stockMutation.isPending}
-          onClick={() => stockMutation.mutate()}
-        >
-          {item.out_of_stock ? 'Mark in stock' : 'Mark out of stock'}
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-3" onClick={(e) => e.stopPropagation()}>
+        <Button variant="ghost" onClick={() => setEditing(true)} className="flex-1">
+          <div className="flex flex-col items-center leading-tight">
+            <span>Edit</span>
+            <span className="text-[10px] font-medium opacity-80 mt-0.5">संपादित करें</span>
+          </div>
         </Button>
-        <Button variant="ghost" onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <Button variant="danger" loading={deleteMutation.isPending} onClick={handleDelete}>
-          Delete
+        <Button variant="danger" loading={deleteMutation.isPending} onClick={handleDelete} className="flex-1">
+          <div className="flex flex-col items-center leading-tight">
+            <span>Delete</span>
+            <span className="text-[10px] font-medium opacity-80 mt-0.5">हटाएं</span>
+          </div>
         </Button>
       </div>
+
+      {armed && (
+        <div className="absolute bottom-0 left-0 right-0 animate-in fade-in slide-in-from-bottom-2 bg-red-500 py-3 text-center text-sm font-bold text-white flex flex-col items-center leading-tight">
+          <span>Tap again to mark unavailable</span>
+          <span className="text-[10px] font-medium opacity-90 mt-0.5">अनुपलब्ध चिह्नित करें / फिर से टैप करें</span>
+        </div>
+      )}
     </Card>
   );
 }
@@ -295,6 +477,7 @@ export function ShopMenuManagePage() {
   }
 
   const items = menuQuery.data ?? [];
+  const allTags = Array.from(new Set(items.flatMap((item) => item.tags || []))).sort();
 
   return (
     <div>
@@ -304,7 +487,10 @@ export function ShopMenuManagePage() {
           <p className="text-sm text-ink/60">Add, edit, and manage stock.</p>
         </div>
         <Button variant="secondary" onClick={() => setShowAddForm((v) => !v)}>
-          {showAddForm ? 'Close form' : 'Add item'}
+          <div className="flex flex-col items-center leading-tight">
+            <span>{showAddForm ? 'Close form' : 'Add item'}</span>
+            {!showAddForm && <span className="text-[10px] font-medium opacity-80 mt-0.5">आइटम जोड़ें</span>}
+          </div>
         </Button>
       </div>
 
@@ -312,6 +498,7 @@ export function ShopMenuManagePage() {
         <div className="mb-5">
           <MenuItemForm
             initial={EMPTY_FORM}
+            allTags={allTags}
             onCancel={() => setShowAddForm(false)}
             onSubmit={(input) => createMutation.mutate(input)}
             submitting={createMutation.isPending}
@@ -322,9 +509,9 @@ export function ShopMenuManagePage() {
       {items.length === 0 ? (
         <EmptyState title="No menu items yet" hint="Add your first item to get started." />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => (
-            <MenuItemRow key={item.id} item={item} />
+            <MenuItemRow key={item.id} item={item} allTags={allTags} />
           ))}
         </div>
       )}

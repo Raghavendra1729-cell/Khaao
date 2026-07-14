@@ -157,6 +157,54 @@ export async function markPrepDone(menuItemId: number, qty = 1): Promise<void> {
   });
 }
 
-export async function closeDay(): Promise<void> {
-  await apiFetch<{ ok: boolean }>('/shop/day/close', { method: 'POST' });
+export interface PhotoSignature {
+  signature: string;
+  timestamp: number;
+  api_key: string;
+  cloud_name: string;
+  folder: string;
+}
+
+export async function getPhotoUploadSignature(): Promise<PhotoSignature> {
+  return apiFetch<PhotoSignature>('/shop/menu/photo-signature', { method: 'POST' });
+}
+
+/** Uploads a menu item photo directly to Cloudinary (signed upload — the API
+ * secret never reaches the browser) and returns the resulting secure_url. */
+export async function uploadMenuItemPhoto(file: File): Promise<string> {
+  const sig = await getPhotoUploadSignature();
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('api_key', sig.api_key);
+  formData.append('timestamp', sig.timestamp.toString());
+  formData.append('signature', sig.signature);
+  formData.append('folder', sig.folder);
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error('Failed to upload photo');
+  }
+
+  const data = await res.json();
+  return data.secure_url;
+}
+
+export async function getVapidPublicKey(): Promise<{ public_key: string }> {
+  return apiFetch<{ public_key: string }>('/push/vapid-public-key');
+}
+
+export async function subscribeToPush(
+  endpoint: string,
+  p256dh: string,
+  auth: string,
+): Promise<void> {
+  await apiFetch('/push/subscribe', {
+    method: 'POST',
+    body: { endpoint, keys: { p256dh, auth } },
+  });
 }

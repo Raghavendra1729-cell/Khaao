@@ -54,6 +54,11 @@ export function MenuItemCard({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <span className="tabular font-display text-sm font-bold text-brand-dark">{formatPrice(item.price)}</span>
+          {item.rating_count > 0 && (
+            <span className="flex items-center gap-0.5 text-xs font-semibold text-ink/70">
+              <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} ({item.rating_count})
+            </span>
+          )}
           {item.status !== 'available' && <MenuStatusBadge status={item.status} />}
         </div>
         {availWindow && <p className="mt-0.5 text-xs text-ink/45">Available {availWindow}</p>}
