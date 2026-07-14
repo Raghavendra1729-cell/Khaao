@@ -10,69 +10,9 @@ import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { OrderTicket } from '../../components/OrderTicket';
+import { StatusStamps } from '../../components/StatusStamps';
 import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
-
-const TIMELINE_STEPS: { status: OrderStatusType; label: string }[] = [
-  { status: 'submitted', label: 'Waiting' },
-  { status: 'preparing', label: 'Cooking' },
-  { status: 'ready', label: 'Ready' },
-  { status: 'awaiting_payment', label: 'Pay' },
-  { status: 'completed', label: 'Done' },
-];
-
-function stepIndex(status: OrderStatusType): number {
-  switch (status) {
-    case 'submitted':
-      return 0;
-    case 'preparing':
-    case 'partially_ready':
-      return 1;
-    case 'ready':
-      return 2;
-    case 'awaiting_payment':
-      return 3;
-    case 'completed':
-      return 4;
-    default:
-      return -1;
-  }
-}
-
-function Timeline({ status }: { status: OrderStatusType }) {
-  const current = stepIndex(status);
-  return (
-    <div className="flex items-center">
-      {TIMELINE_STEPS.map((step, i) => {
-        const done = i < current || status === 'completed';
-        const active = i === current && status !== 'completed';
-        return (
-          <div key={step.status} className="flex flex-1 items-center last:flex-none">
-            <div className="flex flex-col items-center gap-1.5">
-              <span
-                className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold ${
-                  done
-                    ? 'border-brand bg-brand text-white'
-                    : active
-                      ? 'animate-soft-pulse border-brand bg-white text-brand'
-                      : 'border-sage bg-white text-ink/30'
-                }`}
-              >
-                {done ? '✓' : i + 1}
-              </span>
-              <span className={`text-[11px] font-semibold ${done || active ? 'text-ink' : 'text-ink/40'}`}>
-                {step.label}
-              </span>
-            </div>
-            {i < TIMELINE_STEPS.length - 1 && (
-              <div className={`mx-1 h-0.5 flex-1 rounded ${i < current ? 'bg-brand' : 'bg-sage'}`} />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function ReadyBanner({ order }: { order: Order }) {
   const [remaining, setRemaining] = useState(() => secondsUntil(order.expires_at));
@@ -86,9 +26,9 @@ function ReadyBanner({ order }: { order: Order }) {
   const expiringSoon = remaining <= 60;
 
   return (
-    <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-brand px-4 py-5 text-center text-white shadow-ticket">
-      <p className="text-lg font-black tracking-tight">Ready — pick up before the timer, pay at counter</p>
-      <p className={`tabular text-3xl font-black ${expiringSoon ? 'animate-soft-pulse' : ''}`}>
+    <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-stamp px-4 py-5 text-center text-white shadow-ticket">
+      <p className="text-lg font-bold tracking-tight">Ready — pick up before the timer, pay at counter</p>
+      <p className={`tabular font-display text-3xl font-bold ${expiringSoon ? 'animate-soft-pulse' : ''}`}>
         {remaining > 0 ? formatCountdown(remaining) : "Time's up"}
       </p>
       <p className="text-xs text-white/80">Show your token number at the counter.</p>
@@ -101,31 +41,36 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
     <Card className="p-5">
       {order.status === 'ready' && <ReadyBanner order={order} />}
       {order.status === 'awaiting_payment' && (
-        <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-[#e9a03b] px-4 py-5 text-center text-white shadow-ticket">
-          <p className="text-xl font-black tracking-tight">Pay {formatPrice(order.total_price)} at the counter</p>
+        <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-turmeric px-4 py-5 text-center text-white shadow-ticket">
+          <p className="text-xl font-bold tracking-tight">Pay {formatPrice(order.total_price)} at the counter</p>
           <p className="text-sm font-semibold text-white/90">All items are ready.</p>
         </div>
       )}
 
-      <div className="mb-5 flex justify-center">
+      <div className="mb-6 flex justify-center">
         <OrderTicket id={order.order_no} size="lg" />
       </div>
 
       <div className="mb-6">
-        <Timeline status={order.status} />
+        <StatusStamps status={order.status} />
       </div>
 
       {order.status === 'partially_ready' && (
-        <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-800">
+        <p className="mb-4 rounded-lg bg-turmeric-pale px-3 py-2 text-center text-sm font-medium text-turmeric-deep">
           Some items are ready — the rest are still cooking.
         </p>
       )}
 
-      <div className="divide-y divide-sage">
+      <div className="divide-y divide-edge">
         {order.items.map((item) => (
-          <div key={item.id} className="flex items-center justify-between gap-3 py-2.5">
-            <div>
-              <p className="font-semibold text-ink">{item.name}</p>
+          <div key={item.id} className="flex items-center gap-3 py-2.5">
+            {item.photo_url && (
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-edge">
+                <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-semibold text-ink">{item.name}</p>
               <p className="tabular text-xs text-ink/50">
                 {item.allocated_qty}/{item.qty} ready · {item.handed_qty ?? 0} picked up
               </p>
@@ -135,13 +80,15 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
         ))}
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-sage pt-3">
+      <div className="mt-4 flex items-center justify-between border-t border-edge pt-3">
         <span className="font-semibold text-ink/70">Total</span>
-        <span className="tabular text-lg font-black text-brand-dark">{formatPrice(order.total_price)}</span>
+        <span className="tabular font-display text-lg font-bold text-brand-dark">
+          {formatPrice(order.total_price)}
+        </span>
       </div>
 
       {order.status === 'submitted' && (
-        <div className="mt-5 border-t border-sage pt-5">
+        <div className="mt-5 border-t border-edge pt-5">
           <Button variant="secondary" fullWidth onClick={onCancel}>
             Cancel order
           </Button>
@@ -186,11 +133,20 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
               </div>
               <OrderStatusBadge status={order.status} />
             </div>
-            <p className="mt-2 text-sm text-ink/70">
-              {order.items.map((i) => `${i.name} ×${i.qty}`).join(', ')}
-            </p>
+            <div className="mt-2 flex flex-col gap-1.5 text-sm text-ink/70">
+              {order.items.map((item) => (
+                <div key={item.id} className="flex items-center gap-2">
+                  {item.photo_url && (
+                    <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md border border-edge">
+                      <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                    </div>
+                  )}
+                  <span>{item.name} ×{item.qty}</span>
+                </div>
+              ))}
+            </div>
             {hint && <p className="mt-1 text-xs text-ink/50">{hint}</p>}
-            <p className="tabular mt-2 text-sm font-semibold text-brand-dark">
+            <p className="tabular font-display mt-2 text-sm font-semibold text-brand-dark">
               {formatPrice(order.total_price)}
             </p>
           </Card>
@@ -233,11 +189,31 @@ export function OrderStatusPage() {
 
   const activeOrder = activeOrderQuery.data ?? null;
   const history = historyQuery.data ?? [];
+  const hasPastOrders = history.some((o) => o.id !== activeOrder?.id);
+
+  // A student who has never ordered has neither an active order nor any
+  // history — show one welcoming prompt instead of two stacked empty states.
+  if (!activeOrder && !hasPastOrders) {
+    return (
+      <div className="flex flex-col gap-8">
+        <h1 className="mb-4 font-display text-2xl font-bold tracking-tight text-ink">Order status</h1>
+        <EmptyState
+          title="Place your first order"
+          hint="Browse today's menu, build a cart, and track it live once it's in."
+          action={
+            <Link to="/">
+              <Button>Browse menu</Button>
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h1 className="mb-4 text-2xl font-black tracking-tight text-ink">Order status</h1>
+        <h1 className="mb-4 font-display text-2xl font-bold tracking-tight text-ink">Order status</h1>
         {activeOrder ? (
           <ActiveOrderView order={activeOrder} onCancel={handleCancel} />
         ) : (
