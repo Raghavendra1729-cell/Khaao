@@ -341,7 +341,7 @@ export function Menu() {
 
       {cartCount > 0 && !hasActiveOrder && !showCheckout && isShopOpen && (
         <div
-          className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-20 border-t border-edge bg-paper/95 px-4 py-3 backdrop-blur cursor-pointer hover:bg-paper"
+          className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-50 border-t border-edge bg-paper/95 px-4 py-3 backdrop-blur cursor-pointer hover:bg-paper"
           onClick={() => setShowCheckout(true)}
         >
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
