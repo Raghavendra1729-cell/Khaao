@@ -25,7 +25,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const AUTO_DISMISS_MS = 5000;
 
 const VARIANT_STYLES: Record<ToastVariant, string> = {
-  error: 'bg-red-600 text-white',
+  error: 'bg-stamp text-white',
   success: 'bg-brand text-white',
   info: 'bg-ink text-white',
 };

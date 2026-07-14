@@ -23,9 +23,12 @@ const SIZES: Record<Size, string> = {
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-brand text-white shadow-sm hover:bg-brand-dark',
-  secondary: 'border border-brand/30 bg-white text-brand hover:bg-brand-light',
-  danger: 'bg-red-600 text-white shadow-sm hover:bg-red-700',
-  ghost: 'bg-transparent text-ink hover:bg-black/5',
+  secondary: 'border border-brand/30 bg-paper text-brand hover:bg-brand-light',
+  danger: 'bg-stamp text-white shadow-sm hover:bg-stamp-dark',
+  // A visible (if quiet) border matters here: hover reveals a plain-text
+  // button's affordance on desktop, but touch devices have no hover — without
+  // a border this reads as inert text, not a tappable control.
+  ghost: 'border border-edge bg-transparent text-ink hover:bg-ink/5 active:bg-ink/10',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

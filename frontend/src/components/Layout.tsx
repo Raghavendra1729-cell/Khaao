@@ -3,7 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { getActiveOrder } from '../api/orders';
-import { getShopOrders } from '../api/shop';
+import { getPrep, getShopOrders } from '../api/shop';
 import { StudentRealtime } from './StudentRealtime';
 import { ShopRealtime } from './ShopRealtime';
 
@@ -55,7 +55,7 @@ const SHOP_TABS: Tab[] = [
 
 function TabBadge({ children }: { children: ReactNode }) {
   return (
-    <span className="absolute -right-2.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-turmeric px-1 text-[10px] font-black text-white">
+    <span className="absolute -right-2.5 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-turmeric px-1 text-[10px] font-bold text-white">
       {children}
     </span>
   );
@@ -65,6 +65,12 @@ export function Layout() {
   const { user, logout } = useAuth();
   const isShop = user?.role === 'shopkeeper';
   const tabs = isShop ? SHOP_TABS : STUDENT_TABS;
+  // Students use this on a phone: a narrow single-column shell fits perfectly.
+  // Shopkeepers run a multi-column kanban board (Orders) and grids (Prep,
+  // History, Menu) meant for a counter tablet/laptop — max-w-md (28rem) was
+  // capping them to phone width even on a wide screen, squeezing the "New"
+  // column's Accept button until it visually overlapped "Cooking".
+  const contentMaxWidth = isShop ? 'max-w-6xl' : 'max-w-md';
 
   // Badge data rides the same query keys the pages use, so SSE invalidation
   // keeps the bar live without extra plumbing.
@@ -78,22 +84,28 @@ export function Layout() {
     queryFn: getShopOrders,
     enabled: isShop,
   });
+  const prepQuery = useQuery({
+    queryKey: ['shop', 'prep'],
+    queryFn: getPrep,
+    enabled: isShop,
+  });
 
   const incomingCount = shopOrdersQuery.data?.incoming.length ?? 0;
+  const prepBacklogCount = prepQuery.data?.filter((item) => item.remaining_qty > 0).length ?? 0;
   const hasActiveOrder = !isShop && Boolean(activeOrderQuery.data);
 
   return (
-    <div className="flex min-h-screen flex-col bg-cream">
+    <div className="flex min-h-screen flex-col bg-steel">
       {!isShop && <StudentRealtime />}
       {isShop && <ShopRealtime />}
 
-      <header className="sticky top-0 z-20 border-b border-sage bg-cream/95 pt-safe backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-md items-center justify-between px-4">
+      <header className="sticky top-0 z-20 border-b border-edge bg-steel/95 pt-safe backdrop-blur">
+        <div className={`mx-auto flex h-14 ${contentMaxWidth} items-center justify-between px-4`}>
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-black text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md border-2 border-ink bg-paper font-display text-sm font-bold text-ink">
               K
             </span>
-            <span className="font-display text-xl font-black tracking-tight text-brand-dark">
+            <span className="font-display text-lg font-bold uppercase tracking-[0.15em] text-ink">
               Khaao
             </span>
           </div>
@@ -102,7 +114,7 @@ export function Layout() {
             <button
               type="button"
               onClick={logout}
-              className="flex min-h-[44px] items-center rounded-lg px-2.5 text-sm font-semibold text-ink/70 transition hover:bg-black/5 hover:text-ink"
+              className="flex min-h-[44px] items-center rounded-lg px-2.5 text-sm font-semibold text-ink/70 transition hover:bg-ink/5 hover:text-ink"
             >
               Log out
             </button>
@@ -110,12 +122,12 @@ export function Layout() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-24 pt-4">
+      <main className={`mx-auto w-full ${contentMaxWidth} flex-1 px-4 pb-24 pt-4`}>
         <Outlet />
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-sage bg-white/95 pb-safe shadow-bar backdrop-blur">
-        <div className={`mx-auto grid max-w-md ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-paper/95 pb-safe shadow-bar backdrop-blur">
+        <div className={`mx-auto grid ${contentMaxWidth} ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
@@ -130,6 +142,7 @@ export function Layout() {
               <span className="relative">
                 <Icon d={ICONS[tab.icon]} />
                 {tab.icon === 'inbox' && incomingCount > 0 && <TabBadge>{incomingCount}</TabBadge>}
+                {tab.icon === 'flame' && prepBacklogCount > 0 && <TabBadge>{prepBacklogCount}</TabBadge>}
                 {tab.icon === 'ticket' && hasActiveOrder && (
                   <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-turmeric" />
                 )}

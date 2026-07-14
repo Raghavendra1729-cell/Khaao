@@ -8,15 +8,7 @@
   }
 
   body {
-    @apply bg-cream text-ink antialiased;
-    font-family:
-      -apple-system,
-      BlinkMacSystemFont,
-      'Segoe UI',
-      Roboto,
-      Helvetica,
-      Arial,
-      sans-serif;
+    @apply bg-steel font-sans text-ink antialiased;
   }
 
   #root {
@@ -24,11 +16,11 @@
   }
 
   ::selection {
-    @apply bg-brand/20;
+    @apply bg-stamp/20;
   }
 
   :focus-visible {
-    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-cream;
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-steel;
   }
 }
 
@@ -45,6 +37,17 @@
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
   }
+
+  /* Horizontal rails (trending chits, category jump-chips) scroll cleanly on
+     phones without a visible scrollbar eating a row of pixels. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Ticket-stub punch holes, used by OrderTicket. The circle color must match
@@ -57,7 +60,7 @@
   width: 22px;
   height: 22px;
   border-radius: 9999px;
-  background: var(--ticket-notch-bg, #fbf9f4);
+  background: var(--ticket-notch-bg, #eedfbb);
   transform: translateY(-50%);
 }
 
@@ -88,7 +91,17 @@
   .animate-spin,
   .animate-pulse,
   .animate-tick-pop,
-  .animate-slide-up {
+  .animate-slide-up,
+  .animate-stamp,
+  .animate-ready-pop,
+  .animate-ready-glow,
+  .animate-status-in,
+  .animate-rail-in {
     animation: none !important;
+  }
+
+  /* Anchor jumps between menu categories snap instantly instead of gliding. */
+  html {
+    scroll-behavior: auto !important;
   }
 }

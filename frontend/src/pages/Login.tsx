@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
@@ -47,21 +47,28 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-cream px-4">
+    <div className="flex min-h-screen items-center justify-center bg-steel px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-2">
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand text-xl font-black text-white">
+          <span className="flex h-12 w-12 items-center justify-center rounded-md border-2 border-ink bg-paper font-display text-xl font-bold text-ink">
             K
           </span>
-          <h1 className="text-2xl font-black tracking-tight text-brand-dark">Khaao</h1>
-          <p className="text-sm text-ink/60">Order ahead. Skip the line.</p>
+          <h1 className="font-display text-2xl font-bold uppercase tracking-[0.15em] text-ink">Khaao</h1>
+          <p className="font-display text-xs uppercase tracking-widest text-ink/50">
+            Order ahead · Skip the line
+          </p>
         </div>
 
-        <div className="rounded-2xl border border-sage bg-white p-6 shadow-card flex flex-col items-center">
-          <h2 className="mb-4 text-lg font-bold text-ink">Log in</h2>
+        <div
+          className="ticket-notch relative flex flex-col items-center rounded-2xl border-2 border-dashed border-ink/25 bg-paper p-6 shadow-ticket"
+          style={{ '--ticket-notch-bg': '#dce4de' } as CSSProperties}
+        >
+          <h2 className="mb-4 font-display text-sm font-semibold uppercase tracking-widest text-ink/70">
+            Sign in
+          </h2>
 
           {error && (
-            <div className="mb-4 w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+            <div className="mb-4 w-full rounded-md border border-stamp/40 bg-stamp-light px-3 py-2 text-sm font-medium text-stamp-dark">
               {error}
             </div>
           )}
