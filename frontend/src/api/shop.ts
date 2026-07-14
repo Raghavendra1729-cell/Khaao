@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { MenuItem, Order, PrepItem } from './types';
+import type { Diet, MenuItem, Order, PrepItem, ShopState, ShopStatus } from './types';
 
 export interface MenuItemInput {
   name: string;
@@ -8,6 +8,11 @@ export interface MenuItemInput {
   avail_from: string | null;
   avail_to: string | null;
   is_available: boolean;
+  // The backend REQUIRES diet on create/update (400 otherwise); these are
+  // optional in TS only so the not-yet-updated menu form keeps compiling.
+  // WP2's menu form must always send diet, and tags as a (possibly empty) array.
+  diet?: Diet;
+  tags?: string[];
 }
 
 export async function getShopMenu(): Promise<MenuItem[]> {
@@ -53,15 +58,53 @@ export async function getShopOrders(): Promise<ShopOrders> {
   return apiFetch<ShopOrders>('/shop/orders');
 }
 
+export interface HistoryItemCount {
+  name: string;
+  qty: number;
+}
+
+export interface HistoryCustomer {
+  name: string;
+  order_count: number;
+}
+
+/** Day summary computed over completed (paid) orders. */
+export interface HistoryInsights {
+  order_count: number;
+  item_counts: HistoryItemCount[]; // sorted qty desc
+  customers: HistoryCustomer[]; // sorted order_count desc
+}
+
 export interface ShopHistory {
   orders: Order[];
   total_paid: number; // paise collected today
+  insights: HistoryInsights;
 }
 
-/** Today's finished orders + paid total, for counter reconciliation. */
+/** Today's finished orders + paid total + insights, for counter reconciliation. */
 export async function getShopHistory(date?: string): Promise<ShopHistory> {
   const query = date ? `?date=${date}` : '';
   return apiFetch<ShopHistory>(`/shop/history${query}`);
+}
+
+/** Public: the canteen's current open/paused/closed status. */
+export async function getShopStatus(): Promise<ShopStatus> {
+  return apiFetch<ShopStatus>('/shop-status');
+}
+
+/**
+ * Shopkeeper: set the canteen status. Pass reopenAt (RFC3339) only when pausing.
+ * The backend returns 409 ("Finish or cancel the N active order(s) first.") if
+ * pausing/closing while any order is still active.
+ */
+export async function setShopStatus(
+  state: ShopState,
+  reopenAt?: string | null,
+): Promise<ShopStatus> {
+  return apiFetch<ShopStatus>('/shop/status', {
+    method: 'POST',
+    body: { state, reopen_at: reopenAt ?? null },
+  });
 }
 
 export async function acceptOrder(id: number, rejectedItemIds: number[]): Promise<Order> {

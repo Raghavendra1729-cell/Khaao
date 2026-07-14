@@ -18,17 +18,30 @@ export interface AuthConfig {
 
 export type MenuItemStatus = 'available' | 'time_limited' | 'out_of_stock' | 'unavailable';
 
+export type Diet = 'veg' | 'non_veg';
+
 export interface MenuItem {
   id: number;
   name: string;
   price: number; // paise
   photo_url: string | null;
+  diet: Diet;
+  tags: string[]; // always an array (never null); [] when untagged
   is_available: boolean;
   avail_from: string | null; // "HH:MM" 24h, or null
   avail_to: string | null;
   out_of_stock: boolean;
   status: MenuItemStatus;
   orderable: boolean;
+  order_count_today: number; // ordered qty today (non-rejected orders); trending
+}
+
+/** Whether the canteen is accepting orders (GET /api/shop-status). */
+export type ShopState = 'open' | 'paused' | 'closed';
+
+export interface ShopStatus {
+  state: ShopState;
+  reopen_at: string | null; // RFC3339, set only while paused; null otherwise
 }
 
 export type OrderStatus =
@@ -48,6 +61,7 @@ export interface OrderItem {
   id: number;
   menu_item_id: number;
   name: string;
+  photo_url: string | null;
   qty: number;
   allocated_qty: number;
   handed_qty: number;

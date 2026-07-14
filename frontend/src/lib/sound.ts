@@ -62,3 +62,30 @@ export function playIncomingAlert(): void {
   tone(ctx, now, 660, 0.18, 0.45);
   tone(ctx, now + 0.22, 990, 0.24, 0.45);
 }
+
+/**
+ * Short single "ting" — played for a student on any order state change
+ * (submitted → preparing → ready → awaiting payment).
+ */
+export function playStatusChange(): void {
+  const ctx = getContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') void ctx.resume();
+
+  const now = ctx.currentTime;
+  tone(ctx, now, 1046, 0.16, 0.32); // C6
+}
+
+/**
+ * Distinct rising chime — played for the shopkeeper when an order becomes fully
+ * ready / awaiting payment, so it can be handed out fast.
+ */
+export function playOrderComplete(): void {
+  const ctx = getContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') void ctx.resume();
+
+  const now = ctx.currentTime;
+  tone(ctx, now, 784, 0.16, 0.4); // G5
+  tone(ctx, now + 0.18, 1175, 0.22, 0.4); // D6
+}
