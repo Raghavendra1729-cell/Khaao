@@ -9,6 +9,7 @@ import (
 	"khaao/internal/config"
 	"khaao/internal/models"
 	"khaao/internal/realtime"
+	"khaao/internal/repository"
 	"khaao/internal/services"
 )
 
@@ -81,7 +82,7 @@ func TestShopStatusGuard(t *testing.T) {
 		if appErr.Status != 409 {
 			t.Errorf("status = %d, want 409", appErr.Status)
 		}
-		if appErr.Message != "Finish or cancel the 2 active order(s) first." {
+		if appErr.Message != "Finish or cancel the 2 accepted order(s) first." {
 			t.Errorf("message = %q", appErr.Message)
 		}
 
@@ -134,12 +135,30 @@ func TestCreateOrderBlockedWhenNotOpen(t *testing.T) {
 	})
 }
 
+type mockRatingRepo struct {
+	ratings []models.ItemRating
+	aggs    map[uint]repository.MenuRatingAggregate
+}
+
+func (m *mockRatingRepo) SaveAll(ctx context.Context, ratings []models.ItemRating) error {
+	m.ratings = append(m.ratings, ratings...)
+	return nil
+}
+
+func (m *mockRatingRepo) GetMenuAggregates(ctx context.Context) (map[uint]repository.MenuRatingAggregate, error) {
+	if m.aggs == nil {
+		return make(map[uint]repository.MenuRatingAggregate), nil
+	}
+	return m.aggs, nil
+}
+
 func newMenuService() (*services.MenuService, *mockOrderRepo, *mockMenuRepo) {
 	menuRepo := &mockMenuRepo{}
 	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	ratingRepo := &mockRatingRepo{}
 	hub := realtime.NewHub()
 	cfg := &config.Config{}
-	return services.NewMenuService(menuRepo, orderRepo, hub, cfg), orderRepo, menuRepo
+	return services.NewMenuService(menuRepo, orderRepo, ratingRepo, hub, cfg), orderRepo, menuRepo
 }
 
 func TestMenuCreateRequiresDiet(t *testing.T) {

@@ -29,6 +29,7 @@ type PoolEngine struct {
 	cfg            *config.Config
 	alloc          AllocationStrategy
 	mu             sync.Mutex
+	pushSvc        *PushService
 }
 
 func NewPoolEngine(
@@ -53,6 +54,10 @@ func NewPoolEngine(
 		cfg:            cfg,
 		alloc:          alloc,
 	}
+}
+
+func (e *PoolEngine) SetPushService(svc *PushService) {
+	e.pushSvc = svc
 }
 
 // ensureShopOpen rejects order placement while the canteen is paused or closed.
@@ -244,6 +249,9 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 
 	e.broadcast(order.ID)
 	e.hub.NotifyShopOrdersUpdate()
+	if e.pushSvc != nil {
+		e.pushSvc.NotifyNewOrder(ctx, order)
+	}
 
 	stored, err := e.orderRepo.FindByID(ctx, order.ID)
 	if err != nil {
@@ -373,11 +381,17 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 	return ToOrderResponse(*stored, true), nil
 }
 
+// Reject is legal from submitted through ready — the shopkeeper's escape
+// hatch both for a brand-new order and for an already-accepted one where
+// something unexpected comes up later (e.g. an ingredient runs out mid-cook).
+// It always rejects the whole order; there is no partial reject. Refused if
+// pickup has already started on any item (handed_qty > 0).
 func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	var order *models.Order
+	returnedByMenuItem := make(map[uint]int)
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
 		var err error
 		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
@@ -387,22 +401,71 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 		if order == nil {
 			return ErrNotFound("order not found")
 		}
-		if order.Status != models.OrderSubmitted {
-			return ErrConflict("order is not in submitted state")
+		switch order.Status {
+		case models.OrderSubmitted, models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady:
+			// ok
+		default:
+			return ErrConflict("order can no longer be rejected")
 		}
-		order.Status = models.OrderRejected
-		order.TotalPrice = 0 // every item rejected; nothing owed
-		if err := e.orderRepo.Save(txCtx, order); err != nil {
-			return err
+		for _, it := range order.Items {
+			if it.HandedQty > 0 {
+				return ErrConflict("cannot reject — pickup has already started on this order")
+			}
 		}
+
 		for i := range order.Items {
 			it := &order.Items[i]
+			if it.Status == models.ItemRejected {
+				continue
+			}
+			if it.AllocatedQty > 0 {
+				if err := e.poolRepo.Add(txCtx, it.MenuItemID, it.AllocatedQty); err != nil {
+					return err
+				}
+				returnedByMenuItem[it.MenuItemID] += it.AllocatedQty
+				it.AllocatedQty = 0
+			}
 			it.Status = models.ItemRejected
 			if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
 				return err
 			}
 		}
-		return e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{})
+
+		order.Status = models.OrderRejected
+		order.TotalPrice = 0 // every item rejected; nothing owed
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return err
+		}
+		if err := e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{}); err != nil {
+			return err
+		}
+
+		// Re-assign any freed pool units to the next FCFS order(s).
+		for menuItemID, returned := range returnedByMenuItem {
+			if returned == 0 {
+				continue
+			}
+			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			if err != nil {
+				return err
+			}
+			for _, tid := range touched {
+				if tid == order.ID {
+					continue
+				}
+				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, tid)
+				if err != nil {
+					return err
+				}
+				if ord != nil {
+					e.recomputeStatus(ord)
+					if err := e.orderRepo.Save(txCtx, ord); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -410,10 +473,67 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 	}
 
 	e.broadcast(orderID)
+	if len(returnedByMenuItem) > 0 {
+		orders, _ := e.orderRepo.FindInProgress(ctx)
+		for _, o := range orders {
+			if o.ID != orderID {
+				e.broadcast(o.ID)
+			}
+		}
+	}
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
 
 	return ToOrderResponse(*order, true), nil
+}
+
+// RejectAllSubmitted auto-declines every still-submitted (not yet accepted)
+// order — called when the shop transitions to paused/closed, so a student's
+// undecided order doesn't sit forever waiting for a shopkeeper who has
+// stepped away. Submitted orders never had pool allocations, so no units need
+// returning to the pool here.
+func (e *PoolEngine) RejectAllSubmitted(ctx context.Context) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var rejectedIDs []uint
+	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
+		orders, err := e.orderRepo.FindIncoming(txCtx)
+		if err != nil {
+			return err
+		}
+		for i := range orders {
+			order := &orders[i]
+			order.Status = models.OrderRejected
+			order.TotalPrice = 0
+			if err := e.orderRepo.Save(txCtx, order); err != nil {
+				return err
+			}
+			for j := range order.Items {
+				it := &order.Items[j]
+				it.Status = models.ItemRejected
+				if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
+					return err
+				}
+			}
+			if err := e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{"reason": "shop_closed"}); err != nil {
+				return err
+			}
+			rejectedIDs = append(rejectedIDs, order.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	for _, id := range rejectedIDs {
+		e.broadcast(id)
+	}
+	if len(rejectedIDs) > 0 {
+		e.hub.NotifyShopOrdersUpdate()
+	}
+	return len(rejectedIDs), nil
 }
 
 func (e *PoolEngine) Cancel(ctx context.Context, orderID, userID uint) (OrderResponse, error) {

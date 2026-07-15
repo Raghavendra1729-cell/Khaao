@@ -379,6 +379,25 @@ func (r *GormOrderRepo) CountActive(ctx context.Context) (int, error) {
 	return int(count), err
 }
 
+// acceptedOrderStatuses returns the statuses that indicate the shopkeeper has
+// already committed to an order (accepted and actively working on it). Does NOT
+// include submitted — those haven't been accepted yet.
+func acceptedOrderStatuses() []models.OrderStatus {
+	return []models.OrderStatus{
+		models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady, models.OrderAwaitingPayment,
+	}
+}
+
+// CountAccepted returns how many orders the shopkeeper has already accepted
+// (status is preparing / partially_ready / ready / awaiting_payment). Does not
+// count submitted orders, which the shopkeeper hasn't committed to yet.
+func (r *GormOrderRepo) CountAccepted(ctx context.Context) (int, error) {
+	var count int64
+	err := getDB(ctx, r.db).Model(&models.Order{}).
+		Where("status IN ?", acceptedOrderStatuses()).Count(&count).Error
+	return int(count), err
+}
+
 // SumOrderedQtyByDate sums order_items.qty per menu item for a given order_date,
 // across every order whose status is not 'rejected'.
 func (r *GormOrderRepo) SumOrderedQtyByDate(ctx context.Context, date string) (map[uint]int, error) {
@@ -493,4 +512,78 @@ func (r *GormShopStatusRepo) Get(ctx context.Context) (*models.ShopStatus, error
 
 func (r *GormShopStatusRepo) Save(ctx context.Context, status *models.ShopStatus) error {
 	return getDB(ctx, r.db).Save(status).Error
+}
+
+type GormRatingRepo struct {
+	db *gorm.DB
+}
+
+func NewRatingRepo(db *gorm.DB) RatingRepo {
+	return &GormRatingRepo{db: db}
+}
+
+func (r *GormRatingRepo) SaveAll(ctx context.Context, ratings []models.ItemRating) error {
+	if len(ratings) == 0 {
+		return nil
+	}
+	// Silently ignore duplicates using ON CONFLICT DO NOTHING
+	return getDB(ctx, r.db).Clauses(clause.OnConflict{DoNothing: true}).Create(&ratings).Error
+}
+
+func (r *GormRatingRepo) GetMenuAggregates(ctx context.Context) (map[uint]MenuRatingAggregate, error) {
+	type row struct {
+		MenuItemID  uint
+		AvgRating   float64
+		RatingCount int
+	}
+	var rows []row
+	err := getDB(ctx, r.db).
+		Model(&models.ItemRating{}).
+		Select("menu_item_id, COALESCE(AVG(stars), 0) AS avg_rating, COUNT(*) AS rating_count").
+		Group("menu_item_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	
+	m := make(map[uint]MenuRatingAggregate, len(rows))
+	for _, rw := range rows {
+		m[rw.MenuItemID] = MenuRatingAggregate{
+			AvgRating:   rw.AvgRating,
+			RatingCount: rw.RatingCount,
+		}
+	}
+	return m, nil
+}
+
+type GormPushRepo struct {
+	db *gorm.DB
+}
+
+func NewPushRepo(db *gorm.DB) PushRepo {
+	return &GormPushRepo{db: db}
+}
+
+func (r *GormPushRepo) Save(ctx context.Context, sub *models.PushSubscription) error {
+	return getDB(ctx, r.db).Save(sub).Error
+}
+
+func (r *GormPushRepo) FindByRole(ctx context.Context, role models.Role) ([]models.PushSubscription, error) {
+	var subs []models.PushSubscription
+	err := getDB(ctx, r.db).Joins("JOIN users ON users.id = push_subscriptions.user_id").
+		Where("users.role = ?", role).Find(&subs).Error
+	return subs, err
+}
+
+func (r *GormPushRepo) DeleteByEndpoint(ctx context.Context, endpoint string) error {
+	return getDB(ctx, r.db).Where("endpoint = ?", endpoint).Delete(&models.PushSubscription{}).Error
+}
+
+func (r *GormPushRepo) FindByEndpoint(ctx context.Context, endpoint string) (*models.PushSubscription, error) {
+	var sub models.PushSubscription
+	err := getDB(ctx, r.db).Where("endpoint = ?", endpoint).First(&sub).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &sub, err
 }

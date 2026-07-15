@@ -50,7 +50,15 @@ func (m *mockOrderRepo) FindActiveByUserIDForUpdate(ctx context.Context, uid uin
 func (m *mockOrderRepo) FindHistoryByUserID(ctx context.Context, uid uint) ([]models.Order, error) {
 	return nil, nil
 }
-func (m *mockOrderRepo) FindIncoming(ctx context.Context) ([]models.Order, error) { return nil, nil }
+func (m *mockOrderRepo) FindIncoming(ctx context.Context) ([]models.Order, error) {
+	var res []models.Order
+	for _, o := range m.orders {
+		if o.Status == models.OrderSubmitted {
+			res = append(res, *o)
+		}
+	}
+	return res, nil
+}
 func (m *mockOrderRepo) FindInProgress(ctx context.Context) ([]models.Order, error) {
 	var res []models.Order
 	for _, o := range m.orders {
@@ -99,6 +107,21 @@ func (m *mockOrderRepo) CountActive(_ context.Context) (int, error) {
 	n := 0
 	for _, o := range m.orders {
 		if models.IsActiveOrderStatus(o.Status) {
+			n++
+		}
+	}
+	return n, nil
+}
+func (m *mockOrderRepo) CountAccepted(_ context.Context) (int, error) {
+	acceptedStatuses := map[models.OrderStatus]bool{
+		models.OrderPreparing:      true,
+		models.OrderPartiallyReady: true,
+		models.OrderReady:          true,
+		models.OrderAwaitingPayment: true,
+	}
+	n := 0
+	for _, o := range m.orders {
+		if acceptedStatuses[o.Status] {
 			n++
 		}
 	}
@@ -512,3 +535,215 @@ func TestPaidGuards(t *testing.T) {
 		t.Errorf("unexpected err: %v", err)
 	}
 }
+
+// setupShopStatusSvc builds a ShopStatusService wired to a real PoolEngine backed
+// by the same mock repos, so shop-status guard and auto-reject tests can use it.
+func setupShopStatusSvc(engine *services.PoolEngine, orderRepo *mockOrderRepo) (*services.ShopStatusService, *mockShopStatusRepo) {
+	shopStatusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	hub := realtime.NewHub()
+	svc := services.NewShopStatusService(shopStatusRepo, orderRepo, hub)
+	svc.SetPool(engine)
+	return svc, shopStatusRepo
+}
+
+// TestShopStatusGuardBlockedOnlyByAcceptedOrders verifies Fix 1: a submitted
+// order must NOT block a pause/close transition (shopkeeper hasn't committed to
+// it yet), but an accepted order (preparing, etc.) must block it.
+func TestShopStatusGuardBlockedOnlyByAcceptedOrders(t *testing.T) {
+	engine, orderRepo, _ := setupEngine()
+	svc, _ := setupShopStatusSvc(engine, orderRepo)
+	ctx := context.Background()
+
+	// Seed a submitted order only — pause must succeed.
+	submitted := &models.Order{
+		ID:     1,
+		UserID: 1,
+		Status: models.OrderSubmitted,
+		Items:  []models.OrderItem{{ID: 1, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemPending}},
+	}
+	orderRepo.Create(ctx, submitted)
+
+	_, err := svc.Set(ctx, "paused", nil)
+	if err != nil {
+		t.Errorf("pause must succeed when only submitted orders exist, got: %v", err)
+	}
+
+	// Reset shop status to open for the next sub-test.
+	_, _ = svc.Set(ctx, "open", nil)
+
+	// Now add a preparing order — pause must be refused.
+	preparing := &models.Order{
+		ID:     2,
+		UserID: 2,
+		Status: models.OrderPreparing,
+		Items:  []models.OrderItem{{ID: 2, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemQueued}},
+	}
+	orderRepo.Create(ctx, preparing)
+
+	_, err = svc.Set(ctx, "paused", nil)
+	if err == nil {
+		t.Errorf("pause must be refused when a preparing order exists")
+	}
+}
+
+// TestAutoRejectSubmittedOnClose verifies Fix 2: transitioning to closed/paused
+// auto-rejects any still-submitted orders and broadcasts them.
+func TestAutoRejectSubmittedOnClose(t *testing.T) {
+	engine, orderRepo, _ := setupEngine()
+	svc, _ := setupShopStatusSvc(engine, orderRepo)
+	ctx := context.Background()
+
+	// Two submitted orders, no accepted orders (so pause is allowed).
+	for i := 1; i <= 2; i++ {
+		orderRepo.Create(ctx, &models.Order{
+			ID:     uint(i),
+			UserID: uint(i),
+			Status: models.OrderSubmitted,
+			Items:  []models.OrderItem{{ID: uint(i), MenuItemID: 10, Qty: 1, PriceEach: 500, Status: models.ItemPending}},
+		})
+	}
+
+	_, err := svc.Set(ctx, "closed", nil)
+	if err != nil {
+		t.Fatalf("close must succeed with only submitted orders, got: %v", err)
+	}
+
+	// Both orders must now be rejected with zeroed totals.
+	for i := 1; i <= 2; i++ {
+		o, _ := orderRepo.FindByID(ctx, uint(i))
+		if o.Status != models.OrderRejected {
+			t.Errorf("order %d: expected rejected after auto-reject sweep, got %v", i, o.Status)
+		}
+		if o.TotalPrice != 0 {
+			t.Errorf("order %d: expected TotalPrice 0 after auto-reject, got %d", i, o.TotalPrice)
+		}
+	}
+}
+
+// TestCancelRefusedAfterHandover verifies Fix 3 (guard): cancel must be refused
+// with 409 once any item has handed_qty > 0, regardless of order status.
+func TestCancelRefusedAfterHandover(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	ctx := context.Background()
+
+	// Order in partially_ready with one unit already handed over.
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderPartiallyReady,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 1, HandedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	repo.Create(ctx, order)
+
+	_, err := engine.Cancel(ctx, 1, 42)
+	if err == nil {
+		t.Errorf("expected cancel to be refused once a unit has been handed over")
+	}
+}
+
+// TestCancelThroughReadyReallocates verifies Fix 3 (happy path): a student can
+// cancel an order in 'ready' status (nothing handed over), and the freed
+// allocated units are re-distributed FCFS to another waiting order.
+// Cancel is student-initiated and only ever legal pre-accept — this is the
+// direct fix for a real loss incident (a student cancelled after the
+// shopkeeper had already cooked part of the order).
+func TestCancelRefusedOnceAccepted(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	ctx := context.Background()
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderReady,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 0, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	repo.Create(ctx, order)
+
+	_, err := engine.Cancel(ctx, 1, 42)
+	if err == nil {
+		t.Fatal("expected Cancel to be refused once the order is past submitted")
+	}
+}
+
+// Reject is the shopkeeper's escape hatch, legal even after accepting — the
+// "found something unexpected" case — and reallocates freed pool units to the
+// next FCFS-waiting order, same as the pre-accept path.
+func TestRejectAfterAcceptReallocates(t *testing.T) {
+	engine, repo, pool := setupEngine()
+	ctx := context.Background()
+
+	// order1: accepted, status=ready, 2 units of menu item 10 allocated.
+	order1 := &models.Order{
+		ID:         1,
+		UserID:     42,
+		Status:     models.OrderReady,
+		TotalPrice: 2000,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 0, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	repo.Create(ctx, order1)
+
+	// order2: a second student waiting for 1 unit of the same item.
+	order2 := &models.Order{
+		ID:     2,
+		UserID: 99,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 2, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
+		},
+	}
+	repo.Create(ctx, order2)
+
+	_, err := engine.Reject(ctx, 1)
+	if err != nil {
+		t.Fatalf("Reject after accept: %v", err)
+	}
+
+	o1, _ := repo.FindByID(ctx, 1)
+	if o1.Status != models.OrderRejected {
+		t.Errorf("expected rejected, got %v", o1.Status)
+	}
+	if o1.TotalPrice != 0 {
+		t.Errorf("expected TotalPrice 0 after reject, got %d", o1.TotalPrice)
+	}
+
+	o2, _ := repo.FindByID(ctx, 2)
+	if o2.Items[0].AllocatedQty != 1 {
+		t.Errorf("order2: expected 1 unit reallocated after reject, got %d", o2.Items[0].AllocatedQty)
+	}
+	if o2.Status != models.OrderReady {
+		t.Errorf("order2: expected ready after reallocation, got %v", o2.Status)
+	}
+
+	if pool.pool[10] != 1 {
+		t.Errorf("expected 1 leftover unit in pool, got %d", pool.pool[10])
+	}
+}
+
+// Reject is refused once the customer has started collecting — you can't
+// un-hand-over an item.
+func TestRejectAfterAcceptRefusedWhenHandedOver(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	ctx := context.Background()
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderPartiallyReady,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 1, HandedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	repo.Create(ctx, order)
+
+	_, err := engine.Reject(ctx, 1)
+	if err == nil {
+		t.Fatal("expected Reject to be refused once pickup has started")
+	}
+}
+

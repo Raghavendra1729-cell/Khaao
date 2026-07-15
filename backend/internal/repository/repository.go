@@ -58,6 +58,12 @@ type OrderRepo interface {
 	// (submitted / preparing / partially_ready / ready / awaiting_payment).
 	// Used by the shop-status guard.
 	CountActive(ctx context.Context) (int, error)
+	// CountAccepted returns the number of orders in a status that indicates the
+	// shopkeeper has already committed to them (preparing / partially_ready /
+	// ready / awaiting_payment). submitted orders are excluded because the
+	// shopkeeper hasn't accepted them yet and must be able to pause/close freely
+	// while they exist. Used by ShopStatusService.Set to guard pause/close.
+	CountAccepted(ctx context.Context) (int, error)
 	// SumOrderedQtyByDate returns, per menu item id, the total ordered qty for
 	// the given business-day date across all non-rejected orders. Powers the
 	// public menu's order_count_today (trending) figure.
@@ -79,4 +85,21 @@ type PoolRepo interface {
 
 type EventRepo interface {
 	Log(ctx context.Context, event *models.OrderEvent) error
+}
+
+type MenuRatingAggregate struct {
+	AvgRating   float64
+	RatingCount int
+}
+
+type RatingRepo interface {
+	SaveAll(ctx context.Context, ratings []models.ItemRating) error
+	GetMenuAggregates(ctx context.Context) (map[uint]MenuRatingAggregate, error)
+}
+
+type PushRepo interface {
+	Save(ctx context.Context, sub *models.PushSubscription) error
+	FindByRole(ctx context.Context, role models.Role) ([]models.PushSubscription, error)
+	DeleteByEndpoint(ctx context.Context, endpoint string) error
+	FindByEndpoint(ctx context.Context, endpoint string) (*models.PushSubscription, error)
 }

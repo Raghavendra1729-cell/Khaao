@@ -13,11 +13,12 @@ import (
 )
 
 type AuthController struct {
-	auth *services.AuthService
+	auth    *services.AuthService
+	tickets *services.SSETicketService
 }
 
-func NewAuthController(auth *services.AuthService) *AuthController {
-	return &AuthController{auth: auth}
+func NewAuthController(auth *services.AuthService, tickets *services.SSETicketService) *AuthController {
+	return &AuthController{auth: auth, tickets: tickets}
 }
 
 type firebaseLoginRequest struct {
@@ -49,6 +50,22 @@ func (ac *AuthController) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": services.ToUserResponse(user)})
+}
+
+// SSETicket mints a short-lived, single-use ticket the caller can use once,
+// as "?ticket=" on an SSE (EventSource) endpoint, in place of ever putting
+// the real JWT in a URL. See services.SSETicketService for why (STATUS.md §
+// P1-b).
+func (ac *AuthController) SSETicket(c *gin.Context) {
+	ticket, err := ac.tickets.Mint(middleware.UserID(c))
+	if err != nil {
+		respondError(c, services.ErrInternal("failed to mint ticket"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ticket":     ticket,
+		"expires_in": int(services.SSETicketTTL.Seconds()),
+	})
 }
 
 func respondError(c *gin.Context, err error) {

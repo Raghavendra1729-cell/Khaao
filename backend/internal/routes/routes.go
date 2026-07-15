@@ -18,7 +18,10 @@ func Setup(
 	menuSvc *services.MenuService,
 	orderSvc *services.OrderService,
 	shopStatusSvc *services.ShopStatusService,
+	ratingsSvc *services.RatingsService,
 	poolEngine *services.PoolEngine,
+	pushSvc *services.PushService,
+	ssTicketSvc *services.SSETicketService,
 	hub *realtime.Hub,
 ) *gin.Engine {
 	r := gin.New()
@@ -27,15 +30,25 @@ func Setup(
 	r.Use(middleware.CORS(cfg))
 	r.Use(middleware.MaxBodyBytes(1 << 20)) // 1 MiB request-body cap
 
-	authCtrl := controllers.NewAuthController(authSvc)
+	authCtrl := controllers.NewAuthController(authSvc, ssTicketSvc)
 	menuCtrl := controllers.NewMenuController(menuSvc)
-	orderCtrl := controllers.NewOrderController(orderSvc, poolEngine, hub)
+	orderCtrl := controllers.NewOrderController(orderSvc, poolEngine, ratingsSvc, hub)
 	shopCtrl := controllers.NewShopController(orderSvc, poolEngine, hub, cfg)
 	shopStatusCtrl := controllers.NewShopStatusController(shopStatusSvc)
+	pushCtrl := controllers.NewPushController(cfg, pushSvc)
 
 	requireAuth := middleware.RequireAuth(cfg, authSvc)
+	requireSSEAuth := middleware.RequireSSEAuth(authSvc, ssTicketSvc)
 	requireStudent := middleware.RequireRole(string(models.RoleStudent))
 	requireShopkeeper := middleware.RequireRole(string(models.RoleShopkeeper))
+
+	// P1-c: per-user rate limiting on mutations, and a per-user cap on
+	// concurrent SSE connections. Both are in-memory and keyed by user id —
+	// see middleware/ratelimit.go for the numbers and the reasoning.
+	rateLimiter := middleware.NewRateLimiter()
+	rateLimit := middleware.RateLimitByUser(rateLimiter)
+	sseConnLimiter := middleware.NewSSEConnectionLimiter()
+	limitSSEConns := middleware.LimitConcurrentSSE(sseConnLimiter)
 
 	api := r.Group("/api")
 
@@ -54,28 +67,44 @@ func Setup(
 		auth.GET("/config", authCtrl.Config)
 		auth.POST("/firebase", authCtrl.Firebase)
 		auth.GET("/me", requireAuth, authCtrl.Me)
+		// Mints the short-lived ticket the frontend exchanges for SSE access
+		// (see requireSSEAuth below) — authenticated the normal way, via the
+		// Bearer JWT, so the real token never has to appear in a URL.
+		auth.POST("/sse-ticket", requireAuth, rateLimit, authCtrl.SSETicket)
+	}
+
+	push := api.Group("/push")
+	{
+		push.GET("/vapid-public-key", pushCtrl.GetVapidPublicKey)
+		push.POST("/subscribe", requireAuth, rateLimit, pushCtrl.Subscribe)
 	}
 
 	// Student-facing routes (authenticated + student role).
 	student := api.Group("")
-	student.Use(requireAuth, requireStudent)
+	student.Use(requireAuth, requireStudent, rateLimit)
 	{
 		student.POST("/orders", orderCtrl.Create)
 		student.GET("/orders/active", orderCtrl.Active)
 		student.GET("/orders", orderCtrl.History)
 		student.POST("/orders/:id/cancel", orderCtrl.Cancel)
-		student.GET("/stream", orderCtrl.Stream)
+		student.POST("/orders/:id/ratings", orderCtrl.Rate)
 	}
+	// The student SSE stream authenticates via a one-use ticket instead of
+	// the JWT (P1-b) and is capped per-user (P1-c), so it's registered
+	// standalone rather than inside the `student` group above, which uses
+	// JWT-based requireAuth for its (rate-limited) mutation routes.
+	api.GET("/stream", requireSSEAuth, requireStudent, limitSSEConns, orderCtrl.Stream)
 
 	// Shopkeeper-only routes.
 	shop := api.Group("/shop")
-	shop.Use(requireAuth, requireShopkeeper)
+	shop.Use(requireAuth, requireShopkeeper, rateLimit)
 	{
 		shop.GET("/menu", menuCtrl.ListAll)
 		shop.POST("/menu", menuCtrl.Create)
 		shop.PUT("/menu/:id", menuCtrl.Update)
 		shop.DELETE("/menu/:id", menuCtrl.Delete)
 		shop.POST("/menu/:id/stock", menuCtrl.SetStock)
+		shop.POST("/menu/photo-signature", controllers.GetCloudinarySignature(cfg))
 
 		shop.GET("/orders", shopCtrl.Orders)
 		shop.GET("/history", shopCtrl.History)
@@ -90,9 +119,11 @@ func Setup(
 		shop.POST("/orders/:id/paid", shopCtrl.Paid)
 
 		shop.POST("/status", shopStatusCtrl.Set)
-
-		shop.GET("/stream", shopCtrl.Stream)
 	}
+	// Same reasoning as the student stream above: ticket-authenticated,
+	// per-user connection-capped, registered outside the JWT-based `shop`
+	// group.
+	api.GET("/shop/stream", requireSSEAuth, requireShopkeeper, limitSSEConns, shopCtrl.Stream)
 
 	return r
 }

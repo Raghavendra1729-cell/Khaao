@@ -13,13 +13,14 @@ import (
 )
 
 type OrderController struct {
-	orderService *services.OrderService
-	poolEngine   *services.PoolEngine
-	hub          *realtime.Hub
+	orderService   *services.OrderService
+	poolEngine     *services.PoolEngine
+	ratingsService *services.RatingsService
+	hub            *realtime.Hub
 }
 
-func NewOrderController(os *services.OrderService, pe *services.PoolEngine, hub *realtime.Hub) *OrderController {
-	return &OrderController{orderService: os, poolEngine: pe, hub: hub}
+func NewOrderController(os *services.OrderService, pe *services.PoolEngine, rs *services.RatingsService, hub *realtime.Hub) *OrderController {
+	return &OrderController{orderService: os, poolEngine: pe, ratingsService: rs, hub: hub}
 }
 
 type createOrderRequest struct {
@@ -70,6 +71,28 @@ func (oc *OrderController) Cancel(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"order": order})
+}
+
+type submitRatingsRequest struct {
+	Ratings []services.RatingInput `json:"ratings"`
+}
+
+func (oc *OrderController) Rate(c *gin.Context) {
+	orderID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req submitRatingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if err := oc.ratingsService.SubmitRatings(c.Request.Context(), orderID, middleware.UserID(c), req.Ratings); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusOK)
 }
 
 func (oc *OrderController) Stream(c *gin.Context) {

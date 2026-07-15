@@ -29,6 +29,12 @@ type Config struct {
 	FrontendOrigin     string
 	SeedSampleMenu     bool
 	BusinessTimezone   string
+	CloudinaryCloudName string
+	CloudinaryAPIKey    string
+	CloudinaryAPISecret string
+	VapidPublicKey      string
+	VapidPrivateKey     string
+	VapidSubject        string
 
 	loc *time.Location
 }
@@ -49,6 +55,12 @@ func Load() *Config {
 		FrontendOrigin:     envOr("FRONTEND_ORIGIN", "http://localhost:5173"),
 		SeedSampleMenu:     envOrBool("SEED_SAMPLE_MENU", true),
 		BusinessTimezone:   envOr("BUSINESS_TIMEZONE", "Asia/Kolkata"),
+		CloudinaryCloudName: envOr("CLOUDINARY_CLOUD_NAME", ""),
+		CloudinaryAPIKey:    envOr("CLOUDINARY_API_KEY", ""),
+		CloudinaryAPISecret: envOr("CLOUDINARY_API_SECRET", ""),
+		VapidPublicKey:      envOr("VAPID_PUBLIC_KEY", ""),
+		VapidPrivateKey:     envOr("VAPID_PRIVATE_KEY", ""),
+		VapidSubject:        envOr("VAPID_SUBJECT", ""),
 	}
 }
 

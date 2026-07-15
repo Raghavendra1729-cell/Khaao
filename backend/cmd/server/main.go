@@ -42,6 +42,8 @@ func main() {
 	eventRepo := repository.NewEventRepo(db)
 	emailRepo := repository.NewShopkeeperEmailRepo(db)
 	shopStatusRepo := repository.NewShopStatusRepo(db)
+	ratingRepo := repository.NewRatingRepo(db)
+	pushRepo := repository.NewPushRepo(db)
 
 	var tokenVerifier authn.TokenVerifier
 	if cfg.AuthFake {
@@ -53,18 +55,25 @@ func main() {
 	}
 
 	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
-	menuSvc := services.NewMenuService(menuRepo, orderRepo, hub, cfg)
+	menuSvc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, hub, cfg)
 	orderSvc := services.NewOrderService(orderRepo)
 	shopStatusSvc := services.NewShopStatusService(shopStatusRepo, orderRepo, hub)
+	ratingsSvc := services.NewRatingsService(ratingRepo, orderRepo)
+	pushSvc := services.NewPushService(cfg, pushRepo)
+	ssTicketSvc := services.NewSSETicketService()
 	alloc := &services.FCFSAllocation{}
 	poolEngine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, shopStatusRepo, hub, cfg, alloc)
+	// Wire poolEngine into shopStatusSvc so Set() can auto-reject submitted
+	// orders when the shop transitions to paused/closed (Fix 2).
+	shopStatusSvc.SetPool(poolEngine)
+	poolEngine.SetPushService(pushSvc)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go runExpiryTicker(ctx, poolEngine)
 
-	router := routes.Setup(cfg, authSvc, menuSvc, orderSvc, shopStatusSvc, poolEngine, hub)
+	router := routes.Setup(cfg, authSvc, menuSvc, orderSvc, shopStatusSvc, ratingsSvc, poolEngine, pushSvc, ssTicketSvc, hub)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           router,

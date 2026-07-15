@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,9 +32,11 @@ type MenuItemResponse struct {
 	Status          string   `json:"status"`
 	Orderable       bool     `json:"orderable"`
 	OrderCountToday int      `json:"order_count_today"`
+	AvgRating       float64  `json:"avg_rating"`
+	RatingCount     int      `json:"rating_count"`
 }
 
-func ToMenuItemResponse(item models.MenuItem, now time.Time, orderCountToday int) MenuItemResponse {
+func ToMenuItemResponse(item models.MenuItem, now time.Time, orderCountToday int, agg repository.MenuRatingAggregate) MenuItemResponse {
 	status := "available"
 	switch {
 	case item.OutOfStock:
@@ -67,6 +70,8 @@ func ToMenuItemResponse(item models.MenuItem, now time.Time, orderCountToday int
 		Status:          status,
 		Orderable:       orderable,
 		OrderCountToday: orderCountToday,
+		AvgRating:       math.Round(agg.AvgRating*10) / 10,
+		RatingCount:     agg.RatingCount,
 	}
 }
 
@@ -114,14 +119,15 @@ type MenuItemInput struct {
 }
 
 type MenuService struct {
-	repo      repository.MenuRepo
-	orderRepo repository.OrderRepo
-	hub       *realtime.Hub
-	cfg       *config.Config
+	repo       repository.MenuRepo
+	orderRepo  repository.OrderRepo
+	ratingRepo repository.RatingRepo
+	hub        *realtime.Hub
+	cfg        *config.Config
 }
 
-func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
-	return &MenuService{repo: repo, orderRepo: orderRepo, hub: hub, cfg: cfg}
+func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
+	return &MenuService{repo: repo, orderRepo: orderRepo, ratingRepo: ratingRepo, hub: hub, cfg: cfg}
 }
 
 // now returns the current time in the configured business timezone, so
@@ -140,7 +146,11 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items, s.now(), counts), nil
+	aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toMenuResponses(items, s.now(), counts, aggs), nil
 }
 
 func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
@@ -152,7 +162,11 @@ func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items, s.now(), counts), nil
+	aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toMenuResponses(items, s.now(), counts, aggs), nil
 }
 
 // orderCountsToday returns per-menu-item ordered qty for the current business
@@ -162,10 +176,10 @@ func (s *MenuService) orderCountsToday(ctx context.Context) (map[uint]int, error
 	return s.orderRepo.SumOrderedQtyByDate(ctx, today)
 }
 
-func toMenuResponses(items []models.MenuItem, now time.Time, counts map[uint]int) []MenuItemResponse {
+func toMenuResponses(items []models.MenuItem, now time.Time, counts map[uint]int, aggs map[uint]repository.MenuRatingAggregate) []MenuItemResponse {
 	out := make([]MenuItemResponse, 0, len(items))
 	for _, it := range items {
-		out = append(out, ToMenuItemResponse(it, now, counts[it.ID]))
+		out = append(out, ToMenuItemResponse(it, now, counts[it.ID], aggs[it.ID]))
 	}
 	return out
 }
@@ -264,8 +278,8 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 		return MenuItemResponse{}, err
 	}
 	s.hub.NotifyMenuUpdate()
-	// A brand-new item has no orders today.
-	return ToMenuItemResponse(item, s.now(), 0), nil
+	// A brand-new item has no orders today and no ratings.
+	return ToMenuItemResponse(item, s.now(), 0, repository.MenuRatingAggregate{}), nil
 }
 
 func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) (MenuItemResponse, error) {
@@ -297,7 +311,11 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 	if err != nil {
 		return MenuItemResponse{}, err
 	}
-	return ToMenuItemResponse(*item, s.now(), counts[item.ID]), nil
+	aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
+	if err != nil {
+		return MenuItemResponse{}, err
+	}
+	return ToMenuItemResponse(*item, s.now(), counts[item.ID], aggs[item.ID]), nil
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
@@ -334,7 +352,11 @@ func (s *MenuService) SetStock(ctx context.Context, id uint, outOfStock bool) (M
 	if err != nil {
 		return MenuItemResponse{}, err
 	}
-	return ToMenuItemResponse(*item, s.now(), counts[item.ID]), nil
+	aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
+	if err != nil {
+		return MenuItemResponse{}, err
+	}
+	return ToMenuItemResponse(*item, s.now(), counts[item.ID], aggs[item.ID]), nil
 }
 
 func (s *MenuService) GetByID(ctx context.Context, id uint) (models.MenuItem, error) {
