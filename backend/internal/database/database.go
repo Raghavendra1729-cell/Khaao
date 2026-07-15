@@ -1,23 +1,46 @@
 // Package database opens the GORM connection, sets up postgres extensions,
-// runs AutoMigrate, and seeds on boot.
+// runs versioned SQL migrations, and seeds on boot.
 package database
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	migratepg "github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"khaao/internal/config"
 	"khaao/internal/models"
+	"khaao/migrations"
 )
 
-// Open opens the postgres connection, creates extensions, and runs AutoMigrate.
+// Open opens the postgres connection, creates extensions, and runs the
+// versioned SQL migrations in backend/migrations (embedded into the binary
+// — see migrations.FS).
+//
+// Migrations run automatically on every boot, same convenience AutoMigrate
+// used to provide. That's the right default in dev/test, and it's arguably
+// fine in production too *for now*: golang-migrate's Up() is idempotent (a
+// fully-migrated DB is a fast no-op check against schema_migrations) and
+// this app is deliberately single-replica (see STATUS.md § Topology
+// decision), so there's no multi-instance boot race to worry about. The
+// thing to revisit before/at first real deploy: once there are real users
+// and real migrations with real consequences, consider gating auto-run
+// behind APP_ENV (e.g. only auto-run in dev/test, require an explicit
+// `migrate` CLI step — or a one-off `--migrate-only` server flag — in
+// production) so a bad migration can't take down boot of an already-running
+// service, and so schema changes are a deliberate, reviewed step rather than
+// a side effect of restarting the process. Not implemented here: there is
+// no production deployment yet to actually need the gate (see STATUS.md
+// § Deployment), so adding it now would be speculative.
 func Open(cfg *config.Config) (*gorm.DB, error) {
 	gormCfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
 
@@ -42,27 +65,37 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("create citext extension: %w", err)
 	}
 
-	if err := db.AutoMigrate(
-		&models.User{},
-		&models.MenuItem{},
-		&models.Order{},
-		&models.OrderItem{},
-		&models.ItemPool{},
-		&models.OrderEvent{},
-		&models.ShopkeeperEmail{},
-		&models.ShopStatus{},
-	); err != nil {
-		return nil, fmt.Errorf("automigrate: %w", err)
-	}
-
-	idxSQL := `CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_order_per_user 
-		ON orders(user_id) 
-		WHERE status IN ('submitted','preparing','partially_ready','ready','awaiting_payment');`
-	if err := db.Exec(idxSQL).Error; err != nil {
-		return nil, fmt.Errorf("create partial index: %w", err)
+	if err := runMigrations(sqlDB); err != nil {
+		return nil, err
 	}
 
 	return db, nil
+}
+
+// runMigrations applies every pending migration in the embedded
+// backend/migrations directory via golang-migrate, reusing the already-open
+// *sql.DB (no second connection pool). A fully up-to-date database is a
+// cheap no-op (migrate.ErrNoChange), not an error.
+func runMigrations(sqlDB *sql.DB) error {
+	driver, err := migratepg.WithInstance(sqlDB, &migratepg.Config{})
+	if err != nil {
+		return fmt.Errorf("init migrate postgres driver: %w", err)
+	}
+
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("init migrate source: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", src, "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("init migrate instance: %w", err)
+	}
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	return nil
 }
 
 // Seed upserts shopkeeper emails and seeds sample menu.
