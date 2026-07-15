@@ -123,7 +123,14 @@ export function StudentRealtime() {
     [queryClient, showToast, location.pathname],
   );
 
-  useSSE('/api/stream', handleMessage);
+  const handleOpen = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
+    queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
+    queryClient.invalidateQueries({ queryKey: ['menu'] });
+    queryClient.invalidateQueries({ queryKey: ['shop-status'] });
+  }, [queryClient]);
+
+  useSSE('/api/stream', handleMessage, handleOpen);
 
   return null;
 }

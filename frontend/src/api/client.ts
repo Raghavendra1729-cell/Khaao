@@ -4,6 +4,13 @@ const TOKEN_KEY = 'khaao_token';
 const USER_KEY = 'khaao_user';
 const UNAUTHORIZED_EVENT = 'khaao:unauthorized';
 
+// TOKEN STORAGE TRADEOFF (deliberately left as-is this pass): the Khaao JWT
+// lives in localStorage for up to 7 days, so it's exfiltratable by any XSS
+// bug — a full HttpOnly-cookie session would close that gap but is a bigger
+// change (touches CORS/CSRF, the Firebase-popup login flow, AUTH_FAKE dev
+// testing) that deserves its own dedicated pass. See STATUS.md § P1-b for
+// the fuller writeup before you pick this back up.
+
 export class ApiError extends Error {
   status: number;
 

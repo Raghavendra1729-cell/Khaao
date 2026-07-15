@@ -67,7 +67,14 @@ export function ShopRealtime() {
     [queryClient],
   );
 
-  useSSE('/api/shop/stream', handleMessage);
+  const handleOpen = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
+    queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
+    queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
+    queryClient.invalidateQueries({ queryKey: ['shop-status'] });
+  }, [queryClient]);
+
+  useSSE('/api/shop/stream', handleMessage, handleOpen);
 
   return null;
 }
