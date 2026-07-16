@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -154,7 +154,7 @@ func (e *PoolEngine) broadcast(orderID uint) {
 	ctx := context.Background()
 	order, err := e.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
-		log.Printf("khaao: broadcast: load order %d: %v", orderID, err)
+		slog.Error("khaao: broadcast: load order failed", "order_id", orderID, "error", err)
 		return
 	}
 	if order != nil {

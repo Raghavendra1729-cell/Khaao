@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -58,7 +58,7 @@ func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
 	}
 	subs, err := s.repo.FindByRole(ctx, models.RoleShopkeeper)
 	if err != nil {
-		log.Printf("khaao: push: could not load shopkeeper subscriptions: %v", err)
+		slog.Error("khaao: push: could not load shopkeeper subscriptions", "error", err)
 		return
 	}
 	if len(subs) == 0 {
@@ -69,7 +69,7 @@ func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
 		Body:  fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items)),
 	})
 	if err != nil {
-		log.Printf("khaao: push: could not marshal payload: %v", err)
+		slog.Error("khaao: push: could not marshal payload", "error", err)
 		return
 	}
 	for _, sub := range subs {
@@ -94,7 +94,7 @@ func (s *PushService) send(sub models.PushSubscription, payload []byte) {
 		TTL:             60,
 	})
 	if err != nil {
-		log.Printf("khaao: push: send to endpoint failed: %v", err)
+		slog.Warn("khaao: push: send to endpoint failed", "error", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -103,7 +103,7 @@ func (s *PushService) send(sub models.PushSubscription, payload []byte) {
 	// it rather than retrying forever.
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 		if delErr := s.repo.DeleteByEndpoint(context.Background(), sub.Endpoint); delErr != nil {
-			log.Printf("khaao: push: could not clean up dead subscription: %v", delErr)
+			slog.Warn("khaao: push: could not clean up dead subscription", "error", delErr)
 		}
 	}
 }

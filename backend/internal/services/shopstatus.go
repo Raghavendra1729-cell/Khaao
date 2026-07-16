@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"khaao/internal/models"
@@ -102,9 +102,9 @@ func (s *ShopStatusService) Set(ctx context.Context, state string, reopenAt *tim
 		n, err := s.pool.RejectAllSubmitted(ctx)
 		if err != nil {
 			// Non-fatal: the status was already saved. Log and continue.
-			log.Printf("khaao: shopstatus: auto-reject submitted orders after %s: %v", state, err)
+			slog.Error("khaao: shopstatus: auto-reject submitted orders failed", "state", state, "error", err)
 		} else if n > 0 {
-			log.Printf("khaao: shopstatus: auto-rejected %d submitted order(s) on transition to %s", n, state)
+			slog.Info("khaao: shopstatus: auto-rejected submitted orders", "count", n, "state", state)
 		}
 	}
 

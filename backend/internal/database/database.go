@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -128,7 +128,7 @@ func seedShopStatus(db *gorm.DB) error {
 	if err := db.Create(&status).Error; err != nil {
 		return err
 	}
-	log.Printf("khaao: seeded shop status (open)")
+	slog.Info("khaao: seeded shop status", "state", "open")
 	return nil
 }
 
@@ -149,7 +149,7 @@ func seedShopkeeperEmails(db *gorm.DB, raw string) error {
 			if err := db.Create(&se).Error; err != nil {
 				return err
 			}
-			log.Printf("khaao: seeded shopkeeper email %s", email)
+			slog.Info("khaao: seeded shopkeeper email", "email", email)
 		} else if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func seedSampleMenu(db *gorm.DB) error {
 	if err := db.Create(&items).Error; err != nil {
 		return err
 	}
-	log.Printf("khaao: seeded %d sample menu items", len(items))
+	slog.Info("khaao: seeded sample menu items", "count", len(items))
 	return nil
 }
 
