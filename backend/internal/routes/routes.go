@@ -25,7 +25,15 @@ func Setup(
 	hub *realtime.Hub,
 ) *gin.Engine {
 	r := gin.New()
+	// This app never reads client IP (rate limiting is per-authenticated-user,
+	// see middleware/ratelimit.go) — nil tells Gin there are no trusted
+	// proxies, which silences its "trust all proxies" startup warning and
+	// makes explicit that X-Forwarded-For is never used for anything here.
+	if err := r.SetTrustedProxies(nil); err != nil {
+		panic(err)
+	}
 	r.Use(gin.Recovery())
+	r.Use(middleware.RequestLogger())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS(cfg))
 	r.Use(middleware.MaxBodyBytes(1 << 20)) // 1 MiB request-body cap
