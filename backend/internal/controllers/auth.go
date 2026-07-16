@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -71,10 +71,18 @@ func (ac *AuthController) SSETicket(c *gin.Context) {
 func respondError(c *gin.Context, err error) {
 	var appErr *services.AppError
 	if errors.As(err, &appErr) {
+		switch {
+		case appErr.Status >= 500:
+			slog.Error("khaao: app error", "status", appErr.Status, "message", appErr.Message, "path", c.FullPath())
+		case appErr.Status == http.StatusConflict:
+			// Tx conflicts and order-state transition failures surface here
+			// for every service, without instrumenting each call site.
+			slog.Warn("khaao: conflict", "status", appErr.Status, "message", appErr.Message, "path", c.FullPath())
+		}
 		c.JSON(appErr.Status, gin.H{"error": appErr.Message})
 		return
 	}
-	log.Printf("khaao: internal error: %v", err)
+	slog.Error("khaao: internal error", "error", err, "path", c.FullPath())
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 

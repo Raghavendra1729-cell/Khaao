@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,21 +42,25 @@ func RequireAuth(cfg *config.Config, authSvc *services.AuthService) gin.HandlerF
 	return func(c *gin.Context) {
 		token := bearerToken(c)
 		if token == "" {
+			slog.Warn("khaao: auth failed", "reason", "missing_token", "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing auth token"})
 			return
 		}
 		claims, err := services.ParseToken(token, cfg.JWTSecret)
 		if err != nil {
+			slog.Warn("khaao: auth failed", "reason", "invalid_token", "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 			return
 		}
 		userID, err := strconv.ParseUint(claims.Subject, 10, 64)
 		if err != nil {
+			slog.Warn("khaao: auth failed", "reason", "invalid_subject", "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token subject"})
 			return
 		}
 		user, err := authSvc.GetUser(c.Request.Context(), uint(userID))
 		if err != nil {
+			slog.Warn("khaao: auth failed", "reason", "unknown_user", "user_id", userID, "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
 			return
 		}
@@ -76,16 +81,19 @@ func RequireSSEAuth(authSvc *services.AuthService, tickets *services.SSETicketSe
 	return func(c *gin.Context) {
 		ticket := c.Query("ticket")
 		if ticket == "" {
+			slog.Warn("khaao: sse auth failed", "reason", "missing_ticket", "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing ticket"})
 			return
 		}
 		userID, ok := tickets.Consume(ticket)
 		if !ok {
+			slog.Warn("khaao: sse auth failed", "reason", "invalid_ticket", "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired ticket"})
 			return
 		}
 		user, err := authSvc.GetUser(c.Request.Context(), userID)
 		if err != nil {
+			slog.Warn("khaao: sse auth failed", "reason", "unknown_user", "user_id", userID, "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
 			return
 		}
@@ -101,6 +109,7 @@ func RequireRole(role string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		r, _ := c.Get(ContextRole)
 		if r != role {
+			slog.Warn("khaao: role check failed", "required_role", role, "actual_role", r, "path", c.FullPath())
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
