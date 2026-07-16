@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"khaao/internal/authn"
 	"khaao/internal/config"
@@ -22,6 +26,18 @@ func main() {
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("khaao: invalid configuration: %v", err)
+	}
+
+	initLogger(cfg.AppEnv)
+
+	// Gin defaults to debug mode (verbose route-registration logging, and
+	// its own startup banner warning exactly about this) unless told
+	// otherwise. Anything other than local dev/test should run in
+	// ReleaseMode — quieter logs (ours are the structured slog lines
+	// above, not Gin's own [GIN-debug] ones) and Gin skips some
+	// debug-only internal checks on every request.
+	if cfg.AppEnv == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	db, err := database.Open(cfg)
@@ -48,7 +64,7 @@ func main() {
 	var tokenVerifier authn.TokenVerifier
 	if cfg.AuthFake {
 		// Validate() already guarantees AppEnv is dev/test here.
-		log.Println(`khaao: WARNING — AUTH_FAKE enabled; "fake:<email>" tokens are accepted (dev/e2e only)`)
+		slog.Warn("khaao: AUTH_FAKE enabled — \"fake:<email>\" tokens are accepted (dev/e2e only)")
 		tokenVerifier = authn.NewFakeVerifier()
 	} else {
 		tokenVerifier = authn.NewFirebaseVerifier(cfg.FirebaseProjectID)
@@ -85,20 +101,33 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("khaao: listening on :%s (Postgres)", cfg.Port)
+		slog.Info("khaao: listening", "port", cfg.Port, "db", "postgres")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("khaao: server error: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("khaao: shutting down")
+	slog.Info("khaao: shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("khaao: graceful shutdown error: %v", err)
+		slog.Error("khaao: graceful shutdown error", "error", err)
 	}
+}
+
+// initLogger sets the process-wide slog default: JSON in production (for log
+// aggregators), human-readable text elsewhere. Called once at startup before
+// anything else logs.
+func initLogger(appEnv string) {
+	var handler slog.Handler
+	if appEnv == "production" {
+		handler = slog.NewJSONHandler(os.Stdout, nil)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+	}
+	slog.SetDefault(slog.New(handler))
 }
 
 // runExpiryTicker expires ready orders past their hold window every 15s.
@@ -111,7 +140,7 @@ func runExpiryTicker(ctx context.Context, engine *services.PoolEngine) {
 			return
 		case <-ticker.C:
 			if err := engine.ExpiryTick(ctx); err != nil {
-				log.Printf("khaao: expiry tick error: %v", err)
+				slog.Error("khaao: expiry tick failed", "error", err)
 			}
 		}
 	}
