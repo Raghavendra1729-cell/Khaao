@@ -19,21 +19,22 @@ import (
 var hhmmRe = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
 
 type MenuItemResponse struct {
-	ID              uint     `json:"id"`
-	Name            string   `json:"name"`
-	Price           int      `json:"price"`
-	PhotoURL        string   `json:"photo_url"`
-	Diet            string   `json:"diet"`
-	Tags            []string `json:"tags"`
-	IsAvailable     bool     `json:"is_available"`
-	AvailFrom       *string  `json:"avail_from"`
-	AvailTo         *string  `json:"avail_to"`
-	OutOfStock      bool     `json:"out_of_stock"`
-	Status          string   `json:"status"`
-	Orderable       bool     `json:"orderable"`
-	OrderCountToday int      `json:"order_count_today"`
-	AvgRating       float64  `json:"avg_rating"`
-	RatingCount     int      `json:"rating_count"`
+	ID                 uint     `json:"id"`
+	Name               string   `json:"name"`
+	Price              int      `json:"price"`
+	PhotoURL           string   `json:"photo_url"`
+	Diet               string   `json:"diet"`
+	Tags               []string `json:"tags"`
+	IsAvailable        bool     `json:"is_available"`
+	AvailFrom          *string  `json:"avail_from"`
+	AvailTo            *string  `json:"avail_to"`
+	AvailWindowWarning string   `json:"avail_window_warning,omitempty"`
+	OutOfStock         bool     `json:"out_of_stock"`
+	Status             string   `json:"status"`
+	Orderable          bool     `json:"orderable"`
+	OrderCountToday    int      `json:"order_count_today"`
+	AvgRating          float64  `json:"avg_rating"`
+	RatingCount        int      `json:"rating_count"`
 }
 
 func ToMenuItemResponse(item models.MenuItem, now time.Time, orderCountToday int, agg repository.MenuRatingAggregate) MenuItemResponse {
@@ -92,6 +93,21 @@ func withinWindow(from, to *string, now time.Time) bool {
 		return nowMin >= fromMin && nowMin <= toMin
 	}
 	return nowMin >= fromMin || nowMin <= toMin
+}
+
+// availWindowWarning returns a non-blocking hint when from/to look like a
+// same-day window typed backwards. It cannot distinguish that from a
+// genuine overnight window (e.g. 22:00-06:00, which is valid and already
+// handled correctly by withinWindow) — it only flags the ambiguous case
+// so a shopkeeper can double check, never blocks the save.
+func availWindowWarning(from, to *string) string {
+	if from == nil || to == nil {
+		return ""
+	}
+	if *from >= *to {
+		return "avail_from is not before avail_to — if this isn't an overnight window (e.g. 22:00-06:00), check for a typo"
+	}
+	return ""
 }
 
 func hhmmToMinutes(s string) int {
@@ -279,7 +295,9 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 	}
 	s.hub.NotifyMenuUpdate()
 	// A brand-new item has no orders today and no ratings.
-	return ToMenuItemResponse(item, s.now(), 0, repository.MenuRatingAggregate{}), nil
+	resp := ToMenuItemResponse(item, s.now(), 0, repository.MenuRatingAggregate{})
+	resp.AvailWindowWarning = availWindowWarning(item.AvailFrom, item.AvailTo)
+	return resp, nil
 }
 
 func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) (MenuItemResponse, error) {
@@ -315,7 +333,9 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 	if err != nil {
 		return MenuItemResponse{}, err
 	}
-	return ToMenuItemResponse(*item, s.now(), counts[item.ID], aggs[item.ID]), nil
+	resp := ToMenuItemResponse(*item, s.now(), counts[item.ID], aggs[item.ID])
+	resp.AvailWindowWarning = availWindowWarning(item.AvailFrom, item.AvailTo)
+	return resp, nil
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
