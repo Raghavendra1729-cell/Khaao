@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getVapidPublicKey, subscribeToPush } from '../api/shop';
+import { useLanguage } from '../context/LanguageContext';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -17,6 +18,7 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function PushNotificationSetup() {
+  const { language } = useLanguage();
   const [showPrompt, setShowPrompt] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -116,10 +118,9 @@ export function PushNotificationSetup() {
         disabled={loading}
         className="mt-3 w-full rounded-lg bg-brand py-2 text-sm font-bold text-white transition hover:bg-brand-dark active:scale-[0.98] disabled:opacity-50"
       >
-        <div className="flex flex-col items-center leading-tight">
-          <span>{loading ? 'Enabling...' : 'Enable'}</span>
-          {!loading && <span className="text-[10px] font-medium opacity-80 mt-0.5">चालू करें</span>}
-        </div>
+        <span>
+          {language === 'hi' ? (loading ? 'चालू हो रहा है...' : 'चालू करें') : loading ? 'Enabling...' : 'Enable'}
+        </span>
       </button>
     </div>
   );
