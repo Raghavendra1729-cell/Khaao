@@ -1,8 +1,14 @@
 # Khaao — Canteen Pre-Order App — v3 Build Spec
 
+> **This is a frozen v3 baseline** (auth, core order lifecycle, DB schema, state
+> machines) — still accurate for everything it covers. It predates v4 (shop
+> status/open-paused-closed, menu diet+tags, trending, history insights) and
+> the ratings / web push / Cloudinary photo-upload additions that shipped
+> after it. For the current API surface and what's shipped since, see
+> `STATUS.md` at the repo root — that file is the living source of truth.
+
 Single source of truth for the backend (Go) and frontend (React) builds.
-Supersedes v1/v2 entirely. Derived from `docs/01-flows.html`, `docs/02-technical.html`,
-and the v3 product decisions below.
+Supersedes v1/v2 entirely. Derived from the v3 product decisions below.
 
 ## Product summary (v3)
 

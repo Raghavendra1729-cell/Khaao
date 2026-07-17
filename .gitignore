@@ -23,3 +23,6 @@ frontend/dist/
 # Editor
 .idea/
 .vscode/
+
+# Playwright MCP scratch output (screenshots/console logs from ad-hoc browser checks)
+.playwright-mcp/
