@@ -16,6 +16,7 @@ import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 import { OrderModal } from '../../components/OrderModal';
 import { clearShopNotification } from '../../components/shopNotifications';
+import { useLanguage } from '../../context/LanguageContext';
 
 // ─── New orders subpage ───────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ function RejectDialog({
   onConfirm: (unavailableItemIds: number[]) => void;
   busy: boolean;
 }) {
+  const { language } = useLanguage();
   const items = order.items.filter((i) => i.status !== 'rejected');
   const [checked, setChecked] = useState<Record<number, boolean>>(() =>
     Object.fromEntries(items.map((i) => [i.menu_item_id, false])),
@@ -88,10 +90,7 @@ function RejectDialog({
             loading={busy}
             onClick={() => onConfirm(unavailableMenuItemIds)}
           >
-            <div className="flex flex-col items-center leading-tight">
-              <span>Reject order</span>
-              <span className="text-[10px] font-medium opacity-80 mt-0.5">अस्वीकार करें</span>
-            </div>
+            <span>{language === 'hi' ? 'अस्वीकार करें' : 'Reject order'}</span>
           </Button>
         </div>
       </div>
@@ -102,6 +101,7 @@ function RejectDialog({
 function IncomingOrderCard({ order }: { order: Order }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
   const pendingItems = order.items.filter((i) => i.status === 'pending');
   const lockedItems = order.items.filter((i) => i.status !== 'pending' && i.status !== 'rejected');
   const [checked, setChecked] = useState<Record<number, boolean>>(() =>
@@ -112,11 +112,18 @@ function IncomingOrderCard({ order }: { order: Order }) {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
 
   const acceptMutation = useMutation({
-    mutationFn: () => {
-      const rejectedItemIds = pendingItems.filter((i) => !checked[i.id]).map((i) => i.id);
+    mutationFn: async () => {
+      const rejectedItems = pendingItems.filter((i) => !checked[i.id]);
+      const rejectedItemIds = rejectedItems.map((i) => i.id);
+      await Promise.allSettled(
+        rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
+      );
       return acceptOrder(order.id, rejectedItemIds);
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
+    },
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not accept order.', 'error'),
   });
 
@@ -204,10 +211,7 @@ function IncomingOrderCard({ order }: { order: Order }) {
             disabled={busy}
             onClick={() => setShowRejectDialog(true)}
           >
-            <div className="flex flex-col items-center leading-tight">
-              <span>Reject</span>
-              <span className="text-[10px] font-medium opacity-80 mt-0.5">अस्वीकार करें</span>
-            </div>
+            <span>{language === 'hi' ? 'अस्वीकार करें' : 'Reject'}</span>
           </Button>
           <Button
             className="flex-1"
@@ -215,10 +219,7 @@ function IncomingOrderCard({ order }: { order: Order }) {
             loading={acceptMutation.isPending}
             onClick={() => acceptMutation.mutate()}
           >
-            <div className="flex flex-col items-center leading-tight">
-              <span>Accept</span>
-              <span className="text-[10px] font-medium opacity-80 mt-0.5">स्वीकारें</span>
-            </div>
+            <span>{language === 'hi' ? 'स्वीकारें' : 'Accept'}</span>
           </Button>
         </div>
       </Card>
@@ -332,6 +333,7 @@ function InProgressOrderCard({
 type Subpage = 'new' | 'inprogress';
 
 export function ShopOrdersPage() {
+  const { language } = useLanguage();
   const ordersQuery = useQuery({ queryKey: ['shop', 'orders'], queryFn: getShopOrders });
   const [subpage, setSubpage] = useState<Subpage>('new');
   const [modalOrder, setModalOrder] = useState<Order | null>(null);
@@ -383,10 +385,7 @@ export function ShopOrdersPage() {
               : 'text-ink/60 hover:text-ink'
           }`}
         >
-          <div className="flex flex-col items-center leading-none gap-0.5">
-            <span>New orders</span>
-            <span className="text-[10px] font-medium opacity-80">नए ऑर्डर</span>
-          </div>
+          <span>{language === 'hi' ? 'नए ऑर्डर' : 'New orders'}</span>
           {newCount > 0 && (
             <span
               className={`flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${
@@ -407,10 +406,7 @@ export function ShopOrdersPage() {
               : 'text-ink/60 hover:text-ink'
           }`}
         >
-          <div className="flex flex-col items-center leading-none gap-0.5">
-            <span>In progress</span>
-            <span className="text-[10px] font-medium opacity-80">प्रगति में</span>
-          </div>
+          <span>{language === 'hi' ? 'प्रगति में' : 'In progress'}</span>
           {inProgressCount > 0 && (
             <span
               className={`flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${

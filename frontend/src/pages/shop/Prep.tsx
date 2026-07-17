@@ -9,6 +9,7 @@ import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
+import { useLanguage } from '../../context/LanguageContext';
 
 // PrepRow is only ever rendered for items where remaining_qty > 0 (filtered at
 // the page level). The "Not needed right now" / canPrep===false branch has been
@@ -17,6 +18,7 @@ import { useToast } from '../../components/Toast';
 function PrepRow({ item }: { item: PrepItem }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
   const [selected, setSelected] = useState(() => Math.min(1, item.remaining_qty));
 
   // remaining_qty can shift under us (another shopkeeper action, an order
@@ -47,17 +49,15 @@ function PrepRow({ item }: { item: PrepItem }) {
       <div className="flex-1">
         <p className="font-bold text-ink">{item.name}</p>
         <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink/40">
-          <span>left to cook</span>
-          <span className="normal-case text-[10px] opacity-80">पकाना बाकी</span>
+          <span className={language === 'hi' ? 'normal-case' : ''}>
+            {language === 'hi' ? 'पकाना बाकी' : 'left to cook'}
+          </span>
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-2">
         <QtyStepper value={selected} onChange={setSelected} min={1} max={item.remaining_qty} />
         <Button size="md" fullWidth loading={doneMutation.isPending} onClick={() => doneMutation.mutate()}>
-          <div className="flex flex-col items-center leading-tight">
-            <span>Done</span>
-            <span className="text-[10px] font-medium opacity-80 mt-0.5">पूर्ण</span>
-          </div>
+          <span>{language === 'hi' ? 'पूर्ण' : 'Done'}</span>
         </Button>
       </div>
     </Card>

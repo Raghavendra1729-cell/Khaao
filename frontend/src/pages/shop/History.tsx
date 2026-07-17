@@ -7,6 +7,7 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { OrderStatusBadge } from '../../components/StatusBadge';
+import { useLanguage } from '../../context/LanguageContext';
 
 /** Today's date as "YYYY-MM-DD" in the browser's local timezone (not UTC —
  * the canteen device is physically where the business day is being tracked,
@@ -30,6 +31,7 @@ function CountBadge({ n }: { n: number }) {
 }
 
 export function ShopHistoryPage() {
+  const { language } = useLanguage();
   const [date, setDate] = useState(todayLocal);
   const [showOrders, setShowOrders] = useState(false);
 
@@ -128,10 +130,15 @@ export function ShopHistoryPage() {
             onClick={() => setShowOrders((prev) => !prev)}
             className="flex w-full items-center justify-between rounded-xl border border-edge bg-paper px-4 py-3 text-sm font-semibold text-ink shadow-sm transition-colors hover:bg-brand-light/30 focus:outline-none"
           >
-            <div className="flex flex-col items-start leading-tight">
-              <span>{showOrders ? 'Hide order log' : `Show every order (${orders.length})`}</span>
-              {!showOrders && <span className="text-[10px] font-medium opacity-80 mt-0.5">हर ऑर्डर देखें</span>}
-            </div>
+            <span>
+              {language === 'hi'
+                ? showOrders
+                  ? 'ऑर्डर लॉग छुपाएं'
+                  : `हर ऑर्डर देखें (${orders.length})`
+                : showOrders
+                  ? 'Hide order log'
+                  : `Show every order (${orders.length})`}
+            </span>
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className={`h-4 w-4 shrink-0 text-ink/50 transition-transform duration-200 ${
