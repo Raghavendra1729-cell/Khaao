@@ -18,6 +18,14 @@ import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { MenuStatusBadge } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
+import { useLanguage } from '../../context/LanguageContext';
+
+const MENU_STATUS_LABEL_HI: Record<MenuItem['status'], string> = {
+  available: 'उपलब्ध',
+  time_limited: 'समय-सीमित',
+  out_of_stock: 'स्टॉक में नहीं',
+  unavailable: 'अनुपलब्ध',
+};
 
 interface FormState {
   name: string;
@@ -80,6 +88,7 @@ function MenuItemForm({
   onSubmit: (input: MenuItemInput) => void;
   submitting: boolean;
 }) {
+  const { language } = useLanguage();
   const [form, setForm] = useState<FormState>(initial);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
@@ -283,10 +292,9 @@ function MenuItemForm({
           onChange={(e) => setForm((f) => ({ ...f, is_available: e.target.checked }))}
           className="h-5 w-5 accent-brand"
         />
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold text-ink/70">Available on the menu</span>
-          <span className="text-[10px] text-ink/50 mt-0.5">उपलब्ध</span>
-        </div>
+        <span className="text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'मेन्यू पर उपलब्ध' : 'Available on the menu'}
+        </span>
       </label>
 
       <div className="flex gap-2">
@@ -304,6 +312,7 @@ function MenuItemForm({
 function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [armed, setArmed] = useState(false);
   
@@ -391,10 +400,11 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
         <div className="mb-2 flex items-start justify-between gap-2">
           <p className="font-bold text-ink">{item.name}</p>
           <div className="flex flex-col items-end gap-0.5">
-            <MenuStatusBadge status={item.status} />
-            <span className="text-[10px] font-medium text-ink/50">
-              {item.out_of_stock ? 'स्टॉक में नहीं' : 'उपलब्ध'}
-            </span>
+            {language === 'hi' ? (
+              <span className="text-[10px] font-medium text-ink/50">{MENU_STATUS_LABEL_HI[item.status]}</span>
+            ) : (
+              <MenuStatusBadge status={item.status} />
+            )}
           </div>
         </div>
         <p className="tabular text-sm text-ink/60">{formatPrice(item.price)}</p>
@@ -426,23 +436,16 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-3" onClick={(e) => e.stopPropagation()}>
         <Button variant="ghost" onClick={() => setEditing(true)} className="flex-1">
-          <div className="flex flex-col items-center leading-tight">
-            <span>Edit</span>
-            <span className="text-[10px] font-medium opacity-80 mt-0.5">संपादित करें</span>
-          </div>
+          <span>{language === 'hi' ? 'संपादित करें' : 'Edit'}</span>
         </Button>
         <Button variant="danger" loading={deleteMutation.isPending} onClick={handleDelete} className="flex-1">
-          <div className="flex flex-col items-center leading-tight">
-            <span>Delete</span>
-            <span className="text-[10px] font-medium opacity-80 mt-0.5">हटाएं</span>
-          </div>
+          <span>{language === 'hi' ? 'हटाएं' : 'Delete'}</span>
         </Button>
       </div>
 
       {armed && (
-        <div className="absolute bottom-0 left-0 right-0 animate-in fade-in slide-in-from-bottom-2 bg-red-500 py-3 text-center text-sm font-bold text-white flex flex-col items-center leading-tight">
-          <span>Tap again to mark unavailable</span>
-          <span className="text-[10px] font-medium opacity-90 mt-0.5">अनुपलब्ध चिह्नित करें / फिर से टैप करें</span>
+        <div className="absolute bottom-0 left-0 right-0 animate-in fade-in slide-in-from-bottom-2 bg-red-500 py-3 text-center text-sm font-bold text-white">
+          <span>{language === 'hi' ? 'फिर से टैप करें' : 'Tap again to mark unavailable'}</span>
         </div>
       )}
     </Card>
@@ -452,6 +455,7 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
 export function ShopMenuManagePage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
   const menuQuery = useQuery({ queryKey: ['shop', 'menu'], queryFn: getShopMenu });
   const [showAddForm, setShowAddForm] = useState(false);
 
@@ -487,10 +491,15 @@ export function ShopMenuManagePage() {
           <p className="text-sm text-ink/60">Add, edit, and manage stock.</p>
         </div>
         <Button variant="secondary" onClick={() => setShowAddForm((v) => !v)}>
-          <div className="flex flex-col items-center leading-tight">
-            <span>{showAddForm ? 'Close form' : 'Add item'}</span>
-            {!showAddForm && <span className="text-[10px] font-medium opacity-80 mt-0.5">आइटम जोड़ें</span>}
-          </div>
+          <span>
+            {language === 'hi'
+              ? showAddForm
+                ? 'फॉर्म बंद करें'
+                : 'आइटम जोड़ें'
+              : showAddForm
+                ? 'Close form'
+                : 'Add item'}
+          </span>
         </Button>
       </div>
 
