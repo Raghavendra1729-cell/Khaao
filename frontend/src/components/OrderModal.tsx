@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { handoverItem, markPaid, removeOrderItem, rejectOrder } from '../api/shop';
+import { handoverItem, markPaid, removeOrderItem, rejectOrder, setMenuItemStock } from '../api/shop';
 import { ApiError } from '../api/client';
 import type { Order, OrderItem } from '../api/types';
 import { formatPrice } from '../lib/format';
@@ -9,10 +9,12 @@ import { QtyStepper } from './QtyStepper';
 import { OrderItemStatusBadge } from './StatusBadge';
 import { Modal } from './Modal';
 import { useToast } from './Toast';
+import { useLanguage } from '../context/LanguageContext';
 
 function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
 
   const readyToGive = item.allocated_qty - item.handed_qty;
   const stillToCook = item.qty - item.allocated_qty;
@@ -39,9 +41,18 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
   });
 
   const removeMutation = useMutation({
-    mutationFn: () => removeOrderItem(order.id, item.id),
+    mutationFn: async (alsoOutOfStock: boolean) => {
+      if (alsoOutOfStock) {
+        await setMenuItemStock(item.menu_item_id, true).catch(() => {
+          // Best-effort — removal below is the action that matters; a failed
+          // stock-flag shouldn't block or roll back the item removal.
+        });
+      }
+      return removeOrderItem(order.id, item.id);
+    },
     onSuccess: () => {
       invalidate();
+      queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
       showToast('Item removed.', 'success');
     },
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not remove item.', 'error'),
@@ -50,9 +61,13 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
   const busy = handoverMutation.isPending || removeMutation.isPending;
 
   function handleRemove() {
-    if (window.confirm(`Remove "${item.name}" from this order? Any prepared units go back to the pool.`)) {
-      removeMutation.mutate();
+    if (!window.confirm(`Remove "${item.name}" from this order? Any prepared units go back to the pool.`)) {
+      return;
     }
+    const alsoOutOfStock = window.confirm(
+      `Also mark "${item.name}" out of stock so it stops showing as available to students?`,
+    );
+    removeMutation.mutate(alsoOutOfStock);
   }
 
   return (
@@ -85,10 +100,9 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
           {stillToCook > 0 && (
             <div className="flex flex-col items-start gap-0.5 rounded-lg border border-turmeric/30 bg-turmeric-pale/40 px-2.5 py-2">
               <span className="text-xs font-semibold text-turmeric-deep">
-                {stillToCook} needed · {item.allocated_qty} done
-              </span>
-              <span className="text-[10px] font-medium text-turmeric-deep/80">
-                {stillToCook} आवश्यक · {item.allocated_qty} पूर्ण
+                {language === 'hi'
+                  ? `${stillToCook} आवश्यक · ${item.allocated_qty} पूर्ण`
+                  : `${stillToCook} needed · ${item.allocated_qty} done`}
               </span>
             </div>
           )}
@@ -116,10 +130,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
                   disabled={busy}
                   onClick={() => handoverMutation.mutate(giveQty)}
                 >
-                  <div className="flex flex-col items-center leading-tight">
-                    <span>Handover {giveQty}</span>
-                    <span className="text-[10px] font-medium opacity-80 mt-0.5">सौंपें</span>
-                  </div>
+                  <span>{language === 'hi' ? `सौंपें ${giveQty}` : `Handover ${giveQty}`}</span>
                 </Button>
               </div>
             </div>
@@ -134,8 +145,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
               onClick={handleRemove}
               className="self-start text-[11px] font-semibold text-stamp/70 transition hover:text-stamp disabled:opacity-40 flex items-center gap-1.5"
             >
-              <span>Remove item</span>
-              <span className="text-[10px] opacity-80">आइटम हटाएं</span>
+              <span>{language === 'hi' ? 'आइटम हटाएं' : 'Remove item'}</span>
             </button>
           )}
         </div>
@@ -147,6 +157,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
 export function OrderModal({ order, onClose }: { order: Order; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
 
   const items = order.items.filter((i) => i.status !== 'rejected');
   const canCollect = order.status === 'awaiting_payment';
@@ -204,10 +215,9 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
             loading={markPaidMutation.isPending}
             onClick={() => markPaidMutation.mutate()}
           >
-            <div className="flex flex-col items-center leading-tight">
-              <span>Collect {formatPrice(order.total_price)}</span>
-              <span className="text-[10px] font-medium opacity-80 mt-0.5">भुगतान लें</span>
-            </div>
+            <span>
+              {language === 'hi' ? `भुगतान लें ${formatPrice(order.total_price)}` : `Collect ${formatPrice(order.total_price)}`}
+            </span>
           </Button>
           {canCancelOrder && (
             <button
@@ -216,8 +226,7 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
               onClick={handleCancelOrder}
               className="self-center text-[11px] font-semibold text-stamp/70 transition hover:text-stamp disabled:opacity-40 flex items-center gap-1.5 mt-1"
             >
-              <span>Cancel this order</span>
-              <span className="text-[10px] opacity-80">यह ऑर्डर रद्द करें</span>
+              <span>{language === 'hi' ? 'यह ऑर्डर रद्द करें' : 'Cancel this order'}</span>
             </button>
           )}
         </div>
