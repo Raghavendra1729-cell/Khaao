@@ -7,6 +7,7 @@ import { formatTime } from '../lib/format';
 import { Button } from './Button';
 import { Modal } from './Modal';
 import { useToast } from './Toast';
+import { useLanguage } from '../context/LanguageContext';
 
 const STATE_META: Record<ShopState, { label: string; labelHi: string; dot: string; text: string; chip: string }> = {
   open: { label: 'Open', labelHi: 'खुला', dot: 'bg-brand', text: 'text-brand-dark', chip: 'border-brand/40 bg-brand-light' },
@@ -41,6 +42,7 @@ function reopenTimeToISO(hhmm: string): string {
 export function ShopStatusControl() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { language } = useLanguage();
   const statusQuery = useQuery({ queryKey: ['shop', 'status'], queryFn: getShopStatus });
 
   const [open, setOpen] = useState(false);
@@ -96,10 +98,7 @@ export function ShopStatusControl() {
         aria-label={`Canteen status: ${meta.label}. Tap to change.`}
       >
         <span className={`h-2 w-2 rounded-full ${meta.dot} ${current !== 'open' ? 'animate-soft-pulse' : ''}`} />
-        <div className="flex flex-col items-start leading-none gap-0.5">
-          <span>{meta.label}</span>
-          <span className="text-[9px] font-medium opacity-80">{meta.labelHi}</span>
-        </div>
+        <span>{language === 'hi' ? meta.labelHi : meta.label}</span>
       </button>
 
       <Modal
@@ -126,10 +125,7 @@ export function ShopStatusControl() {
                 }`}
               >
                 <span className={`h-2.5 w-2.5 rounded-full ${m.dot}`} />
-                <div className="flex flex-col items-center leading-none gap-1 mt-0.5">
-                  <span>{m.label}</span>
-                  <span className="text-[10px] font-medium opacity-80">{m.labelHi}</span>
-                </div>
+                <span className="mt-0.5">{language === 'hi' ? m.labelHi : m.label}</span>
               </button>
             );
           })}
@@ -140,7 +136,7 @@ export function ShopStatusControl() {
             {target === 'paused' && (
               <label className="block">
                 <span className="mb-1 block text-sm font-semibold text-ink/70">
-                  Reopens at <span className="font-normal opacity-80">(फिर से खुलेगा)</span>
+                  {language === 'hi' ? 'फिर से खुलने का समय' : 'Reopens at'}
                 </span>
                 <input
                   type="time"
@@ -187,12 +183,19 @@ export function ShopStatusControl() {
                 loading={mutation.isPending}
                 onClick={() => mutation.mutate(target)}
               >
-                <div className="flex flex-col items-center leading-tight">
-                  <span>{target === 'open' ? 'Reopen' : target === 'paused' ? 'Pause' : 'Close'}</span>
-                  <span className="text-[10px] font-medium opacity-80 mt-0.5">
-                    {target === 'open' ? 'खुला' : target === 'paused' ? 'रुका हुआ' : 'बंद'}
-                  </span>
-                </div>
+                <span>
+                  {language === 'hi'
+                    ? target === 'open'
+                      ? 'खुला'
+                      : target === 'paused'
+                        ? 'रुका हुआ'
+                        : 'बंद'
+                    : target === 'open'
+                      ? 'Reopen'
+                      : target === 'paused'
+                        ? 'Pause'
+                        : 'Close'}
+                </span>
               </Button>
             </div>
           </div>
