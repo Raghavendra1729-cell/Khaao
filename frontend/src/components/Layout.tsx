@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { LanguageProvider, useLanguage } from '../context/LanguageContext';
 import { getActiveOrder } from '../api/orders';
 import { getPrep, getShopOrders } from '../api/shop';
 import { StudentRealtime } from './StudentRealtime';
@@ -114,14 +115,53 @@ function ShopBell() {
 }
 
 /**
+ * Compact segmented EN/हिं toggle for the shop header. Shopkeeper-only —
+ * never rendered for students (gated by the caller), so there's no risk of
+ * a stored 'hi' preference leaking Hindi into a student session.
+ */
+function LanguageToggle() {
+  const { language, toggleLanguage } = useLanguage();
+  return (
+    <button
+      type="button"
+      onClick={toggleLanguage}
+      aria-label={language === 'en' ? 'Switch UI language to Hindi' : 'यूआई भाषा अंग्रेज़ी में बदलें'}
+      className="flex h-8 items-center rounded-full border border-ink/15 bg-ink/5 p-0.5 text-[11px] font-bold"
+    >
+      <span
+        className={`rounded-full px-2 py-1 leading-none transition ${
+          language === 'en' ? 'bg-paper text-ink shadow-sm' : 'text-ink/40'
+        }`}
+      >
+        EN
+      </span>
+      <span
+        className={`rounded-full px-2 py-1 leading-none transition ${
+          language === 'hi' ? 'bg-paper text-ink shadow-sm' : 'text-ink/40'
+        }`}
+      >
+        हिं
+      </span>
+    </button>
+  );
+}
+
+/**
  * Avatar button (shows first initial of the user's name) that opens a small
  * dropdown with the full name and a Log out action. Closes on outside click or
  * Escape. Width on screen: 36×36px — well within the mobile header budget.
+ *
+ * isShop gates Hindi explicitly (not just the language value) — this
+ * component is shared with students, and the language preference persists
+ * in localStorage, so without this guard a shopkeeper switching to Hindi on
+ * a shared device could leak Hindi into a student's session too.
  */
-function AvatarMenu({ name, onLogout }: { name: string; onLogout: () => void }) {
+function AvatarMenu({ name, onLogout, isShop }: { name: string; onLogout: () => void; isShop: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const initial = name.trim().charAt(0).toUpperCase() || '?';
+  const { language } = useLanguage();
+  const showHindi = isShop && language === 'hi';
 
   // Close on outside click
   useEffect(() => {
@@ -176,10 +216,7 @@ function AvatarMenu({ name, onLogout }: { name: string; onLogout: () => void }) 
             }}
             className="flex w-full min-h-[44px] items-center px-4 py-2.5 text-sm font-semibold text-stamp-dark transition hover:bg-stamp-light/60 rounded-b-xl"
           >
-            <div className="flex flex-col items-start leading-tight">
-              <span>Log out</span>
-              <span className="text-[10px] font-medium opacity-80 mt-0.5">लॉग आउट</span>
-            </div>
+            <span>{showHindi ? 'लॉग आउट' : 'Log out'}</span>
           </button>
         </div>
       )}
@@ -188,7 +225,16 @@ function AvatarMenu({ name, onLogout }: { name: string; onLogout: () => void }) 
 }
 
 export function Layout() {
+  return (
+    <LanguageProvider>
+      <LayoutInner />
+    </LanguageProvider>
+  );
+}
+
+function LayoutInner() {
   const { user, logout } = useAuth();
+  const { language } = useLanguage();
   const isShop = user?.role === 'shopkeeper';
   const tabs = isShop ? SHOP_TABS : STUDENT_TABS;
   // Students use this on a phone: a narrow single-column shell fits perfectly.
@@ -236,8 +282,10 @@ export function Layout() {
             </span>
           </div>
 
-          {/* Right cluster: status pill + bell (shop only) + avatar — must not wrap at 375px */}
-          <div className="flex shrink-0 items-center gap-2">
+          {/* Right cluster: language toggle + status pill + bell (shop only) + avatar — must not wrap at 375px */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* Hindi/English toggle — shopkeeper only */}
+            {isShop && <LanguageToggle />}
             {/* Shop status pill — highest-stakes control, always visible for shopkeepers */}
             {isShop && <ShopStatusControl />}
             {/* Notification bell — always visible for shopkeepers */}
@@ -247,7 +295,7 @@ export function Layout() {
               </span>
             )}
             {/* Avatar + name/logout collapsed into a single 36px button */}
-            <AvatarMenu name={user?.name ?? ''} onLogout={logout} />
+            <AvatarMenu name={user?.name ?? ''} onLogout={logout} isShop={isShop} />
           </div>
         </div>
       </header>
@@ -280,10 +328,7 @@ export function Layout() {
                   <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-turmeric" />
                 )}
               </span>
-              <span className="flex flex-col items-center leading-none mt-0.5 gap-0.5">
-                <span>{tab.label}</span>
-                {tab.labelHi && <span className="text-[9px] font-medium opacity-80">{tab.labelHi}</span>}
-              </span>
+              <span className="mt-0.5">{tab.labelHi && language === 'hi' ? tab.labelHi : tab.label}</span>
             </NavLink>
           ))}
         </div>
