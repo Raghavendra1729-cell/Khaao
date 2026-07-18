@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"khaao/internal/config"
@@ -134,16 +135,40 @@ type MenuItemInput struct {
 	IsAvailable *bool    `json:"is_available"`
 }
 
+// availableMenuCacheTTL bounds how stale /api/menu can be after a mutation.
+// A single stock toggle during rush hour fans out a menu_update SSE event to
+// every connected student, each of whom immediately refetches — without this
+// cache that's ~1-2k simultaneous ListAvailable calls (3 queries each) in
+// under a second. Same single-instance reasoning as the SSE hub: a tiny
+// in-process cache, no Redis. Invalidated eagerly on every mutation, so a
+// shopkeeper's own change is never masked by a stale cache; the TTL alone
+// bounds the fan-out cost from everyone else's read traffic.
+const availableMenuCacheTTL = 4 * time.Second
+
+type menuCacheEntry struct {
+	items     []MenuItemResponse
+	expiresAt time.Time
+}
+
 type MenuService struct {
 	repo       repository.MenuRepo
 	orderRepo  repository.OrderRepo
 	ratingRepo repository.RatingRepo
 	hub        *realtime.Hub
 	cfg        *config.Config
+
+	cacheMu sync.Mutex
+	cache   *menuCacheEntry
 }
 
 func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
 	return &MenuService{repo: repo, orderRepo: orderRepo, ratingRepo: ratingRepo, hub: hub, cfg: cfg}
+}
+
+func (s *MenuService) invalidateCache() {
+	s.cacheMu.Lock()
+	s.cache = nil
+	s.cacheMu.Unlock()
 }
 
 // now returns the current time in the configured business timezone, so
@@ -154,6 +179,14 @@ func (s *MenuService) now() time.Time {
 }
 
 func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, error) {
+	s.cacheMu.Lock()
+	if s.cache != nil && time.Now().Before(s.cache.expiresAt) {
+		items := s.cache.items
+		s.cacheMu.Unlock()
+		return items, nil
+	}
+	s.cacheMu.Unlock()
+
 	items, err := s.repo.FindAll(ctx, true)
 	if err != nil {
 		return nil, err
@@ -166,7 +199,13 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 	if err != nil {
 		return nil, err
 	}
-	return toMenuResponses(items, s.now(), counts, aggs), nil
+	resp := toMenuResponses(items, s.now(), counts, aggs)
+
+	s.cacheMu.Lock()
+	s.cache = &menuCacheEntry{items: resp, expiresAt: time.Now().Add(availableMenuCacheTTL)}
+	s.cacheMu.Unlock()
+
+	return resp, nil
 }
 
 func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {
@@ -293,6 +332,7 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 	if err := s.repo.Save(ctx, &item); err != nil {
 		return MenuItemResponse{}, err
 	}
+	s.invalidateCache()
 	s.hub.NotifyMenuUpdate()
 	// A brand-new item has no orders today and no ratings.
 	resp := ToMenuItemResponse(item, s.now(), 0, repository.MenuRatingAggregate{})
@@ -324,6 +364,7 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 	if err := s.repo.Save(ctx, item); err != nil {
 		return MenuItemResponse{}, err
 	}
+	s.invalidateCache()
 	s.hub.NotifyMenuUpdate()
 	counts, err := s.orderCountsToday(ctx)
 	if err != nil {
@@ -351,6 +392,7 @@ func (s *MenuService) Delete(ctx context.Context, id uint) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
+	s.invalidateCache()
 	s.hub.NotifyMenuUpdate()
 	return nil
 }
@@ -367,6 +409,7 @@ func (s *MenuService) SetStock(ctx context.Context, id uint, outOfStock bool) (M
 		return MenuItemResponse{}, err
 	}
 	item.OutOfStock = outOfStock
+	s.invalidateCache()
 	s.hub.NotifyMenuUpdate()
 	counts, err := s.orderCountsToday(ctx)
 	if err != nil {
