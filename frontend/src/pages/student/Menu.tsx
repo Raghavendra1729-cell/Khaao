@@ -66,13 +66,18 @@ export function Menu() {
   const shopStatus = shopStatusQuery.data ?? { state: 'open', reopen_at: null };
   const isShopOpen = shopStatus.state === 'open';
 
-  const cartEntries = useMemo(
-    () =>
-      Object.entries(cart)
-        .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
-        .filter((e) => e.qty > 0),
-    [cart],
-  );
+  // Only ever surface entries for items still present in the current menu —
+  // a shopkeeper can delete/hide an item that's sitting in a student's cart
+  // (menu refetches live via SSE menu_update), and a stale entry here would
+  // crash checkout downstream.
+  const cartEntries = useMemo(() => {
+    const items = menuQuery.data;
+    if (!items) return [];
+    const validIds = new Set(items.map((i) => i.id));
+    return Object.entries(cart)
+      .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
+      .filter((e) => e.qty > 0 && validIds.has(e.menu_item_id));
+  }, [cart, menuQuery.data]);
 
   const cartTotal = useMemo(() => {
     const items = menuQuery.data ?? [];
@@ -87,6 +92,25 @@ export function Menu() {
   function setQty(itemId: number, qty: number) {
     setCart((prev) => ({ ...prev, [itemId]: qty }));
   }
+
+  // Prune cart entries that fell out of the menu and let the student know.
+  useEffect(() => {
+    const items = menuQuery.data;
+    if (!items) return;
+    const validIds = new Set(items.map((i) => i.id));
+    const staleIds = Object.entries(cart)
+      .filter(([id, qty]) => qty > 0 && !validIds.has(Number(id)))
+      .map(([id]) => Number(id));
+    if (staleIds.length === 0) return;
+    setCart((prev) => {
+      const next = { ...prev };
+      staleIds.forEach((id) => {
+        delete next[id];
+      });
+      return next;
+    });
+    showToast('Some items are no longer available and were removed from your cart.', 'error');
+  }, [cart, menuQuery.data, showToast]);
 
   const submitMutation = useMutation({
     mutationFn: async () => {
@@ -381,7 +405,8 @@ export function Menu() {
 
             <div className="mb-6 max-h-[50vh] overflow-y-auto divide-y divide-edge border-b border-t border-edge">
               {cartEntries.map((entry) => {
-                const item = items.find((i) => i.id === entry.menu_item_id)!;
+                const item = items.find((i) => i.id === entry.menu_item_id);
+                if (!item) return null;
                 return (
                   <div key={item.id} className="flex items-center justify-between py-3">
                     <div className="flex flex-col">
