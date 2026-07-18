@@ -11,13 +11,6 @@ export interface SSEMessage {
 
 const MAX_BACKOFF_MS = 15_000;
 const BASE_BACKOFF_MS = 1_000;
-/**
- * After this many consecutive errors the hook stops retrying and dispatches
- * `khaao:unauthorized` so the app redirects to login. This bounds the retry
- * loop on expired / revoked tokens (EventSource can't read the HTTP status
- * code, so we treat persistent failure as a session problem).
- */
-const MAX_RETRIES = 8;
 
 /**
  * Subscribes to a Khaao SSE endpoint, authenticating each connection with a
@@ -29,10 +22,14 @@ const MAX_RETRIES = 8;
  * for every connection attempt, including reconnects — tickets are one-use
  * and expire in ~60s, so a stale one is never retried.
  *
- * Reconnects with exponential backoff on error/disconnect for as long as the
- * hook stays mounted and `path` is non-null. After MAX_RETRIES consecutive
- * failures it gives up and forces a re-login via the khaao:unauthorized
- * event.
+ * Reconnects with exponential backoff (capped at MAX_BACKOFF_MS) on
+ * error/disconnect for as long as the hook stays mounted and `path` is
+ * non-null — it retries forever on network/EventSource failures, since a
+ * flaky connection (campus Wi-Fi dead zone, elevator, network switch) says
+ * nothing about whether the session itself is still valid. Only a genuine
+ * 401 from the ticket-mint call proves the session is dead; that path is
+ * already handled globally by apiFetch (clears storage, dispatches
+ * khaao:unauthorized) — this hook just stops retrying when it sees one.
  *
  * `onOpen`, if given, fires on every successful (re)connect, including the
  * first — pass a callback that invalidates whatever queries this stream
@@ -66,12 +63,6 @@ export function useSSE(
 
     function connect(): void {
       if (stopped) return;
-
-      if (attempt >= MAX_RETRIES) {
-        // Persistent failure — treat as expired session and force re-login.
-        window.dispatchEvent(new Event('khaao:unauthorized'));
-        return;
-      }
 
       // Mint a brand-new ticket for this specific connection attempt (never
       // reuse one across reconnects — a ticket is one-use and short-lived,
