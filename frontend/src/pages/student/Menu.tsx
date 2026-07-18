@@ -17,6 +17,33 @@ import { TrendingRail } from '../../components/TrendingRail';
 import { DietFilter, type DietFilterValue } from '../../components/DietFilter';
 import { MenuItemCard } from '../../components/MenuItemCard';
 
+const CART_STORAGE_KEY = 'khaao_cart_v2';
+
+interface StoredCart {
+  date: string;
+  items: Record<number, number>;
+}
+
+/** Local calendar date as YYYY-MM-DD — just a "is this cart from today or a
+ * stale earlier day" heuristic, not the authoritative BUSINESS_TIMEZONE
+ * boundary the backend uses for order tokens. */
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function loadStoredCart(): Record<number, number> {
+  try {
+    const raw = localStorage.getItem(CART_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as StoredCart;
+    if (parsed.date !== todayKey()) return {};
+    return parsed.items ?? {};
+  } catch (e) {
+    return {};
+  }
+}
+
 function formatReopenTime(isoString: string | null): string {
   if (!isoString) return '';
   try {
@@ -36,14 +63,11 @@ export function Menu() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const [cart, setCart] = useState<Record<number, number>>(() => {
-    try {
-      const saved = sessionStorage.getItem('khaao_cart');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
+  // localStorage, not sessionStorage — sessionStorage dies with the process,
+  // so the OS reclaiming a backgrounded installed PWA (e.g. the student
+  // switched to WhatsApp mid-cart) silently lost everything. Keyed by
+  // today's date so a cart from a previous day is never resurrected.
+  const [cart, setCart] = useState<Record<number, number>>(loadStoredCart);
   const [showCheckout, setShowCheckout] = useState(false);
   const [dietFilter, setDietFilter] = useState<DietFilterValue>('all');
   const [activeCategory, setActiveCategory] = useState<string>('');
@@ -51,9 +75,9 @@ export function Menu() {
   useEffect(() => {
     const hasItems = Object.values(cart).some((qty) => qty > 0);
     if (!hasItems) {
-      sessionStorage.removeItem('khaao_cart');
+      localStorage.removeItem(CART_STORAGE_KEY);
     } else {
-      sessionStorage.setItem('khaao_cart', JSON.stringify(cart));
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ date: todayKey(), items: cart } satisfies StoredCart));
     }
   }, [cart]);
 
@@ -118,7 +142,7 @@ export function Menu() {
     },
     onSuccess: () => {
       setCart({});
-      sessionStorage.removeItem('khaao_cart');
+      localStorage.removeItem(CART_STORAGE_KEY);
       setShowCheckout(false);
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
       queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
