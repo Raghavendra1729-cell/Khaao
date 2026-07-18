@@ -7,7 +7,7 @@ import { app } from '../lib/firebase';
 import { fetchAuthConfig } from '../api/auth';
 
 export function Login() {
-  const { loginWithGoogle, isAuthenticated, user } = useAuth();
+  const { loginWithGoogle, completeGoogleRedirect, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +29,29 @@ export function Login() {
       .catch(() => {});
   }, []);
 
+  // Standalone-PWA sign-in hands the window off via signInWithRedirect and
+  // comes back here — pick up the result once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    setSubmitting(true);
+    completeGoogleRedirect()
+      .then((loggedInUser) => {
+        if (cancelled || !loggedInUser) return;
+        navigate(loggedInUser.role === 'shopkeeper' ? '/shop' : '/', { replace: true });
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : err?.message || 'Something went wrong. Please try again.');
+      })
+      .finally(() => {
+        if (!cancelled) setSubmitting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleGoogleLogin() {
     setError(null);
     setSubmitting(true);
@@ -37,7 +60,11 @@ export function Login() {
         throw new Error('Firebase is not configured. Please check your environment variables (.env).');
       }
       const loggedInUser = await loginWithGoogle();
-      navigate(loggedInUser.role === 'shopkeeper' ? '/shop' : '/', { replace: true });
+      // null means standalone mode handed the window off via redirect — the
+      // page is navigating away, nothing left to do here.
+      if (loggedInUser) {
+        navigate(loggedInUser.role === 'shopkeeper' ? '/shop' : '/', { replace: true });
+      }
     } catch (err: any) {
       if (err?.code === 'auth/popup-closed-by-user') return;
       setError(err instanceof ApiError ? err.message : err.message || 'Something went wrong. Please try again.');

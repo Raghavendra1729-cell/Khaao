@@ -10,13 +10,16 @@ import { useNavigate } from 'react-router-dom';
 import * as authApi from '../api/auth';
 import { getStoredUser, getToken, onUnauthorized } from '../api/client';
 import type { User } from '../api/types';
-import { signInWithGoogle } from '../lib/firebase';
+import { getGoogleRedirectResult, signInWithGoogle } from '../lib/firebase';
 
 interface AuthContextValue {
   user: User | null;
   isAuthenticated: boolean;
   authLoading: boolean;
-  loginWithGoogle: () => Promise<User>;
+  /** Resolves to `null` when standalone mode redirected the window away. */
+  loginWithGoogle: () => Promise<User | null>;
+  /** Picks up a signInWithRedirect result; `null` when there wasn't one. */
+  completeGoogleRedirect: () => Promise<User | null>;
   logout: () => void;
 }
 
@@ -34,11 +37,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [navigate]);
 
-  async function loginWithGoogleAction(): Promise<User> {
+  async function loginWithGoogleAction(): Promise<User | null> {
     setAuthLoading(true);
     try {
       const config = await authApi.fetchAuthConfig();
       const idToken = await signInWithGoogle(config.allowed_email_domain);
+      if (!idToken) return null; // standalone mode: window is redirecting away
+      const res = await authApi.loginWithFirebase(idToken);
+      setUser(res.user);
+      return res.user;
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function completeGoogleRedirectAction(): Promise<User | null> {
+    const idToken = await getGoogleRedirectResult();
+    if (!idToken) return null;
+    setAuthLoading(true);
+    try {
       const res = await authApi.loginWithFirebase(idToken);
       setUser(res.user);
       return res.user;
@@ -59,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: user !== null && getToken() !== null,
       authLoading,
       loginWithGoogle: loginWithGoogleAction,
+      completeGoogleRedirect: completeGoogleRedirectAction,
       logout,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
