@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (e.g. a branch getting new pushes)
+# so CI capacity isn't wasted validating commits nobody cares about anymore.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast unit suite: no Postgres needed. Every service test in
+  # backend/internal/services/*_test.go runs against hand-written mock repos,
+  # so this job only needs the Go toolchain.
+  backend-unit:
+    name: Backend — build, vet, unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: backend/go.sum
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (fast unit suite, no Postgres, -race)
+        run: go test ./... -race
+
+  # Real-Postgres integration suite (P2-c): unique/partial-index constraints,
+  # FK enforcement, concurrent order-creation and pool-allocation races
+  # against real transactions/row-locks, expiry-tick + FCFS re-pooling. These
+  # are excluded from `go test ./...` by the `integration` build tag and only
+  # run here, against a real `postgres:16` service container.
+  backend-integration:
+    name: Backend — Postgres integration tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: khaao_test
+        ports:
+          - 5432:5432
+        # GitHub Actions' documented health-check shape for service
+        # containers: pg_isready must succeed before any job step runs, so
+        # the tests below never race a still-starting database.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/khaao_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: backend/go.sum
+
+      - name: Enable citext extension
+        run: psql "$TEST_DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS citext;"
+
+      - name: go build (integration tag)
+        run: go build -tags=integration ./...
+
+      - name: go vet (integration tag)
+        run: go vet -tags=integration ./...
+
+      # -p 1 is required, not optional: every integration test truncates
+      # every application table at the start of the test. `go test ./...`
+      # runs different packages' test binaries concurrently by default, and
+      # internal/repository's and internal/services' integration suites
+      # share this one database — without -p 1, one package's truncate can
+      # wipe data out from under a test running concurrently in the other
+      # package (see the doc comments on the *_test.go files themselves;
+      # this was caught by actually running the suite, not theorized).
+      - name: go test -tags=integration (real Postgres, -race)
+        run: go test -tags=integration -p 1 ./... -race
+
+  frontend:
+    name: Frontend — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b --noEmit
+
+      - name: Build
+        run: npm run build
