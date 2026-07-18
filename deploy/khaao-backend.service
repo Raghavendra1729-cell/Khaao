@@ -1,0 +1,89 @@
+# Khaao backend — systemd unit
+#
+# Install:
+#   sudo cp deploy/khaao-backend.service /etc/systemd/system/khaao-backend.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now khaao-backend
+#
+# See deploy/RUNBOOK.md for the full deployment sequence (this unit assumes
+# the binary is already built and the env file already exists at the paths
+# below — RUNBOOK.md § 4 covers both).
+
+[Unit]
+Description=Khaao backend (Go/Gin API server)
+# Best-effort ordering only — DATABASE_URL points at a managed/remote
+# Postgres (see STATUS.md § Topology decision), not a local service, so
+# there is nothing local to hard-require with Requires=/BindsTo=. If network
+# isn't up yet the process will fail its first DB connection and systemd
+# will restart it per the Restart= policy below.
+After=network-online.target
+Wants=network-online.target
+
+# Rate-limit restarts: if config.Validate() rejects a genuinely bad config
+# (e.g. a bad DATABASE_URL) the process exits immediately every time, so
+# without a cap Restart=on-failure below would spin systemd in a tight loop
+# and flood the journal. These two belong in [Unit] (generalized here since
+# systemd v230, systemd.unit(5) "UNIT START RATE LIMITING") — NOT [Service],
+# where older systemd docs/examples sometimes place them; systemd silently
+# ignores them if put under [Service], quietly disabling this protection.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# Runs as a dedicated unprivileged service account — never root. Create it
+# once with:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin khaao
+User=khaao
+Group=khaao
+
+# Real secrets/config live OUTSIDE the git working directory on purpose —
+# systemd services should never read from a repo checkout (permissions,
+# accidental `git clean`/`git checkout` wiping config, deploys overwriting
+# it, etc). Copy backend/.env.example to this path once, fill in real
+# values, and chmod it 600 owned by root (systemd reads EnvironmentFile as
+# root before dropping to User=khaao, so root:root 600 is correct and keeps
+# the khaao user itself from reading its own secrets off disk directly).
+EnvironmentFile=/etc/khaao/backend.env
+
+# Compiled binary — see RUNBOOK.md § 4 for the build command
+# (`go build -o /opt/khaao/bin/khaao-backend ./cmd/server`, run from
+# backend/, then copy the resulting binary to this path).
+ExecStart=/opt/khaao/bin/khaao-backend
+WorkingDirectory=/opt/khaao
+
+# Restart automatically on crash/non-zero exit, but not in a tight loop if
+# something is fundamentally broken (e.g. bad DATABASE_URL) — fail-closed
+# config.Validate() in production means a genuinely bad config exits
+# immediately every time, so the burst limit below stops systemd from
+# spinning forever and filling the journal.
+Restart=on-failure
+RestartSec=5
+
+# Each SSE connection (student /api/stream, shopkeeper /api/shop/stream)
+# holds one open file descriptor for as long as the tab/app stays open. At
+# the ~2000-student scale target with ~1-2k concurrent SSE connections
+# (STATUS.md § Topology decision), the default per-process ulimit (often
+# 1024 on many distros) is exhausted well before every student who wants to
+# be connected can be. This raises the ceiling for THIS service only,
+# without touching the box's global /etc/security/limits.conf.
+LimitNOFILE=65536
+
+# Give the process time to finish Gin's graceful http.Server.Shutdown
+# (main.go uses a 10s shutdown context) before systemd sends SIGKILL.
+TimeoutStopSec=15
+
+# --- Light sandboxing (defense in depth, not a substitute for the above) ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The binary/env file live under /opt/khaao and /etc/khaao respectively and
+# are read-only to this service (ProtectSystem=strict already makes most of
+# the filesystem read-only); the app itself writes no local files — it logs
+# to stdout, which journald captures, and all persistent state is in
+# Postgres — so no ReadWritePaths= entry is needed.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,144 @@
+# Khaao — Caddy v2 reverse-proxy config
+#
+# Terminates TLS (Caddy's automatic HTTPS via Let's Encrypt/ZeroSSL — it just
+# needs a real, publicly-resolvable domain in the site block below, and ports
+# 80/443 reachable from the internet for the ACME challenge) and fronts the
+# single Go backend instance plus the built frontend static bundle.
+#
+# ============================================================================
+# REPLACE ME: khaao.example.com is a PLACEHOLDER. Swap it for the real
+# production domain before deploying. Caddy uses whatever hostname appears
+# in the site block below both to request the TLS cert AND to decide which
+# requests match this site — it will not issue a cert or route traffic
+# correctly while this placeholder is left in place.
+# ============================================================================
+khaao.example.com {
+	# We deliberately use `handle` blocks (not bare same-type directives)
+	# for the /api split below. `handle` blocks are mutually exclusive and
+	# evaluated in the order written — the first matching block handles the
+	# request and no other `handle` block runs. This avoids relying on
+	# Caddy's automatic directive-sorting behavior, which is the easy way
+	# to accidentally get the SSE-specific reverse_proxy settings below
+	# silently ignored in favor of the generic /api/* one.
+
+	# ------------------------------------------------------------------
+	# SSE endpoints — MUST be their own `handle` blocks, listed before the
+	# generic /api/* block below, so they get non-buffered, long-lived
+	# streaming treatment instead of default reverse-proxy settings.
+	#
+	# GET /api/stream       — student order updates
+	#                         (backend/internal/routes/routes.go:
+	#                          student.GET("/stream", orderCtrl.Stream))
+	# GET /api/shop/stream   — shopkeeper orders/prep/menu/shop-status updates
+	#                         (backend/internal/routes/routes.go:
+	#                          shop.GET("/stream", shopCtrl.Stream))
+	#
+	# Both are Server-Sent Events: a single long-lived HTTP response the
+	# backend writes small "data: ...\n\n" frames to as events happen. If
+	# any layer between the Go process and the browser buffers the
+	# response, those frames pile up and get delivered late/in bursts
+	# instead of instantly — this breaks live order-status tracking and
+	# the shopkeeper's incoming-order/prep board silently (no errors, just
+	# stale-feeling UI), so don't merge these into the generic /api/* rule
+	# below even though the upstream address is identical.
+	# ------------------------------------------------------------------
+	handle /api/stream {
+		reverse_proxy localhost:8080 {
+			# The single most important line in this file. -1 means "flush
+			# to the client after every write, don't batch on a timer."
+			# Caddy's default flush interval is tuned for normal
+			# request/response traffic and will hold SSE frames in a
+			# buffer for up to ~a couple hundred ms (or until the buffer
+			# fills), which reads as "real-time updates are laggy" bug
+			# reports that are actually a proxy config problem, not a
+			# backend problem.
+			flush_interval -1
+
+			# Keep the upstream (Caddy → Go backend) connection alive
+			# across the long SSE session instead of Caddy assuming a
+			# short-lived request and being aggressive about reuse/timeout.
+			transport http {
+				keepalive 90s
+				keepalive_idle_conns 10
+			}
+		}
+	}
+
+	handle /api/shop/stream {
+		reverse_proxy localhost:8080 {
+			flush_interval -1
+			transport http {
+				keepalive 90s
+				keepalive_idle_conns 10
+			}
+		}
+	}
+
+	# ------------------------------------------------------------------
+	# All other /api/* routes — ordinary request/response, so Caddy's
+	# default buffering is fine and in fact desirable (allows gzip, sane
+	# error handling, etc). This block MUST come after the two SSE
+	# `handle` blocks above, since `handle` picks the first match and
+	# /api/stream, /api/shop/stream would otherwise also match /api/*.
+	# ------------------------------------------------------------------
+	handle /api/* {
+		reverse_proxy localhost:8080
+	}
+
+	# ------------------------------------------------------------------
+	# Frontend static bundle (Vite build output, `frontend/dist`) with SPA
+	# fallback. try_files serves the requested file if it exists on disk
+	# (JS/CSS/images/manifest/service-worker/etc.); anything else (e.g. a
+	# hard refresh on /orders or /shop/prep, both react-router client
+	# routes with no matching file on disk) falls back to index.html so
+	# the SPA's router can take over instead of the request 404ing.
+	#
+	# gzip/zstd compression is scoped to ONLY this block (not applied
+	# globally) so it can never interact with the SSE responses above —
+	# compressing a stream reintroduces exactly the buffering problem
+	# flush_interval -1 exists to avoid.
+	# ------------------------------------------------------------------
+	handle {
+		root * /var/www/khaao/frontend/dist
+		encode gzip zstd
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Basic security headers at the edge. The Go backend also sets its own
+	# (including an identical copy of the CSP below) via
+	# middleware.SecurityHeaders() — this is defense in depth for the
+	# static-file responses Caddy serves directly, not a replacement. THIS
+	# header block is the one that actually protects the browser-rendered
+	# app in production (the frontend's HTML/JS is served here by Caddy,
+	# not by the Go backend) — the two copies being identical means a
+	# browser that sees both (frontend page load through Caddy, API
+	# response also passing through this same site block) just intersects
+	# two equal policies, which is a no-op, not a bug.
+	#
+	# CSP allows: Firebase Google sign-in (a signInWithPopup flow — the
+	# opened popup itself isn't governed by frame-src, but the Firebase SDK
+	# also uses a hidden auth iframe at *.firebaseapp.com for some
+	# operations), Cloudinary's direct-upload endpoint
+	# (api.cloudinary.com) and photo hosting (res.cloudinary.com), Google
+	# profile photos (*.googleusercontent.com), and the Firebase/Google
+	# APIs the JS SDK calls (*.googleapis.com). style-src needs
+	# 'unsafe-inline' for a handful of React inline `style` props; nothing
+	# needs script-src 'unsafe-inline' since this is a compiled Vite bundle.
+	#
+	# NOT YET LIVE-VERIFIED against a real Google sign-in + Cloudinary
+	# upload (see middleware/security.go's contentSecurityPolicy comment) —
+	# do that before trusting this in production. A CSP violation fails
+	# silently from the user's point of view (login or photo upload just
+	# stops working), so check the browser console for
+	# "Refused to ..." errors on first deploy.
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://res.cloudinary.com https://*.googleusercontent.com; connect-src 'self' https://api.cloudinary.com https://*.googleapis.com; frame-src https://*.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self'"
+	}
+
+	log {
+		output file /var/log/caddy/khaao-access.log
+	}
+}
