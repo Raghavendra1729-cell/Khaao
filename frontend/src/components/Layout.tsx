@@ -305,7 +305,7 @@ function LayoutInner() {
       </main>
 
       <InstallPrompt />
-      {isShop && <PushNotificationSetup />}
+      <PushNotificationSetup isShop={isShop} />
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-paper/95 pb-safe shadow-bar backdrop-blur">
         <div className={`mx-auto grid ${contentMaxWidth} ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>

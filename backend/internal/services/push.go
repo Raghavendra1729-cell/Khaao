@@ -77,6 +77,36 @@ func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
 	}
 }
 
+// NotifyOrderReady fires a best-effort push to the ordering student when
+// their order transitions to ready — this is the one moment a student
+// absolutely needs to notice even with the screen off/locked, and on iOS the
+// in-tab SSE chime/vibration/Notification() path can't reach a backgrounded
+// tab at all. Same fire-and-forget-per-subscription shape as NotifyNewOrder.
+func (s *PushService) NotifyOrderReady(ctx context.Context, userID uint, orderNo int) {
+	if s.cfg.VapidPublicKey == "" || s.cfg.VapidPrivateKey == "" {
+		return
+	}
+	subs, err := s.repo.FindByUserID(ctx, userID)
+	if err != nil {
+		slog.Error("khaao: push: could not load student subscriptions", "user_id", userID, "error", err)
+		return
+	}
+	if len(subs) == 0 {
+		return
+	}
+	payload, err := json.Marshal(pushPayload{
+		Title: "Order ready!",
+		Body:  fmt.Sprintf("Order #%d is ready — head to the counter.", orderNo),
+	})
+	if err != nil {
+		slog.Error("khaao: push: could not marshal payload", "error", err)
+		return
+	}
+	for _, sub := range subs {
+		go s.send(sub, payload)
+	}
+}
+
 // send delivers one push message. It deliberately does not take the
 // request's context — the goroutine must be able to finish after the HTTP
 // handler that triggered it has already returned.

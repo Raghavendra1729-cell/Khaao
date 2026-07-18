@@ -77,9 +77,20 @@ export function StudentRealtime() {
               if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
                 navigator.vibrate([200, 100, 200]); // buzz phones on silent
               }
-              if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-                new Notification('Khaao — order ready', {
-                  body: `Token #${order.order_no} is ready. Pick up at the counter.`,
+              if (
+                typeof Notification !== 'undefined' &&
+                Notification.permission === 'granted' &&
+                'serviceWorker' in navigator
+              ) {
+                // The Notification() constructor isn't supported on iOS
+                // Safari — only registration.showNotification() from a
+                // service worker is. Same call path as the SW's own `push`
+                // listener, so it works identically in-tab or backgrounded.
+                navigator.serviceWorker.ready.then((registration) => {
+                  registration.showNotification('Khaao — order ready', {
+                    body: `Token #${order.order_no} is ready. Pick up at the counter.`,
+                    icon: '/icon-192.png',
+                  });
                 });
               }
               if (!location.pathname.startsWith('/order')) {

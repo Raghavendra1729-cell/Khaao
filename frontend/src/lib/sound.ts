@@ -15,6 +15,24 @@ function getContext(): AudioContext | null {
   return sharedContext;
 }
 
+/**
+ * iOS keeps an AudioContext created outside a user gesture permanently
+ * `suspended`, so a chime fired later (e.g. an SSE event while the student
+ * isn't actively tapping) would silently never play. Call once at app
+ * startup — it attaches a one-time listener that creates/resumes the shared
+ * context on the student's first touch, so by the time a real chime is
+ * needed the context is already running.
+ */
+export function unlockAudioOnFirstTouch(): void {
+  if (typeof window === 'undefined') return;
+  const unlock = () => {
+    const ctx = getContext();
+    if (ctx && ctx.state === 'suspended') void ctx.resume();
+    window.removeEventListener('pointerdown', unlock);
+  };
+  window.addEventListener('pointerdown', unlock, { once: true });
+}
+
 function tone(
   ctx: AudioContext,
   startTime: number,

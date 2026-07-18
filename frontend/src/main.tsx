@@ -15,6 +15,9 @@ import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './components/Toast.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { unlockAudioOnFirstTouch } from './lib/sound.ts';
+
+unlockAudioOnFirstTouch();
 
 // Installable PWA: precache the shell, auto-update in the background.
 registerSW({ immediate: true });

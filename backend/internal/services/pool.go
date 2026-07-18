@@ -130,12 +130,28 @@ func (e *PoolEngine) recomputeStatus(order *models.Order) {
 			order.ReadyAt = &now
 			exp := now.Add(time.Duration(e.cfg.HoldMinutes) * time.Minute)
 			order.ExpiresAt = &exp
+			e.notifyOrderReady(order)
 		}
 	case anyProgress:
 		order.Status = models.OrderPartiallyReady
 	default:
 		order.Status = models.OrderPreparing
 	}
+}
+
+// notifyOrderReady fires a best-effort push to the ordering student the
+// moment their order becomes fully allocated (recomputeStatus's "ready"
+// transition). Detached from the caller's transaction/context on purpose —
+// this fires from deep inside WithTx callbacks and must not add a
+// synchronous DB round-trip to the critical section, nor block on a
+// transaction that might still be rolled back by a later step. The push
+// itself is already best-effort (see PushService.NotifyOrderReady).
+func (e *PoolEngine) notifyOrderReady(order *models.Order) {
+	if e.pushSvc == nil {
+		return
+	}
+	userID, orderNo := order.UserID, order.OrderNo
+	go e.pushSvc.NotifyOrderReady(context.Background(), userID, orderNo)
 }
 
 func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.EventType, payload any) error {

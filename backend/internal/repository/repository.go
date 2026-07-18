@@ -100,6 +100,7 @@ type RatingRepo interface {
 type PushRepo interface {
 	Save(ctx context.Context, sub *models.PushSubscription) error
 	FindByRole(ctx context.Context, role models.Role) ([]models.PushSubscription, error)
+	FindByUserID(ctx context.Context, userID uint) ([]models.PushSubscription, error)
 	DeleteByEndpoint(ctx context.Context, endpoint string) error
 	FindByEndpoint(ctx context.Context, endpoint string) (*models.PushSubscription, error)
 }

@@ -17,8 +17,16 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-export function PushNotificationSetup() {
+interface PushNotificationSetupProps {
+  /** Gates Hindi copy explicitly, matching Layout.tsx's AvatarMenu — a
+   * shopkeeper's stored 'hi' preference must never leak into a student
+   * session on a shared device/browser. */
+  isShop: boolean;
+}
+
+export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
   const { language } = useLanguage();
+  const showHindi = isShop && language === 'hi';
   const [showPrompt, setShowPrompt] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -99,7 +107,9 @@ export function PushNotificationSetup() {
         <div className="flex-1">
           <p className="text-sm font-bold text-ink">Enable Notifications</p>
           <p className="mt-0.5 text-xs text-ink/70">
-            Get notified of new orders even when this tab is closed.
+            {isShop
+              ? 'Get notified of new orders even when this tab is closed.'
+              : 'Get notified the moment your order is ready — even with your screen locked.'}
           </p>
         </div>
         <button
@@ -119,7 +129,7 @@ export function PushNotificationSetup() {
         className="mt-3 w-full rounded-lg bg-brand py-2 text-sm font-bold text-white transition hover:bg-brand-dark active:scale-[0.98] disabled:opacity-50"
       >
         <span>
-          {language === 'hi' ? (loading ? 'चालू हो रहा है...' : 'चालू करें') : loading ? 'Enabling...' : 'Enable'}
+          {showHindi ? (loading ? 'चालू हो रहा है...' : 'चालू करें') : loading ? 'Enabling...' : 'Enable'}
         </span>
       </button>
     </div>

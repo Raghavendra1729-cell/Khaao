@@ -575,6 +575,12 @@ func (r *GormPushRepo) FindByRole(ctx context.Context, role models.Role) ([]mode
 	return subs, err
 }
 
+func (r *GormPushRepo) FindByUserID(ctx context.Context, userID uint) ([]models.PushSubscription, error) {
+	var subs []models.PushSubscription
+	err := getDB(ctx, r.db).Where("user_id = ?", userID).Find(&subs).Error
+	return subs, err
+}
+
 func (r *GormPushRepo) DeleteByEndpoint(ctx context.Context, endpoint string) error {
 	return getDB(ctx, r.db).Where("endpoint = ?", endpoint).Delete(&models.PushSubscription{}).Error
 }
