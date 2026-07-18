@@ -2,7 +2,11 @@ package services_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
 
 	"khaao/internal/authn"
 	"khaao/internal/config"
@@ -63,20 +67,20 @@ func TestAuthRules(t *testing.T) {
 	eRepo := &mockEmailRepo{emails: map[string]bool{"shop@shop.com": true}}
 	verifier := &mockVerifier{
 		identities: map[string]*authn.Identity{
-			"shop-token": {UID: "1", Email: "shop@shop.com", EmailVerified: true},
+			"shop-token":    {UID: "1", Email: "shop@shop.com", EmailVerified: true},
 			"student-token": {UID: "2", Email: "student@college.edu", EmailVerified: true},
-			"bad-token": {UID: "3", Email: "bad@gmail.com", EmailVerified: true},
-			"unverified": {UID: "4", Email: "student@college.edu", EmailVerified: false},
+			"bad-token":     {UID: "3", Email: "bad@gmail.com", EmailVerified: true},
+			"unverified":    {UID: "4", Email: "student@college.edu", EmailVerified: false},
 		},
 	}
-	
+
 	cfg := &config.Config{
 		AllowedEmailDomain: "college.edu",
-		JWTSecret: "secret",
+		JWTSecret:          "secret",
 	}
-	
+
 	svc := services.NewAuthService(uRepo, eRepo, verifier, cfg)
-	
+
 	// Shopkeeper login (in allowlist, domain doesn't match)
 	user, _, err := svc.FirebaseLogin(context.Background(), "shop-token")
 	if err != nil {
@@ -85,7 +89,7 @@ func TestAuthRules(t *testing.T) {
 	if user.Role != models.RoleShopkeeper {
 		t.Fatalf("expected shopkeeper, got %v", user.Role)
 	}
-	
+
 	// Student login (domain matches)
 	user, _, err = svc.FirebaseLogin(context.Background(), "student-token")
 	if err != nil {
@@ -94,16 +98,67 @@ func TestAuthRules(t *testing.T) {
 	if user.Role != models.RoleStudent {
 		t.Fatalf("expected student, got %v", user.Role)
 	}
-	
+
 	// Bad domain login
 	_, _, err = svc.FirebaseLogin(context.Background(), "bad-token")
 	if err == nil {
 		t.Fatalf("expected failure for bad domain")
 	}
-	
+
 	// Unverified email
 	_, _, err = svc.FirebaseLogin(context.Background(), "unverified")
 	if err == nil {
 		t.Fatalf("expected failure for unverified email")
 	}
+}
+
+// TestParseTokenRejectsWrongAlgorithm pins ParseToken to HS256 — without
+// jwt.WithValidMethods, the library happily verifies whatever alg the token
+// header claims, including "none" (no signature at all) or an attacker-
+// supplied RS256 token, as long as the "signature" satisfies that
+// algorithm's check. Not practically exploitable today ([]byte HS256 key is
+// type-incompatible with RSA/ECDSA verification), but this makes the
+// HS256-only claim actually true in code.
+func TestParseTokenRejectsWrongAlgorithm(t *testing.T) {
+	secret := "test-secret-at-least-32-bytes-long!"
+
+	claims := &services.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "1"},
+		Role:             string(models.RoleStudent),
+	}
+
+	t.Run("valid HS256 token is accepted", func(t *testing.T) {
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+		if err != nil {
+			t.Fatalf("failed to sign token: %v", err)
+		}
+		if _, err := services.ParseToken(signed, secret); err != nil {
+			t.Fatalf("expected valid HS256 token to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("alg none is rejected", func(t *testing.T) {
+		token := jwt.NewWithClaims(jwt.SigningMethodNone, claims)
+		signed, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+		if err != nil {
+			t.Fatalf("failed to sign none-alg token: %v", err)
+		}
+		if _, err := services.ParseToken(signed, secret); err == nil {
+			t.Fatal("expected alg=none token to be rejected")
+		}
+	})
+
+	t.Run("alg RS256 is rejected", func(t *testing.T) {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("failed to generate RSA key: %v", err)
+		}
+		signed, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+		if err != nil {
+			t.Fatalf("failed to sign RS256 token: %v", err)
+		}
+		if _, err := services.ParseToken(signed, secret); err == nil {
+			t.Fatal("expected alg=RS256 token to be rejected")
+		}
+	})
 }
