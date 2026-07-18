@@ -6,11 +6,18 @@
 > a descriptive message) — this file only tracks the *current* picture, not a
 > session-by-session diary.
 
-## Current state (2026-07-15, end of session)
+## Current state (2026-07-18)
 
-The entire § 9 backlog from the previous session's handoff is now **done,
-live-verified, and committed**. Everything in § 8 plus everything below is
-feature-complete and works end-to-end.
+**2026-07-18: a full code review (backend + frontend + mobile-first audit) was
+performed and § 9 now contains a fresh, prioritized backlog derived from it.**
+The app is feature-complete and all backend tests pass (`go build ./... && go
+vet ./... && go test ./... -race` verified clean 2026-07-18), but the review
+found real launch-affecting gaps — especially around mobile robustness
+(§ 9 P0) — that should be fixed before the Deployment milestone.
+
+The entire pre-2026-07-15 backlog from the previous session's handoff is
+**done, live-verified, and committed**. Everything in § 8 plus everything
+below is feature-complete and works end-to-end.
 
 | Item | Status |
 |---|---|
@@ -294,16 +301,62 @@ endpoints, state machines). Added since that doc was written:
 
 ---
 
-## 9. What's LEFT — priority order (next agent starts here)
+## 9. What's LEFT — review-driven backlog (2026-07-18, next agent starts here)
 
-> Legend: **P0** = blocks 2000-student launch · **P1** = correctness/security
-> before real use · **P2** = reliability/ops · **Deploy** = deployment milestone
+> Legend: **P0** = fix before launch (breaks the core mobile experience) ·
+> **P1** = fix before real 2000-student use · **P2** = quality/reliability ·
+> **P3** = tooling/process · **Deploy** = deployment milestone
+>
+> Source: full code review 2026-07-18 (backend + frontend + mobile-first
+> audit). Every item below carries file references and a verification step —
+> work them top-to-bottom, commit each one separately, and run the § 6
+> verification suite before every commit. This app is **mobile-only for
+> students** (phone PWA) and mobile-first for the shopkeeper; desktop is the
+> lowest priority — evaluate every fix on a 375px viewport first.
 
-Everything previously tracked here as P0/P1/P2 code work is **done, verified,
-and committed** — see § Current state above for what was done and how each
-item was verified. Nothing is queued in this section right now. The only
-remaining work in this project is the **Deployment** milestone below, which
-needs a human with real infra/dashboard access, not more code.
+### P0 — launch blockers (mobile robustness)
+
+| # | What | Detail |
+|---|---|---|
+| R1 | **Add a root React error boundary** | There is no ErrorBoundary anywhere (`grep -rn ErrorBoundary frontend/src` → nothing). Any render-time throw = permanent white screen — fatal in an installed PWA where there's no browser chrome to refresh with. Add a small class-component boundary around `<App />` in `frontend/src/main.tsx` with the app's paper/steel styling and a "Reload" button (`location.reload()`). Verify: throw inside a page component in dev, confirm the fallback renders instead of a blank screen. |
+| R2 | **Cart checkout crash on deleted menu item** | `frontend/src/pages/student/Menu.tsx:384` — `items.find((i) => i.id === entry.menu_item_id)!` non-null-asserts. If a shopkeeper deletes/hides an item while it sits in a student's cart (menu refetches via SSE `menu_update`), `item` is `undefined` and `.name` throws → white screen (compounded by R1). Fix: derive `cartEntries` only from ids present in the current menu, silently drop stale lines (toast "Some items are no longer available and were removed from your cart"), and delete the `!`. Verify: add item to cart, delete it via the shop UI in a second session, open the cart sheet. |
+| R3 | **SSE retry-exhaustion logs the user out on flaky networks** | `frontend/src/hooks/useSSE.ts` — after `MAX_RETRIES=8` consecutive failures (~75 s of bad connectivity: campus Wi-Fi dead zone, elevator, network switch) it dispatches `khaao:unauthorized`, bouncing a student with a perfectly valid token to the login screen. Only a **401 from the ticket mint** proves the session is dead — network errors (`ApiError` status 0) and `EventSource` errors must retry forever at the capped 15 s backoff instead of counting toward a logout. Keep a "reconnecting…" indicator out of scope. Verify: dev-tools offline mode for 3+ minutes → back online → stream reconnects, no logout. |
+| R4 | **Google sign-in inside an installed PWA (esp. iOS)** | `frontend/src/lib/firebase.ts` uses `signInWithPopup` only. In standalone/installed mode (`display-mode: standalone`) popups are unreliable-to-broken, and on iOS the installed app has **separate storage from Safari**, so every iOS installer must log in *inside* the standalone app — exactly where the popup flow fails. Fix: detect standalone (`matchMedia('(display-mode: standalone)')` or `navigator.standalone`) and use `signInWithRedirect` + `getRedirectResult` there (handle the result in `Login.tsx` on mount); keep the popup elsewhere. Note D-2 (authorized domains) interacts with this. Verify: must be checked on a real phone during D-6 — add it to the D-6 checklist. |
+| R5 | **"Order ready" is silent on iPhones** | For students, the ready moment relies on (a) `new Notification(...)` — the constructor is **not supported on iOS Safari** (only `registration.showNotification` from a SW is), (b) `navigator.vibrate` — doesn't exist on iOS, (c) a WebAudio chime whose `AudioContext` is created outside a user gesture (`frontend/src/lib/sound.ts`), which iOS keeps `suspended` — so an iOS student with the screen off gets *nothing*. Fixes, in value order: (1) extend Web Push to students — backend: send a push to the order's owner on the `ready` transition (`services/pool.go` recomputeStatus already knows `oldStatus != ready`; add a `PushService.NotifyOrderReady(userID, orderNo)` using the existing per-user subscriptions — `push_subscriptions` is already user-keyed) and surface the existing `PushNotificationSetup` prompt to students too (it's currently shop-only in `Layout.tsx`); (2) replace `new Notification` with `navigator.serviceWorker.ready.then(r => r.showNotification(...))`; (3) unlock audio on first touch: one-time `pointerdown` listener that creates/resumes the shared AudioContext. Verify: real-device check in D-6 (Android Chrome + iOS 16.4+ installed PWA). |
+
+### P1 — before real 2000-student use
+
+| # | What | Detail |
+|---|---|---|
+| R6 | **Cloudinary images served at original size** | `secure_url` is stored and rendered raw (`grep -rn cloudinary frontend/src` → only the upload call). A 4–8 MB phone photo is downloaded full-size into 48 px thumbnails by every student on mobile data, N items × every menu load. Fix: a `cloudinaryThumb(url, widthPx)` helper in `lib/format.ts` that injects `f_auto,q_auto,w_<2×display>` after `/upload/`, used at every `<img src={...photo_url}>` site (`MenuItemCard`, `TrendingRail`, `OrderStatus`, `Orders`, `OrderModal`); non-Cloudinary URLs pass through untouched. Also downscale before upload in `uploadMenuItemPhoto` (canvas, max edge ~1600 px, JPEG ~0.8) — campus uplink is the bottleneck. Verify: network tab shows transformed URLs and <100 KB thumbnails. |
+| R7 | **Save-during-upload submits a `blob:` URL** | `frontend/src/pages/shop/MenuManage.tsx` `handlePhotoSelected` puts the local `blob:` preview into `form.photo_url`, and Save stays enabled while uploading — submitting then sends `blob:…` to the API (backend 400s it, but the shopkeeper just sees a confusing error). Keep the preview in separate state (never in the submitted field), disable Save while `uploadingPhoto`, and `URL.revokeObjectURL` the preview (currently leaked). Verify: pick a photo on a throttled network and hit Save immediately. |
+| R8 | **Menu-refetch thundering herd at rush hour** | Every `menu_update` / `shop_status` SSE event is broadcast to *all* connected clients (`realtime/hub.go` `broadcastAll`), and each client immediately refetches `/api/menu` — which costs 3 queries (items + `SumOrderedQtyByDate` + `GetMenuAggregates`, `services/menu.go`). One stock toggle during rush = ~1–2 k simultaneous refetches ≈ 5–6 k queries in ~1 s. Fix server-side (client jitter alone is weaker): a tiny in-process cache of the `ListAvailable` response with ~3–5 s TTL, invalidated in `MenuService` mutations — same single-instance reasoning as the SSE hub, no Redis. The public `/api/menu` + `/api/shop-status` also have **no rate limiting at all** (GETs are exempt in `middleware/ratelimit.go`); the cache addresses the DB cost. Verify: `scripts/loadtest.js` k6 scenario with SSE-triggered refetch, watch query counts. |
+| R9 | **Cart lost when the OS kills the PWA** | `frontend/src/pages/student/Menu.tsx` keeps the cart in `sessionStorage`, which dies with the process — building a cart, switching to WhatsApp, and returning after the OS reaps the app loses everything. Move to `localStorage` keyed with the business date (`khaao_cart_v2: {date, items}`), discard on a different day. Verify: kill and reopen the PWA mid-cart. |
+| R10 | **Pin the app JWT's signing algorithm** | `backend/internal/services/auth.go` `ParseToken` has no `jwt.WithValidMethods([]string{"HS256"})` — § 11's "app JWT pinned to HS256" claim is currently *not true in code*. Not practically exploitable today (the []byte key is type-incompatible with RSA/ECDSA verification), but pinning is one line and makes the documented claim real. Add the option + a unit test that a token signed `alg: none`/`RS256` is rejected. |
+| R11 | **Rune-unsafe tag truncation corrupts Hindi text** | `backend/internal/services/menu.go` `normalizeTags` does `t[:40]` on the raw string — byte slicing that can cut a UTF-8 rune in half (Hindi/Devanagari tags are 3 bytes per char), storing invalid UTF-8. Truncate by runes (`[]rune(t)[:40]`) or reject with a 400. Add a test with a Devanagari tag > 40 bytes. |
+| R12 | **Backend broadcast storms hold the global engine lock** | `backend/internal/services/pool.go` — `MarkDone`, `Reject`, `RemoveItem` broadcast by reloading **every** in-progress order (`FindInProgress` + one `FindByID` per order inside `broadcast()`) while still holding `e.mu` (the deferred unlock). During rush with ~200 active orders, one "mark 1 samosa done" = ~200 sequential SELECTs serializing all other mutations behind it. The allocator already returns exactly the `touched` order IDs — broadcast only those (plus the acted-on order). Also fix the three ignored errors (`orders, _ := e.orderRepo.FindInProgress(ctx)` at ~pool.go:477, 756, 886) — log them at minimum. Verify: existing unit + integration suites stay green; add a unit test asserting broadcast count == touched count. |
+| R13 | **Bound the student history payload** | `GET /api/orders` (`FindHistoryByUserID`, `backend/internal/repository/gorm.go`) has no LIMIT — a semester of orders (plus items, on a phone) in one response. Add `LIMIT 20` (newest first) now; real pagination only if a "see more" is ever asked for. Mirror a sensible cap on `FindTerminalByDate` if shop history grows. Update the frontend copy if it implies "all" history. |
+| R14 | **Shop-status change races the order engine** | `backend/internal/services/shopstatus.go` `Set()` runs `CountAccepted` → `Save` → `RejectAllSubmitted` as three separate operations outside any transaction and without `PoolEngine.mu` — a concurrent `Accept` between check and save can leave the shop paused *with* an accepted order outstanding, the exact state the 409 guard exists to prevent. Wrap the check+save in `uow.WithTx` (the advisory lock in `WithTx` then serializes it against every engine mutation). Verify: integration test — concurrent Accept + Set(paused). |
+
+### P2 — quality / reliability
+
+| # | What | Detail |
+|---|---|---|
+| R15 | **Consolidate modals; drop `window.confirm`** | Three overlay implementations exist: `components/Modal.tsx` (portal, Esc, scroll-lock — the good one), the hand-rolled checkout sheet in `Menu.tsx`, and `RejectDialog` in `shop/Orders.tsx` (neither portaled, no Esc/scroll-lock). Plus 5 native `window.confirm` calls — `OrderModal.tsx` even chains two in a row for remove-item. Build a small `ConfirmDialog` on top of `Modal` (title, body, confirm variant, optional checkbox for "also mark out of stock") and migrate all five call sites + both hand-rolled overlays. Verify on 375px: focus, backdrop tap, background scroll locked. |
+| R16 | **Duplicated FCFS reallocation loop in pool.go** | The "Allocate → FindByIDForUpdate → recomputeStatus → Save" block appears 5× (`Accept`, `Reject`, `RemoveItem`, `MarkDone`, `ExpiryTick`). Extract `(e *PoolEngine) reallocate(txCtx, menuItemID) ([]uint, error)`. Pure refactor — the full test suite is the safety net. Also fix the "canttenapp" typo comment while in there. |
+| R17 | **Offline is a dead end** | SW precaches the shell, `/api` is NetworkOnly (correct for ordering), but offline the app renders generic "Network error" states everywhere. Add a lightweight `navigator.onLine`/fetch-failure banner ("You're offline — reconnecting…") in `Layout.tsx`, and let TanStack Query keep showing the last cached menu (it already does if `staleTime`/`gcTime` allow — verify, don't rebuild). |
+| R18 | **Manifest locks orientation to portrait** | `frontend/vite.config.ts` manifest `orientation: 'portrait'` forces portrait even for the shopkeeper's counter **tablet** (a stated target, `Layout.tsx` comment). Remove the key (or `'any'`). |
+| R19 | **Small frontend correctness papercuts** | (a) `PushNotificationSetup.tsx:31` reads `Notification.permission` without a `'Notification' in window` guard (StudentRealtime guards it; webviews without it would throw). (b) `InstallPrompt.tsx` iOS sniff misses iPadOS 13+ (reports as Mac); add `navigator.maxTouchPoints > 1 && /Mac/` to the check. (c) `MenuManage.tsx` uses `animate-in fade-in slide-in-from-bottom-2` — classes from the `tailwindcss-animate` plugin, which is **not installed** (`tailwind.config.js` plugins: []) — dead classes, no animation; use the existing `animate-slide-up` keyframe. (d) `Menu.tsx` `formatReopenTime` hardcodes `Asia/Kolkata`/`en-US` — use device-local formatting like `lib/format.ts` does. (e) Set `<html lang="hi">` while the shop UI is toggled to Hindi (screen readers), reset to `en` otherwise. (f) `khaao_rated_orders` in localStorage grows forever — cap it (keep last ~50 ids). |
+| R20 | **Backend hygiene papercuts** | (a) `config.go` `devDefaultDatabaseURL` embeds a personal username (`lingaraghavendra`) — use `postgres://localhost:5432/khaao?sslmode=disable` and let libpq default the user, or read `$USER`. (b) `envOrInt`/`envOrBool` silently fall back on unparseable values — a typo'd `HOLD_MINUTES=1O` quietly becomes 15; fail closed (error at `Validate()`) and require `HoldMinutes > 0`. (c) `services/push.go` `send` uses webpush-go's default HTTP client (no timeout) — pass `Options.HTTPClient` with ~10 s timeout so a hung push endpoint can't strand goroutines. (d) `errors.go` exposes `ErrBadRequest` etc. as mutable package-level `var` function values — make them plain `func`s. (e) The GORM struct tags (constraints/indexes) are now dead weight next to the SQL migrations — document in `models/` that **migrations are the schema source of truth** so nobody edits a tag expecting a schema change. |
+| R21 | **SSE hub silently drops events for slow consumers** | `realtime/hub.go` `send()` drops on a full 32-slot channel; the client only re-syncs on *reconnect* (`onOpen` invalidation), not on a drop, so a stale screen can persist until the next event. Cheap fix consistent with the topology: on drop, close the client's channel (forcing the stream handler to end → client reconnects → full refetch). Verify: unit test with a blocked reader. |
+
+### P3 — tooling / process (do early; cheap, prevents regressions)
+
+| # | What | Detail |
+|---|---|---|
+| R22 | **Frontend has no linter and no tests at all** | No ESLint config exists (a stray `eslint-disable-next-line` in `AuthContext.tsx` refers to a linter that isn't installed), no Prettier, no test runner, zero test files. Add: flat-config ESLint (`typescript-eslint` strict + `react-hooks` + `react-refresh`), Prettier, and Vitest + Testing Library. First tests where the review found risk: cart derivation incl. deleted-item case (R2), `useSSE` backoff/give-up logic (R3), `StudentRealtime` transition→notification decisions, `lib/format` money helpers. Wire `npm run lint` + `npm test` into `.github/workflows/ci.yml` frontend job. |
+| R23 | **Backend has no linter beyond go vet** | Add `golangci-lint` (modest set: govet, staticcheck, errcheck, ineffassign, misspell) + CI step. `errcheck` alone would have caught the three ignored `FindInProgress` errors (R12). |
+| R24 | **Bundle: one 456 KB JS chunk, Firebase for everyone** | `frontend/dist/assets/index-*.js` ≈ 456 KB raw — Firebase auth (used only at login) and all shop pages ship to every student on first load. `React.lazy` the shop pages and the student pages as route-group chunks, and dynamic-`import()` `lib/firebase.ts` inside the login action so the SDK loads only when someone actually signs in. Target: initial student chunk < ~200 KB raw. Verify: `npm run build` chunk report + the app still logs in (popup *and* R4's redirect path). |
 
 ### Deployment (deferred milestone — needs real infra, not just code)
 
@@ -316,7 +369,7 @@ needs a human with real infra/dashboard access, not more code.
 | ~~D-3~~ | ~~Cloudinary account check~~ | **Done (2026-07-15).** Live-verified via a direct signed-upload test against Cloudinary's API. Current `backend/.env` (cloud `r2avfle3`) is a working Programmable Media account. |
 | D-4 | **Deploy backend** | One instance (replicas=1 enforced). Raise `ulimit -n`. Caddy/nginx in front, `proxy_buffering off` on `/api/stream`, long read timeout for SSE. |
 | D-5 | **Deploy frontend** | Static host (Netlify/Vercel/Cloudflare Pages), `VITE_FIREBASE_*` set at build time. |
-| D-6 | **End-to-end production verification** | One real student + one real shopkeeper account complete a full order lifecycle on production. |
+| D-6 | **End-to-end production verification** | One real student + one real shopkeeper account complete a full order lifecycle on production. **Must include real-device checks from the § 9 review:** (R4) Google sign-in *inside* the installed PWA on iOS and Android — not just in the browser tab; (R5) the "ready" moment on a locked/backgrounded phone (push arrives, notification shows); CSP console check per § 11.5 (no "Refused to …" errors during login or photo upload). |
 | D-7 | **Runbook** | How to: rotate `JWT_SECRET`, add/remove a shopkeeper, restore a backup, check logs. |
 
 ---
@@ -452,5 +505,9 @@ harmless here since no code path ever reads client IP (rate limiting is
 per-authenticated-user, not per-IP), but silences Gin's warning and makes
 that non-use explicit rather than accidental.
 
-Already correct, do not change: Firebase token pinned to RS256, app JWT
-pinned to HS256; CORS pinned to `FRONTEND_ORIGIN` (no wildcard).
+Already correct, do not change: Firebase token verification pinned to RS256
+(`authn/firebase.go` checks the signing method explicitly); CORS pinned to
+`FRONTEND_ORIGIN` (no wildcard). **Correction (2026-07-18 review):** the app
+JWT is *not* actually alg-pinned in code — `services/auth.go` `ParseToken`
+has no `jwt.WithValidMethods` (not practically exploitable, but see § 9 R10
+for the one-line fix that makes this claim true).
