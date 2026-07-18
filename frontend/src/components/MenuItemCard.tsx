@@ -1,5 +1,5 @@
 import type { MenuItem } from '../api/types';
-import { formatPrice } from '../lib/format';
+import { cloudinaryThumb, formatPrice } from '../lib/format';
 import { QtyStepper } from './QtyStepper';
 import { MenuStatusBadge } from './StatusBadge';
 import { VegMark } from './VegMark';
@@ -43,7 +43,12 @@ export function MenuItemCard({
     >
       {item.photo_url && (
         <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-edge">
-          <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={cloudinaryThumb(item.photo_url, 128) ?? undefined}
+            alt={item.name}
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
         </div>
       )}
 

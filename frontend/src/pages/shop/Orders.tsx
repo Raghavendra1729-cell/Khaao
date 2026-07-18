@@ -8,7 +8,7 @@ import {
 } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { Order } from '../../api/types';
-import { formatPrice, formatTime } from '../../lib/format';
+import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -70,7 +70,11 @@ function RejectDialog({
               />
               {item.photo_url && (
                 <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-edge">
-                  <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                  <img
+                    src={cloudinaryThumb(item.photo_url, 64) ?? undefined}
+                    alt={item.name}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
               )}
               <span className="flex-1 text-sm font-medium text-ink">
@@ -193,7 +197,11 @@ function IncomingOrderCard({ order }: { order: Order }) {
               />
               {item.photo_url && (
                 <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-edge">
-                  <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                  <img
+                    src={cloudinaryThumb(item.photo_url, 72) ?? undefined}
+                    alt={item.name}
+                    className="h-full w-full object-cover"
+                  />
                 </div>
               )}
               <span className="flex-1 text-sm font-medium text-ink">

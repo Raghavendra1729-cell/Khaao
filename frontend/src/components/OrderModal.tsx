@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { handoverItem, markPaid, removeOrderItem, rejectOrder, setMenuItemStock } from '../api/shop';
 import { ApiError } from '../api/client';
 import type { Order, OrderItem } from '../api/types';
-import { formatPrice } from '../lib/format';
+import { cloudinaryThumb, formatPrice } from '../lib/format';
 import { Button } from './Button';
 import { QtyStepper } from './QtyStepper';
 import { OrderItemStatusBadge } from './StatusBadge';
@@ -75,7 +75,11 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
       <div className="flex items-start gap-3">
         {item.photo_url && (
           <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-edge">
-            <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+            <img
+              src={cloudinaryThumb(item.photo_url, 88) ?? undefined}
+              alt={item.name}
+              className="h-full w-full object-cover"
+            />
           </div>
         )}
         <div className="min-w-0 flex-1">

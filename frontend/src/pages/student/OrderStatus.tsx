@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
 import { ApiError } from '../../api/client';
 import type { Order, OrderStatus as OrderStatusType } from '../../api/types';
-import { formatCountdown, formatDateTime, formatPrice, secondsUntil } from '../../lib/format';
+import { cloudinaryThumb, formatCountdown, formatDateTime, formatPrice, secondsUntil } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -77,7 +77,11 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
           <div key={item.id} className="flex items-center gap-3 py-2.5">
             {item.photo_url && (
               <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-edge">
-                <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                <img
+                  src={cloudinaryThumb(item.photo_url, 96) ?? undefined}
+                  alt={item.name}
+                  className="h-full w-full object-cover"
+                />
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -208,7 +212,11 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
                 <div key={item.id} className="flex items-center gap-2">
                   {item.photo_url && (
                     <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md border border-edge">
-                      <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                      <img
+                        src={cloudinaryThumb(item.photo_url, 56) ?? undefined}
+                        alt={item.name}
+                        className="h-full w-full object-cover"
+                      />
                     </div>
                   )}
                   <span>{item.name} ×{item.qty}</span>

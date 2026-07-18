@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getShopHistory } from '../../api/shop';
 import { ApiError } from '../../api/client';
-import { formatPrice } from '../../lib/format';
+import { cloudinaryThumb, formatPrice } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
@@ -174,7 +174,11 @@ export function ShopHistoryPage() {
                       <div key={item.id} className="flex items-center gap-2">
                         {item.photo_url && (
                           <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md border border-edge">
-                            <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" />
+                            <img
+                              src={cloudinaryThumb(item.photo_url, 56) ?? undefined}
+                              alt={item.name}
+                              className="h-full w-full object-cover"
+                            />
                           </div>
                         )}
                         <span>

@@ -39,3 +39,21 @@ export function formatCountdown(totalSeconds: number): string {
   const s = clamped % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
+
+const CLOUDINARY_UPLOAD_MARKER = '/upload/';
+
+/**
+ * Injects an f_auto,q_auto,w_<widthPx> transform right after `/upload/` in a
+ * Cloudinary delivery URL, so a phone photo uploaded at full size (4-8 MB)
+ * is served at the size it's actually displayed at instead of downloaded
+ * full-size into e.g. a 48px thumbnail. Any URL that isn't a Cloudinary
+ * delivery URL (blob: previews, non-Cloudinary values) passes through
+ * unchanged.
+ */
+export function cloudinaryThumb(url: string | null | undefined, widthPx: number): string | null {
+  if (!url) return null;
+  const markerIndex = url.indexOf(CLOUDINARY_UPLOAD_MARKER);
+  if (markerIndex === -1) return url;
+  const insertAt = markerIndex + CLOUDINARY_UPLOAD_MARKER.length;
+  return `${url.slice(0, insertAt)}f_auto,q_auto,w_${Math.round(widthPx)}/${url.slice(insertAt)}`;
+}

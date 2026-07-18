@@ -11,7 +11,8 @@ import {
 } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { Diet, MenuItem } from '../../api/types';
-import { formatPrice, paiseToRupeesInput, rupeesToPaise } from '../../lib/format';
+import { cloudinaryThumb, formatPrice, paiseToRupeesInput, rupeesToPaise } from '../../lib/format';
+import { downscaleImage } from '../../lib/image';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -117,7 +118,8 @@ function MenuItemForm({
 
     setUploadingPhoto(true);
     try {
-      const url = await uploadMenuItemPhoto(file);
+      const resized = await downscaleImage(file);
+      const url = await uploadMenuItemPhoto(resized);
       setForm((f) => ({ ...f, photo_url: url }));
     } catch (err) {
       showToast('Photo upload failed.', 'error');
@@ -251,7 +253,11 @@ function MenuItemForm({
         <span className="mb-1 block text-sm font-semibold text-ink/70">Photo (optional)</span>
         <div className="flex items-center gap-3">
           {form.photo_url && (
-            <img src={form.photo_url} alt="Preview" className="h-11 w-11 rounded-lg object-cover" />
+            <img
+              src={cloudinaryThumb(form.photo_url, 88) ?? undefined}
+              alt="Preview"
+              className="h-11 w-11 rounded-lg object-cover"
+            />
           )}
           <input
             type="file"

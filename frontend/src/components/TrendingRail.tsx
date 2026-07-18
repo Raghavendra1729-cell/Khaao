@@ -1,5 +1,5 @@
 import type { MenuItem } from '../api/types';
-import { formatPrice } from '../lib/format';
+import { cloudinaryThumb, formatPrice } from '../lib/format';
 import { QtyStepper } from './QtyStepper';
 import { VegMark } from './VegMark';
 
@@ -70,7 +70,12 @@ export function TrendingRail({
 
               {item.photo_url ? (
                 <div className="mb-2 h-20 w-full overflow-hidden rounded-lg border border-edge">
-                  <img src={item.photo_url} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
+                  <img
+                    src={cloudinaryThumb(item.photo_url, 350) ?? undefined}
+                    alt={item.name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
                 </div>
               ) : (
                 <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg border border-dashed border-edge bg-steel/40 font-display text-2xl font-bold text-ink/25">
