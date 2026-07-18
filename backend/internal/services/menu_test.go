@@ -2,7 +2,9 @@ package services_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"khaao/internal/models"
 	"khaao/internal/services"
@@ -53,6 +55,36 @@ func TestMenuListAvailableCache(t *testing.T) {
 	}
 	if len(fresh) != 2 {
 		t.Fatalf("expected fresh response with 2 items after invalidation, got %d", len(fresh))
+	}
+}
+
+// TestMenuCreateRuneSafeTagTruncation guards against byte-slicing a
+// multi-byte UTF-8 tag in half. Devanagari characters are 3 bytes each, so a
+// naive t[:40] byte truncation on a Hindi tag would split a character mid-
+// encoding and store invalid UTF-8.
+func TestMenuCreateRuneSafeTagTruncation(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _ := newMenuService()
+
+	longTag := strings.Repeat("न", 50) // 50 runes, 150 bytes
+	resp, err := svc.Create(ctx, services.MenuItemInput{
+		Name:  "Chai",
+		Price: 100,
+		Diet:  "veg",
+		Tags:  []string{longTag},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(resp.Tags) != 1 {
+		t.Fatalf("expected 1 tag, got %d", len(resp.Tags))
+	}
+	tag := resp.Tags[0]
+	if !utf8.ValidString(tag) {
+		t.Fatalf("truncated tag is not valid UTF-8: %q", tag)
+	}
+	if n := utf8.RuneCountInString(tag); n != 40 {
+		t.Fatalf("expected tag truncated to 40 runes, got %d", n)
 	}
 }
 

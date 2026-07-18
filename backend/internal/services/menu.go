@@ -298,8 +298,11 @@ func normalizeTags(tags []string) []string {
 		if t == "" {
 			continue
 		}
-		if len(t) > 40 {
-			t = t[:40]
+		// Rune-safe truncation: byte slicing (t[:40]) can cut a multi-byte
+		// UTF-8 character in half — e.g. Devanagari tags are 3 bytes/char —
+		// which stores invalid UTF-8.
+		if runes := []rune(t); len(runes) > 40 {
+			t = string(runes[:40])
 		}
 		key := strings.ToLower(t)
 		if _, dup := seen[key]; dup {
