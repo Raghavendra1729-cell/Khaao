@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createMenuItem,
@@ -108,13 +108,29 @@ function MenuItemForm({
 
   const { showToast } = useToast();
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Kept separate from form.photo_url so a blob: preview can never be
+  // submitted — Save reads only form.photo_url, which only ever holds a
+  // real Cloudinary URL (or the empty string). Mirrored into a ref so the
+  // unmount cleanup below always sees the latest value, not the one from
+  // whichever render the effect closed over.
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const localPreviewRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Revoke on unmount so a mid-upload navigate-away doesn't leak the blob.
+    return () => {
+      if (localPreviewRef.current) URL.revokeObjectURL(localPreviewRef.current);
+    };
+  }, []);
 
   async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (localPreviewRef.current) URL.revokeObjectURL(localPreviewRef.current);
     const previewUrl = URL.createObjectURL(file);
-    setForm((f) => ({ ...f, photo_url: previewUrl }));
+    localPreviewRef.current = previewUrl;
+    setLocalPreview(previewUrl);
 
     setUploadingPhoto(true);
     try {
@@ -125,6 +141,11 @@ function MenuItemForm({
       showToast('Photo upload failed.', 'error');
       setForm((f) => ({ ...f, photo_url: '' }));
     } finally {
+      if (localPreviewRef.current === previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        localPreviewRef.current = null;
+        setLocalPreview(null);
+      }
       setUploadingPhoto(false);
     }
   }
@@ -252,9 +273,9 @@ function MenuItemForm({
       <label className="block">
         <span className="mb-1 block text-sm font-semibold text-ink/70">Photo (optional)</span>
         <div className="flex items-center gap-3">
-          {form.photo_url && (
+          {(localPreview || form.photo_url) && (
             <img
-              src={cloudinaryThumb(form.photo_url, 88) ?? undefined}
+              src={localPreview ?? cloudinaryThumb(form.photo_url, 88) ?? undefined}
               alt="Preview"
               className="h-11 w-11 rounded-lg object-cover"
             />
@@ -307,7 +328,7 @@ function MenuItemForm({
         <Button type="button" variant="ghost" className="flex-1" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" className="flex-1" loading={submitting}>
+        <Button type="submit" className="flex-1" loading={submitting} disabled={uploadingPhoto}>
           Save
         </Button>
       </div>
