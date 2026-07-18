@@ -26,3 +26,6 @@ frontend/dist/
 
 # Playwright MCP scratch output (screenshots/console logs from ad-hoc browser checks)
 .playwright-mcp/
+
+# Competitive Programming Helper
+.cph/
