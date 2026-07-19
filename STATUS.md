@@ -8,6 +8,20 @@
 
 ## Current state (2026-07-20)
 
+**2026-07-20 (later): a NEW frontend backlog — the G-series (§ 9.3) — is
+authorized and open.** The project owner explicitly requested a next round
+of frontend work, which supersedes the earlier "no new backlog until D-6"
+rule for frontend items only. The G-series was authored after a grounded
+re-read of the post-F-series code (Menu, OrderStatus, History, MenuItemCard,
+Login, index.html, tailwind.config.js) — every item is anchored to real
+files and real gaps, not speculation. It is **depth-of-use work** (search,
+re-order, insight legibility, a11y parity), not another polish pass — the
+F-series already fixed everything a fix-pass would find. § 9.4 records
+backend-needed / decision-needed items for LATER (recorded, not
+authorized). § 9.5 is the ready-to-paste brief for the agent that picks
+this up. Deployment (D-1..D-7) remains the human-led milestone in
+parallel.
+
 **2026-07-20: the § 9.2 F-series design-polish backlog (F1–F24) is fully
 implemented, reviewed, and committed.** Executed as five parallel agents in
 isolated git worktrees, one per disjoint file-ownership group (student Menu
@@ -433,14 +447,20 @@ commit range. The pre-deploy GATE has run clean: § 6 suite green,
 `scripts/loadtest.js` green at smoke scale (after fixing two bugs in
 the script itself — see Current state), and CI green on `main`.
 
-**The only thing left is Deployment (D-1..D-7) below** — a human/agent
-pairing task needing real infra access, not more code. If you're an
-agent picking this up: read § 9.1 (mobile design rules) before touching
-ANY frontend file even for a deployment-driven fix, and don't start a
-new backlog here — real work items only get added when D-6 real-device
-testing actually surfaces something. § 9.2 is kept below as a historical
-record of the design pass (per-file verdicts, what shipped) — there is
-nothing actionable left in it.
+**Two milestones are open (2026-07-20):**
+
+1. **§ 9.3 — the G-series frontend backlog** (the active *code*
+   milestone). Owner-authorized on 2026-07-20; this supersedes the
+   earlier "no new backlog until D-6" rule for frontend items. If you're
+   an agent picking this up: read § 9.1 first (binding for every
+   frontend change), then work § 9.3 in order. § 9.5 is your brief.
+   Frontend only — do not start anything from § 9.4.
+2. **Deployment (D-1..D-7)** below — human-led, needs real infra access,
+   not more code.
+
+§ 9.2 is kept below as a historical record of the F-series design pass
+(per-file verdicts, what shipped) — there is nothing actionable left in
+it.
 
 **Caveats worth knowing from the R12–R24 batch (recorded, not tasks):**
 
@@ -772,7 +792,167 @@ name through its whole flow (Accept / Reject / Handover / Collect).
 | `sw.ts` | Clean (R30 fallback + url routing present). |
 | All `*.test.*`, `test/setup.ts` | Not design surface; 50/50 green at last GATE. |
 
-### Deployment (the remaining milestone — needs real infra, not just code)
+### 9.3 Frontend depth backlog (G-series) — added 2026-07-20, **ACTIVE**
+
+Owner-authorized next round of frontend work. Unlike the F-series (a
+fix-and-polish pass), this is **depth-of-use** work: the features a
+daily-use canteen app is still missing, plus the accessibility parity the
+chime/vibration path never got. Every item below was grounded against the
+actual post-F-series code on 2026-07-20 — file references are real.
+
+**Work G1 → G8 in order.** G1 is the floor (small compliance fixes found
+in the 2026-07-20 re-read); G2–G7 are the feature round; G8 is the one
+product-shaped item — if its scope feels doubtful mid-flight, finish
+G1–G7, then stop and ask the owner (per § 9.5) rather than guessing.
+One commit per item, `feat(frontend):` / `fix(frontend):` /
+`polish(frontend):` prefixes.
+
+**GATE for every G-item** (identical to the F-series gate): `npx tsc -b
+--noEmit` · `npm run lint` (0 errors) · `npm test` (all green — 53/53
+baseline, plus any new tests) · `npm run build` with raw initial student
+JS ≤ 250 KB — **currently 249.37 KB, snug**: no new runtime dependencies
+of any kind, hand-built code only, and re-check the build number after
+every item; if the initial chunk crosses the line, stop and report
+instead of shipping. Check 375×667, ~360 px, and 768–1024 px · no
+horizontal page scroll · `prefers-reduced-motion` still kills all
+animation. § 9.1 is binding throughout — student strings English-only,
+shopkeeper strings Hindi-paired via `useLanguage()`.
+
+**Design direction for this round:** the identity (paper chit / steel
+counter, § 9.2's direction block) is settled — do not restyle anything.
+New UI must read as if it was always there: existing tokens, existing
+components, mono for data / sans for prose. Spend the round's boldness
+on **G3 (Order again)** — the moment that turns the history ledger from
+a record into a tool; everything else stays quiet. Copy rules carry
+over: plain verbs, sentence case, an action keeps one name through its
+whole flow, every error says what to do next.
+
+- **G1 · Floor sweep (small fixes first).**
+  (a) Thumbnails outside `MenuItemCard` never got lazy-loading: add
+  `loading="lazy" decoding="async"` to the `<img>`s in
+  `pages/student/OrderStatus.tsx` (active-order item rows ~line 122 and
+  history rows ~line 329) and `pages/shop/History.tsx` (order-log grid
+  ~line 251); add `decoding="async"` to `MenuItemCard.tsx`'s already-lazy
+  img; check `OrderModal.tsx` for the same while there.
+  (b) `OrderStatus.tsx` RatingPrompt's "Skip" is a bare text link under
+  44 px (~line 221) — keep the visual size, grow the hit area to
+  `min-h-[44px]` (§ 9.1.2).
+  (c) While in those files, sanity-check no other sub-44 target crept in
+  post-F2.
+- **G2 · Menu search** (`pages/student/Menu.tsx`). The single
+  highest-value missing student feature — there is no way to find a dish
+  by name on a long menu. A quiet full-width search input above the
+  "Main Menu" header row: client-side, case-insensitive match on item
+  name and tags over the already-loaded `items` (no debounce needed, no
+  network). While a query is active: hide `TrendingRail` and the sticky
+  chip bar, render one flat "Results (n)" section (diet filter still
+  composes with it), and give the no-match case a real empty state
+  ("No dishes match 'x'") with a ≥44 px clear action. Input rules
+  § 9.1.6: `type="search"`, `text-base` (16 px — iOS zoom),
+  `min-h-[44px]`, `enterKeyHint="search"`; style it as a paper chit
+  (`bg-paper border-edge`), not a floating pill. Keep the scroll-spy
+  effects keyed on `allCategories` exactly as they are (F7) so clearing
+  the query doesn't churn observers.
+- **G3 · "Order this again"** (`pages/student/OrderStatus.tsx` +
+  `lib/cart.ts`). On completed-order history cards: one secondary
+  button, "Order this again", that refills today's cart from that
+  order. The merge logic is a pure helper in `lib/cart.ts`
+  (`reorderIntoCart(cart, pastOrder, menu)` or similar) with unit tests
+  — only items still on today's menu **and orderable** are added,
+  quantities merge additively into any existing cart. Because the Menu
+  page is unmounted on `/order`, write the merged cart straight to the
+  `khaao_cart_v2` localStorage key (same `{date, items}` shape,
+  today-keyed) and `navigate('/')` — `Menu`'s `loadStoredCart` picks it
+  up on mount and the existing cart bar slide-up is the arrival moment
+  (no new animation needed). Toast the outcome honestly: full ("3 items
+  added to your cart"), partial ("2 of 3 added — Vada Pav isn't on
+  today's menu"), none (error toast, don't navigate). Hide or disable
+  the button with a stated reason while an active order exists.
+- **G4 · Diet filter persistence** (`pages/student/Menu.tsx`). A veg
+  student re-selects "Veg" every single visit. Initialize `dietFilter`
+  from localStorage (`khaao_diet_filter_v1`), validate the stored value
+  against the actual `DietFilterValue` union before trusting it, persist
+  on change.
+- **G5 · History date stepper** (`pages/shop/History.tsx`). The native
+  date input is the only navigation — flipping through days is the #1
+  history gesture and it takes three taps. Flank the input with ◀ / ▶
+  buttons (≥44 px, `aria-label`s Hindi-paired), ▶ disabled at today;
+  show a "Today" quick-jump pill when `date !== todayLocal()`. Do the
+  date arithmetic on the `YYYY-MM-DD` parts in local time (same
+  reasoning as `todayLocal()`'s doc comment — never `toISOString()`).
+- **G6 · Top-items ledger bars** (`pages/shop/History.tsx` insights).
+  The "Top items" card lists name + count but the proportions are
+  invisible. Add a quiet proportional bar per row — hand-built divs
+  (width = qty / max qty), `bg-brand-light` fill, ledger feel, sitting
+  under each row's text line; `aria-hidden="true"` on the bars (the
+  numbers stay the accessible content). **Load the `dataviz` skill
+  before writing this item** — it is chart-shaped work. No chart
+  library under any circumstances (§ 9.1.8).
+- **G7 · Live status announcements (a11y parity).** Status changes
+  arrive as chime + vibration + visual stamp — a screen-reader user
+  gets silence. Add one visually-hidden `aria-live="polite"` region
+  (Layout-level, `sr-only`) fed by the transition detection that
+  already exists — `StudentRealtime.tsx` / `ShopRealtime.tsx` both have
+  the `prevStatusRef` idiom; reuse it, do not duplicate transition
+  logic. Announce exactly the transitions that already chime (student:
+  "Order #12 is ready — pick it up at the counter"; shop: new incoming
+  order, Hindi-paired). Nothing more — a live region that narrates
+  every refetch is worse than none.
+- **G8 · "Your usuals" — local favorites** (`MenuItemCard.tsx` +
+  `pages/student/Menu.tsx`). The same student orders the same dosa most
+  days. A quiet pin toggle on each menu card (≥44 px hit area, inline
+  ink-line SVG in the `EmptyStateIcons` style — **not** an emoji, per
+  the design direction), ids stored in `khaao_favorites_v1`
+  localStorage. When ≥1 favorite is on today's menu, render a "Your
+  usuals" strip above the Main Menu header — visually distinct from
+  `TrendingRail` (that one is everyone's data; this one is yours —
+  label it accordingly). Device-local by design; cross-device sync is
+  § 9.4-B2, not this item.
+
+### 9.4 Deferred backlog — recorded for LATER, **NOT authorized**
+
+Backend work, product decisions, or deliberately-postponed frontend.
+Nothing here may be started as part of the G-series — it's written down
+so it isn't lost, and so the owner can pick from it deliberately later.
+
+| # | What | Why it's deferred |
+|---|---|---|
+| B1 | Order notes to kitchen ("less spicy") | Backend: new order field + validation; UI on both faces. |
+| B2 | Favorites sync across devices | Backend: table + endpoints. G8 ships device-local first. |
+| B3 | Menu item descriptions | Backend: new column + API field; would unlock a student item-detail sheet. |
+| B4 | Scheduled pickup time slots | Product decision + backend scheduling; changes the FCFS model. |
+| B5 | Student history beyond `LIMIT 20` | Backend pagination param (R13) + UI. Not felt until months of use. |
+| B6 | Weekly/range shop insights | Backend aggregation across days + a real dataviz pass. |
+| B7 | Queue position / ETA for students | Backend derivation from pool state; needs careful honesty about accuracy. |
+| B8 | Shopkeeper allowlist admin UI | Backend endpoints; today it's env-seeded (`SHOPKEEPER_EMAILS`), fine at this scale. |
+| B9 | httpOnly cookie sessions | § 11.2 — an architecture project, not a task. |
+| B10 | iOS splash screens (`apple-touch-startup-image`) | Pure asset generation; wait for D-6 real-device pass to prove it's worth the asset set. |
+| B11 | SW update-prompt UX | `registerType` is `autoUpdate` today; switching to a "refresh for update" prompt is a product decision. |
+
+### 9.5 Agent brief — how to hand this off
+
+Paste this (or equivalent) to the implementing agent, verbatim:
+
+> Read `STATUS.md` top-to-bottom before touching any code. § 9.1 (mobile
+> design rules) is binding for every frontend change. Your task is the
+> **G-series frontend backlog in § 9.3, and only that**: work G1 → G8 in
+> order, one commit per item (`feat(frontend):` / `fix(frontend):` /
+> `polish(frontend):`), and run the full GATE from § 9.3 after every
+> item — `npx tsc -b --noEmit`, `npm run lint`, `npm test`,
+> `npm run build` with raw initial student JS ≤ 250 KB (it is at
+> 249.37 KB — if an item pushes it over, stop and report instead of
+> shipping), checks at 375×667 / ~360 px / 768–1024 px, no horizontal
+> page scroll, `prefers-reduced-motion` kills all animation. No new
+> runtime dependencies of any kind. Do **not** touch `backend/`,
+> `deploy/`, or anything listed in § 9.4 — those are recorded for later
+> and not authorized. Before G6, load the `dataviz` skill. When the
+> G-series is complete (or you are genuinely blocked), update the
+> "Current state" and § 9.3 sections of `STATUS.md` to reflect what
+> shipped, then **STOP and ask the project owner whether they want any
+> other changes** — do not start new work, new backlogs, or § 9.4 items
+> on your own.
+
+### Deployment (the remaining human-led milestone — needs real infra, not just code)
 
 **`deploy/RUNBOOK.md` is the expanded, step-by-step version of this table**
 (each D-item maps to a runbook section) — follow it, don't re-derive.
