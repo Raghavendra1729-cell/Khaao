@@ -19,6 +19,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { MenuStatusBadge } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useLanguage } from '../../context/LanguageContext';
 
 const MENU_STATUS_LABEL_HI: Record<MenuItem['status'], string> = {
@@ -137,7 +138,7 @@ function MenuItemForm({
       const resized = await downscaleImage(file);
       const url = await uploadMenuItemPhoto(resized);
       setForm((f) => ({ ...f, photo_url: url }));
-    } catch (err) {
+    } catch {
       showToast('Photo upload failed.', 'error');
       setForm((f) => ({ ...f, photo_url: '' }));
     } finally {
@@ -382,11 +383,11 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not delete item.', 'error'),
   });
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   function handleDelete(e: React.MouseEvent) {
     e.stopPropagation();
-    if (window.confirm(`Delete "${item.name}"? This cannot be undone.`)) {
-      deleteMutation.mutate();
-    }
+    setConfirmingDelete(true);
   }
 
   function handleCardClick() {
@@ -471,10 +472,23 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
       </div>
 
       {armed && (
-        <div className="absolute bottom-0 left-0 right-0 animate-in fade-in slide-in-from-bottom-2 bg-red-500 py-3 text-center text-sm font-bold text-white">
+        <div className="absolute bottom-0 left-0 right-0 animate-slide-up bg-red-500 py-3 text-center text-sm font-bold text-white">
           <span>{language === 'hi' ? 'फिर से टैप करें' : 'Tap again to mark unavailable'}</span>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this item?"
+        body={`Delete "${item.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        busy={deleteMutation.isPending}
+        onCancel={() => setConfirmingDelete(false)}
+        onConfirm={() => {
+          setConfirmingDelete(false);
+          deleteMutation.mutate();
+        }}
+      />
     </Card>
   );
 }

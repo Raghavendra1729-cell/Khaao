@@ -13,6 +13,7 @@ import { OrderTicket } from '../../components/OrderTicket';
 import { StatusStamps } from '../../components/StatusStamps';
 import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 
 function ReadyBanner({ order }: { order: Order }) {
   const [remaining, setRemaining] = useState(() => secondsUntil(order.expires_at));
@@ -38,6 +39,7 @@ function ReadyBanner({ order }: { order: Order }) {
 
 function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => void }) {
   const droppedItems = order.items.filter((i) => i.status === 'rejected');
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   return (
     <Card className="p-5">
@@ -104,11 +106,23 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
 
       {order.status === 'submitted' && (
         <div className="mt-5 border-t border-edge pt-5">
-          <Button variant="secondary" fullWidth onClick={onCancel}>
+          <Button variant="secondary" fullWidth onClick={() => setConfirmingCancel(true)}>
             Cancel order
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmingCancel}
+        title="Cancel this order?"
+        body={`Cancel order #${order.order_no}? This can't be undone.`}
+        confirmLabel="Cancel order"
+        onCancel={() => setConfirmingCancel(false)}
+        onConfirm={() => {
+          setConfirmingCancel(false);
+          onCancel();
+        }}
+      />
     </Card>
   );
 }
@@ -242,7 +256,6 @@ export function OrderStatusPage() {
   const handleCancel = async () => {
     const activeOrder = activeOrderQuery.data;
     if (!activeOrder) return;
-    if (!window.confirm(`Cancel order #${activeOrder.order_no}? This can't be undone.`)) return;
     try {
       await cancelOrder(activeOrder.id);
       activeOrderQuery.refetch();
@@ -262,7 +275,10 @@ export function OrderStatusPage() {
   });
 
   const markAsRated = (orderId: number) => {
-    const next = [...ratedOrders, orderId];
+    // Only the most recent completed order is ever checked against this
+    // list (see mostRecentCompleted below), so it never needs more than a
+    // handful of ids — cap it rather than let it grow forever.
+    const next = [...ratedOrders, orderId].slice(-50);
     setRatedOrders(next);
     localStorage.setItem('khaao_rated_orders', JSON.stringify(next));
   };

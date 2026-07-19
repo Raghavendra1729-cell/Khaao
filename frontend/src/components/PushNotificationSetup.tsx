@@ -31,8 +31,10 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Only run if service workers and push are supported
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    // Only run if service workers, push, and Notification itself are
+    // supported — some webviews have serviceWorker/PushManager but no
+    // Notification global, which would throw on the very next line.
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
       return;
     }
 

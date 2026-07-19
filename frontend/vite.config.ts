@@ -19,7 +19,9 @@ export default defineConfig({
         theme_color: '#2c4434',
         background_color: '#dce4de',
         display: 'standalone',
-        orientation: 'portrait',
+        // No orientation lock — the shopkeeper's counter device is a
+        // stated target (see Layout.tsx) and 'portrait' forced it into
+        // portrait even on a tablet.
         start_url: '/',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },

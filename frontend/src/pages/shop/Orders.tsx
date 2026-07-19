@@ -15,6 +15,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 import { OrderModal } from '../../components/OrderModal';
+import { Modal } from '../../components/Modal';
 import { clearShopNotification } from '../../components/shopNotifications';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -46,43 +47,12 @@ function RejectDialog({
     .map((i) => i.menu_item_id);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative z-10 w-full max-w-sm rounded-t-2xl bg-paper p-5 shadow-2xl sm:rounded-2xl">
-        <h2 className="mb-1 font-display text-lg font-bold text-ink">Reject order #{order.order_no}</h2>
-        <p className="mb-4 text-sm text-ink/60">
-          Tick any items that are unavailable — they'll be marked out of stock automatically.
-        </p>
-        <div className="mb-5 flex flex-col gap-2">
-          {items.map((item) => (
-            <label
-              key={item.menu_item_id}
-              className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
-            >
-              <input
-                type="checkbox"
-                checked={checked[item.menu_item_id] ?? false}
-                onChange={(e) =>
-                  setChecked((prev) => ({ ...prev, [item.menu_item_id]: e.target.checked }))
-                }
-                className="h-5 w-5 accent-stamp"
-              />
-              {item.photo_url && (
-                <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-edge">
-                  <img
-                    src={cloudinaryThumb(item.photo_url, 64) ?? undefined}
-                    alt={item.name}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-              )}
-              <span className="flex-1 text-sm font-medium text-ink">
-                {item.name} ×{item.qty}
-              </span>
-            </label>
-          ))}
-        </div>
+    <Modal
+      open
+      onClose={onCancel}
+      title={`Reject order #${order.order_no}`}
+      size="sm"
+      footer={
         <div className="flex gap-2">
           <Button variant="ghost" className="flex-1" disabled={busy} onClick={onCancel}>
             Cancel
@@ -97,8 +67,41 @@ function RejectDialog({
             <span>{language === 'hi' ? 'अस्वीकार करें' : 'Reject order'}</span>
           </Button>
         </div>
+      }
+    >
+      <p className="mb-4 text-sm text-ink/60">
+        Tick any items that are unavailable — they'll be marked out of stock automatically.
+      </p>
+      <div className="flex flex-col gap-2">
+        {items.map((item) => (
+          <label
+            key={item.menu_item_id}
+            className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
+          >
+            <input
+              type="checkbox"
+              checked={checked[item.menu_item_id] ?? false}
+              onChange={(e) =>
+                setChecked((prev) => ({ ...prev, [item.menu_item_id]: e.target.checked }))
+              }
+              className="h-5 w-5 accent-stamp"
+            />
+            {item.photo_url && (
+              <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-edge">
+                <img
+                  src={cloudinaryThumb(item.photo_url, 64) ?? undefined}
+                  alt={item.name}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            )}
+            <span className="flex-1 text-sm font-medium text-ink">
+              {item.name} ×{item.qty}
+            </span>
+          </label>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 

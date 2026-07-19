@@ -8,6 +8,7 @@ import { Button } from './Button';
 import { QtyStepper } from './QtyStepper';
 import { OrderItemStatusBadge } from './StatusBadge';
 import { Modal } from './Modal';
+import { ConfirmDialog } from './ConfirmDialog';
 import { useToast } from './Toast';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -59,16 +60,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
   });
 
   const busy = handoverMutation.isPending || removeMutation.isPending;
-
-  function handleRemove() {
-    if (!window.confirm(`Remove "${item.name}" from this order? Any prepared units go back to the pool.`)) {
-      return;
-    }
-    const alsoOutOfStock = window.confirm(
-      `Also mark "${item.name}" out of stock so it stops showing as available to students?`,
-    );
-    removeMutation.mutate(alsoOutOfStock);
-  }
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
   return (
     <div className="rounded-xl border border-edge bg-steel/20 p-3">
@@ -146,7 +138,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
             <button
               type="button"
               disabled={busy}
-              onClick={handleRemove}
+              onClick={() => setConfirmingRemove(true)}
               className="self-start text-[11px] font-semibold text-stamp/70 transition hover:text-stamp disabled:opacity-40 flex items-center gap-1.5"
             >
               <span>{language === 'hi' ? 'आइटम हटाएं' : 'Remove item'}</span>
@@ -154,6 +146,20 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmingRemove}
+        title="Remove item?"
+        body={`Remove "${item.name}" from this order? Any prepared units go back to the pool.`}
+        confirmLabel="Remove"
+        busy={removeMutation.isPending}
+        checkboxLabel="Also mark out of stock"
+        onCancel={() => setConfirmingRemove(false)}
+        onConfirm={(alsoOutOfStock) => {
+          setConfirmingRemove(false);
+          removeMutation.mutate(alsoOutOfStock);
+        }}
+      />
     </div>
   );
 }
@@ -191,15 +197,7 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
     onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not cancel order.', 'error'),
   });
 
-  function handleCancelOrder() {
-    if (
-      window.confirm(
-        `Cancel order #${order.order_no}? Use this only if something unexpected came up — the student will be notified to reorder. This can't be undone.`,
-      )
-    ) {
-      cancelOrderMutation.mutate();
-    }
-  }
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   return (
     <Modal
@@ -227,7 +225,7 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
             <button
               type="button"
               disabled={cancelOrderMutation.isPending}
-              onClick={handleCancelOrder}
+              onClick={() => setConfirmingCancel(true)}
               className="self-center text-[11px] font-semibold text-stamp/70 transition hover:text-stamp disabled:opacity-40 flex items-center gap-1.5 mt-1"
             >
               <span>{language === 'hi' ? 'यह ऑर्डर रद्द करें' : 'Cancel this order'}</span>
@@ -241,6 +239,19 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
           <OrderModalItem key={item.id} order={order} item={item} />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmingCancel}
+        title="Cancel this order?"
+        body={`Cancel order #${order.order_no}? Use this only if something unexpected came up — the student will be notified to reorder. This can't be undone.`}
+        confirmLabel="Cancel order"
+        busy={cancelOrderMutation.isPending}
+        onCancel={() => setConfirmingCancel(false)}
+        onConfirm={() => {
+          setConfirmingCancel(false);
+          cancelOrderMutation.mutate();
+        }}
+      />
     </Modal>
   );
 }

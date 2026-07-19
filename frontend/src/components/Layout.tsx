@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -12,6 +12,8 @@ import { ShopStatusControl } from './ShopStatusControl';
 import { useShopNotification, clearShopNotification } from './shopNotifications';
 import { InstallPrompt } from './InstallPrompt';
 import { PushNotificationSetup } from './PushNotificationSetup';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { FullPageSpinner } from './Spinner';
 
 function Icon({ d }: { d: string }) {
   return (
@@ -235,7 +237,16 @@ export function Layout() {
 function LayoutInner() {
   const { user, logout } = useAuth();
   const { language } = useLanguage();
+  const isOnline = useOnlineStatus();
   const isShop = user?.role === 'shopkeeper';
+
+  // Gated by isShop, not just language — a shopkeeper's stored 'hi'
+  // preference must never leak into a student session on a shared
+  // device/browser (same guard AvatarMenu already applies to Hindi copy).
+  useEffect(() => {
+    document.documentElement.lang = isShop && language === 'hi' ? 'hi' : 'en';
+  }, [isShop, language]);
+
   const tabs = isShop ? SHOP_TABS : STUDENT_TABS;
   // Students use this on a phone: a narrow single-column shell fits perfectly.
   // Shopkeepers are mobile-first (375-430px target) but also need to work on a
@@ -300,8 +311,16 @@ function LayoutInner() {
         </div>
       </header>
 
+      {!isOnline && (
+        <div className="bg-turmeric-deep px-4 py-1.5 text-center text-xs font-semibold text-white">
+          You're offline — reconnecting…
+        </div>
+      )}
+
       <main className={`mx-auto w-full ${contentMaxWidth} flex-1 px-4 pb-24 pt-4`}>
-        <Outlet />
+        <Suspense fallback={<FullPageSpinner />}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <InstallPrompt />

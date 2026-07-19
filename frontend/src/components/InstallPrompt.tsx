@@ -24,8 +24,12 @@ export function InstallPrompt() {
       return;
     }
 
-    // Check for iOS Safari
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    // Check for iOS Safari. iPadOS 13+ reports a desktop-Mac userAgent (no
+    // "iPad" substring) — navigator.maxTouchPoints > 1 is what actually
+    // distinguishes it from a real Mac, which reports 0.
+    const isIos =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
     if (isIos) {
       const dismissed = localStorage.getItem('khaao_install_dismissed');
       if (!dismissed) {

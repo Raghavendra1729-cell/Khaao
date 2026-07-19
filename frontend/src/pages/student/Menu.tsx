@@ -6,12 +6,13 @@ import { getActiveOrder, createOrder, type OrderItemInput } from '../../api/orde
 import { getShopStatus } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { MenuItem } from '../../api/types';
-import { formatPrice } from '../../lib/format';
+import { formatPrice, formatTime } from '../../lib/format';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
 import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
+import { Modal } from '../../components/Modal';
 
 import { TrendingRail } from '../../components/TrendingRail';
 import { DietFilter, type DietFilterValue } from '../../components/DietFilter';
@@ -39,23 +40,8 @@ function loadStoredCart(): Record<number, number> {
     const parsed = JSON.parse(raw) as StoredCart;
     if (parsed.date !== todayKey()) return {};
     return parsed.items ?? {};
-  } catch (e) {
+  } catch {
     return {};
-  }
-}
-
-function formatReopenTime(isoString: string | null): string {
-  if (!isoString) return '';
-  try {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: 'Asia/Kolkata',
-    });
-  } catch (e) {
-    return '';
   }
 }
 
@@ -280,7 +266,7 @@ export function Menu() {
 
       {shopStatus.state === 'paused' && (
         <div className="mb-5 rounded-2xl border border-dashed border-turmeric bg-turmeric-pale/40 px-4 py-3 text-sm font-semibold text-turmeric-deep shadow-card">
-          On a break — back at {formatReopenTime(shopStatus.reopen_at) || '--:--'}
+          On a break — back at {formatTime(shopStatus.reopen_at) || '--:--'}
         </div>
       )}
 
@@ -407,73 +393,59 @@ export function Menu() {
       )}
 
       {showCheckout && (
-        <div
-          className="fixed inset-0 z-50 flex items-end bg-ink/40 backdrop-blur-sm sm:items-center sm:justify-center"
-          onClick={() => setShowCheckout(false)}
-        >
-          <div
-            className="w-full rounded-t-3xl border-t-2 border-dashed border-ink/20 bg-paper p-5 shadow-2xl sm:max-w-md sm:rounded-3xl sm:border-t-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-widest text-ink/70">
-                Your order
-              </h2>
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-edge/50 text-ink/70 hover:bg-edge hover:text-ink"
-                onClick={() => setShowCheckout(false)}
+        <Modal
+          open
+          onClose={() => setShowCheckout(false)}
+          title="Your order"
+          footer={
+            <>
+              <div className="mb-4 flex items-center justify-between">
+                <span className="text-lg font-bold text-ink">Total</span>
+                <span className="font-display text-2xl font-bold text-brand-dark">{formatPrice(cartTotal)}</span>
+              </div>
+              <Button
+                size="lg"
+                fullWidth
+                loading={submitMutation.isPending}
+                disabled={!isShopOpen}
+                onClick={() => {
+                  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                    void Notification.requestPermission();
+                  }
+                  submitMutation.mutate();
+                }}
               >
-                ✕
-              </button>
-            </div>
-
-            <div className="mb-6 max-h-[50vh] overflow-y-auto divide-y divide-edge border-b border-t border-edge">
-              {cartEntries.map((entry) => {
-                const item = items.find((i) => i.id === entry.menu_item_id);
-                if (!item) return null;
-                return (
-                  <div key={item.id} className="flex items-center justify-between py-3">
-                    <div className="flex flex-col">
-                      <span className="font-semibold text-ink">
-                        {item.name}
-                      </span>
-                      <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="tabular font-display text-sm font-bold text-brand-dark">
-                        {formatPrice(item.price * entry.qty)}
-                      </span>
-                      <QtyStepper value={entry.qty} onChange={(next) => {
-                        setQty(item.id, next);
-                        if (cartCount - entry.qty + next === 0) setShowCheckout(false);
-                      }} />
-                    </div>
+                Place order
+              </Button>
+            </>
+          }
+        >
+          <div className="divide-y divide-edge">
+            {cartEntries.map((entry) => {
+              const item = items.find((i) => i.id === entry.menu_item_id);
+              if (!item) return null;
+              return (
+                <div key={item.id} className="flex items-center justify-between py-3">
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-ink">
+                      {item.name}
+                    </span>
+                    <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="mb-6 flex items-center justify-between">
-              <span className="text-lg font-bold text-ink">Total</span>
-              <span className="font-display text-2xl font-bold text-brand-dark">{formatPrice(cartTotal)}</span>
-            </div>
-
-            <Button
-              size="lg"
-              fullWidth
-              loading={submitMutation.isPending}
-              disabled={!isShopOpen}
-              onClick={() => {
-                if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                  void Notification.requestPermission();
-                }
-                submitMutation.mutate();
-              }}
-            >
-              Place order
-            </Button>
+                  <div className="flex items-center gap-3">
+                    <span className="tabular font-display text-sm font-bold text-brand-dark">
+                      {formatPrice(item.price * entry.qty)}
+                    </span>
+                    <QtyStepper value={entry.qty} onChange={(next) => {
+                      setQty(item.id, next);
+                      if (cartCount - entry.qty + next === 0) setShowCheckout(false);
+                    }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
