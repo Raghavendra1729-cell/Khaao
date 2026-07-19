@@ -110,6 +110,14 @@ func main() {
 	<-ctx.Done()
 	slog.Info("khaao: shutting down")
 
+	// Server.Shutdown waits for active handlers but never cancels their
+	// request contexts, and an SSE stream handler only exits on client
+	// disconnect or a hub channel close — so any open stream would
+	// otherwise stall shutdown for the full timeout below. Close every
+	// client first so their handlers return immediately; browsers see a
+	// closed connection and reconnect, same as any other drop.
+	hub.CloseAll()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

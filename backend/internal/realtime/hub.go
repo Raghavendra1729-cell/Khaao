@@ -49,6 +49,26 @@ func (h *Hub) Unregister(c *Client) {
 	}
 }
 
+// CloseAll closes every connected client's channel and empties the hub.
+// net/http's Server.Shutdown waits for active handlers to return but does
+// not cancel their request contexts, and streamSSE only ever exits on
+// client disconnect or a channel close — so with even one stream open,
+// every graceful shutdown would otherwise stall for the full shutdown
+// timeout and the streams would die abruptly anyway when the process
+// exits. Call this right before Shutdown: each handler's `msg, ok :=
+// <-client.Messages()` sees ok=false and returns immediately, the browser
+// sees a closed connection and reconnects (the same self-heal path R21's
+// drop-on-full-channel already exercises daily), and Shutdown completes in
+// milliseconds instead of stalling.
+func (h *Hub) CloseAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		close(c.ch)
+		delete(h.clients, c)
+	}
+}
+
 // Messages returns the channel the SSE handler should read from.
 func (c *Client) Messages() <-chan []byte {
 	return c.ch

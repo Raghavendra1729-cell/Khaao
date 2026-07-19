@@ -53,3 +53,39 @@ func TestHubDropsSlowConsumerByClosingChannel(t *testing.T) {
 	hub.NotifyOrderUpdate(1, map[string]any{"n": "after-drop"})
 	hub.Unregister(client)
 }
+
+// TestHubCloseAllClosesEveryClientAndLeavesHubEmpty guards the R29 fix:
+// CloseAll must close every connected client's channel (so each SSE
+// handler's read loop returns immediately during a graceful shutdown
+// instead of stalling it) and must leave the hub in a state where a
+// subsequent broadcast is a safe no-op, not a panic on a stale entry.
+func TestHubCloseAllClosesEveryClientAndLeavesHubEmpty(t *testing.T) {
+	hub := NewHub()
+	clients := make([]*Client, 5)
+	for i := range clients {
+		clients[i] = hub.Register(uint(i+1), "student")
+	}
+
+	hub.CloseAll()
+
+	for i, c := range clients {
+		select {
+		case _, ok := <-c.Messages():
+			if ok {
+				t.Fatalf("client %d: expected a closed channel, got a message instead", i)
+			}
+		default:
+			t.Fatalf("client %d: expected the closed channel to be immediately readable (ok=false), got nothing", i)
+		}
+	}
+
+	// The hub must be empty afterward — a broadcast over a stale entry
+	// would otherwise send on (or double-close) an already-closed channel
+	// and panic.
+	hub.NotifyMenuUpdate()
+	hub.NotifyShopOrdersUpdate()
+
+	// CloseAll itself must also be safe to call again (e.g. a slow shutdown
+	// path invoking it more than once) — no double-close panic.
+	hub.CloseAll()
+}
