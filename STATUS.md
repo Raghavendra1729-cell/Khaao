@@ -81,6 +81,21 @@ of it needs a human with domain/server/dashboard access, not an agent.
 Per the GATE's own rule, further code changes should only come from
 real-device findings during D-6.
 
+**2026-07-19 (fifth pass): full frontend design review.** At the
+project owner's request, every file under `frontend/src` (all 57,
+plus `index.html`, `tailwind.config.js`, `vite.config.ts`) was
+re-read as a design-lead pass — visual quality, § 9.1 rule
+compliance, a11y, and copy. Findings are recorded as the **F-series
+backlog in § 9.2**: F1–F12 are standing-rule violations and small
+bugs (safe-area misses, sub-44px touch targets, off-token colors,
+patchy Hindi coverage, a render-impurity in `StatusStamps`), F13–F24
+are the deliberate beauty pass (login set-piece, the unused "ready"
+signature animation, skeleton loading, shopkeeper tablet layout,
+order-age display). § 9.2 also carries a per-file verdict table so
+future agents know what was checked and found clean. No backend
+items. § 9.2 is now the active *code* milestone alongside the
+human-led Deployment table.
+
 The entire pre-2026-07-15 backlog from the previous session's handoff is
 **done, live-verified, and committed**. Everything in § 8 plus everything
 below is feature-complete and works end-to-end.
@@ -386,12 +401,15 @@ range. The pre-deploy GATE has run clean: § 6 suite green,
 `scripts/loadtest.js` green at smoke scale (after fixing two bugs in
 the script itself — see Current state), and CI green on `main`.
 
-**The only thing left is Deployment (D-1..D-7) below** — a human/agent
-pairing task needing real infra access, not more code. If you're an
-agent picking this up: read § 9.1 (mobile design rules) before touching
-ANY frontend file even for a deployment-driven fix, and don't start a
-new backlog here — real work items only get added when D-6 real-device
-testing actually surfaces something.
+**Two milestones remain: the § 9.2 frontend design-polish backlog
+(F-series — code work an agent can do now) and Deployment (D-1..D-7 —
+human-led).** If you're an agent picking this up: read § 9.1 (mobile
+design rules) before touching ANY frontend file, then work § 9.2 in
+its stated order. Beyond those two lists, don't start a new backlog
+here — new work items only get added when D-6 real-device testing
+actually surfaces something. (The F-series was authorized by the
+project owner on 2026-07-19 as a deliberate design pass; it is the
+one sanctioned exception to the earlier "no new backlog" rule.)
 
 **Caveats worth knowing from the R12–R24 batch (recorded, not tasks):**
 
@@ -470,6 +488,251 @@ a phone or counter tablet. These are standing rules, not suggestions:
     design and guarded to stay that way (`Layout.tsx`).
 12. **Orientation:** never lock it — the manifest deliberately has no
     `orientation` key (R18); shopkeeper tablets go landscape.
+
+### 9.2 Frontend design-polish backlog (F-series) — added 2026-07-19
+
+Authorized by the project owner: make both faces of the app — the
+student PWA and the shopkeeper counter tool — genuinely beautiful,
+without breaking anything R1–R31 hardened. Every file under
+`frontend/src` was re-read for this pass; findings below. § 9.1 remains
+binding for every item here. Work F1→F24 in order (F1–F12 are the
+floor: rule violations and small bugs; F13–F24 are the beauty pass —
+don't polish on top of violations). One commit per item or per small
+coherent batch, `fix(frontend):`/`feat(frontend):`/`polish(frontend):`
+prefixes.
+
+**GATE for every F-item:** `npx tsc -b --noEmit` · `npm run lint` ·
+`npm test` · `npm run build` with raw initial student JS ≤ 250 KB ·
+check at 375×667, ~360 px, and 768–1024 px · no horizontal page
+scroll · `prefers-reduced-motion` still kills all animation. **No new
+runtime dependencies** (no UI/animation/icon libraries — the theme is
+hand-built and must stay that way). No new fonts, no new grays/shadows/
+radii outside `tailwind.config.js` tokens.
+
+#### Design direction (read before F13–F24)
+
+The identity is already chosen and it is good: **the paper chit and
+the steel counter.** Every order is a kraft-paper token stamped as it
+moves down the line; the app around it is the cool institutional
+steel of a canteen counter. IBM Plex Mono is the "printed on the
+chit" voice (numbers, prices, stamps, labels); IBM Plex Sans is
+everything else. `brand` moss = the awning, `stamp` red = rubber-stamp
+ink, `turmeric` = the kitchen. **Sharpen this identity; do not replace
+it or dilute it toward a generic food-delivery look** (no gradients,
+no glassmorphism, no emoji-as-icon, no rounded-blob illustration
+style).
+
+The **signature element** is the rubber-stamp language — and its
+proper stage is the **"ready" moment**, the emotional peak of the
+whole product (your food is ready, go get it). The keyframes for it
+(`ready-pop`, `ready-glow`, `tick-pop`, `status-in`) already exist in
+`tailwind.config.js` and are currently **dead — referenced nowhere**.
+Wiring them where they were designed to go is F13/F14/F19, and it is
+the highest-leverage beauty work in this list. Spend boldness there;
+keep everything else quiet and disciplined. Copy rules: plain verbs,
+sentence case, name the action by what it does (`Place order` →
+"Order placed"), errors say what to do next, and an action keeps one
+name through its whole flow (Accept / Reject / Handover / Collect).
+
+#### F1–F12 — fix first (violations & small bugs)
+
+- **F1 · Safe-area misses.** `pages/student/Menu.tsx:317` — the sticky
+  category-chip bar uses `top-14`, ignoring the notch inset the header
+  already handles with `pt-safe`; in installed-PWA standalone on a
+  notched iPhone the chips slide *under* the header. Use
+  `top-[calc(3.5rem+env(safe-area-inset-top,0px))]`.
+  `components/Toast.tsx:48` — the toast container is `top-0 … pt-4`
+  with no safe-area padding, so toasts render under the notch/Dynamic
+  Island. Add safe-area top padding. (§ 9.1.4.)
+- **F2 · Sub-44 px touch targets** (§ 9.1.2) on the most-tapped
+  student screens: `DietFilter.tsx` buttons (~34 px), Menu category
+  chips (`Menu.tsx:321-333`, ~30 px), the rating stars in
+  `OrderStatus.tsx:172-180` (also missing `type="button"` and
+  per-star `aria-label`), and both prompt-card dismiss buttons
+  (`InstallPrompt.tsx`, `PushNotificationSetup.tsx` — `h-6 w-6`).
+  Keep the *visual* size; grow the hit area (padding / `min-h`
+  / negative-margin technique).
+- **F3 · Input rules** (§ 9.1.6). `pages/shop/History.tsx:73-78` — the
+  date input is `text-sm` (14 px ⇒ iOS zooms on focus) and under 44 px
+  tall; make it `text-base min-h-[44px]`. `MenuManage.tsx` price input:
+  add `inputMode="decimal"` so phones open the right keyboard.
+- **F4 · Off-token colors** (§ 9.1.10) in `pages/shop/MenuManage.tsx`:
+  the armed tap-again state uses raw `ring-red-500`/`bg-red-500`
+  (lines ~427, 485) — use `stamp` tokens; the Veg/Non-veg text pill
+  uses raw `bg-green-100 text-green-700`/`bg-red-100 text-red-700`
+  (lines ~455-459) — replace with the shared `VegMark` (the student
+  side already speaks FSSAI mark; the shop side should too).
+- **F5 · `StatusStamps.tsx:45-49` render impurity.** `nextFilterId()`
+  mutates a module counter *during render* — a new SVG filter id every
+  render, id churn under StrictMode, re-injected `<filter>` defs each
+  time. Replace with React's `useId()`.
+- **F6 · Cart bar is a clickable `<div>`** (`Menu.tsx:372-398`): not
+  keyboard-reachable, no role, and it nests a `<Button>` that
+  `stopPropagation()`s to do the same thing. Make the whole bar one
+  `<button>`; give it an `animate-slide-up` entrance so it doesn't
+  blink into existence. Bonus: when the shop pauses/closes with items
+  in the cart the bar vanishes entirely — keep a view-only "View cart"
+  affordance so students can still see what they'd picked.
+- **F7 · Category-observer churn** (`Menu.tsx:208-234`): the
+  IntersectionObserver effect lists `activeCategory` in its deps and
+  also *sets* it from the callback, so the observer is torn down and
+  rebuilt on every scroll transition. Drop it from the deps (functional
+  update / ref). Also scroll the *active chip itself* into view inside
+  the chip strip — on long menus the highlighted chip drifts
+  off-screen.
+- **F8 · Complete the Hindi pairing** (§ 9.1.11 — coverage is patchy;
+  a Hindi-mode shopkeeper gets a half-translated UI). Missing strings,
+  by file — pair each via the existing `language === 'hi' ? … : …`
+  idiom, no i18n library: `shop/Orders.tsx` (RejectDialog body +
+  title, "Already accepted", "Uncheck anything you're out of…", both
+  empty states); `components/OrderModal.tsx` ("ready x/y · handed over
+  x/y" line, "Waiting on the cook…", "Hand over every item to collect
+  payment.", "✓ Handed over", remove/cancel ConfirmDialog copy);
+  `shop/MenuManage.tsx` (every form label + placeholder, validation
+  messages, "Uploading...", delete-confirm copy, page subtitle);
+  `shop/Prep.tsx` (title, subtitle, empty state); `shop/History.tsx`
+  (page header line, insight-card labels Orders/Top items/Regulars,
+  empty states); `components/ShopStatusControl.tsx` (modal subtitle,
+  the three explanation paragraphs, the pending-orders warning,
+  "Cancel", "Already …"); `components/ConfirmDialog.tsx` (default
+  Confirm/Cancel labels — accept overrides from callers);
+  `components/PushNotificationSetup.tsx` (title + body, currently
+  English-only for shop); `components/Layout.tsx` offline banner (shop
+  side); shop-side mutation error toasts. Student-facing strings stay
+  English-only — do not touch them.
+- **F9 · Prompt-card collisions & consistency.** `InstallPrompt` and
+  `PushNotificationSetup` both render `fixed inset-x-4 bottom-20
+  z-40` — when both fire they overlap exactly. Coordinate them (show
+  at most one; install wins, push waits for next session or for the
+  install card's dismissal). Both hand-roll their CTA buttons — use
+  `Button`. And `PushNotificationSetup.handleEnable`'s failure path is
+  `console.error` only — surface a toast so a real user isn't left
+  with a silently dead Enable button.
+- **F10 · Permission race at checkout** (`Menu.tsx:418-421`):
+  `Notification.requestPermission()` fires inside the Place-order
+  click, so the native permission dialog lands at the same instant as
+  the submit + navigation. Move it to the mutation's `onSuccess` (ask
+  after the order exists) — `PushNotificationSetup` remains the owner
+  of the full push-subscription flow.
+- **F11 · History copy bugs.** Insights card says "completed today"
+  even when a past date is selected; the header says "collected on
+  2026-07-18" (raw ISO). Humanize the date once ("Fri 18 Jul") and
+  reuse it in both places.
+- **F12 · Two papercuts.** `Login.tsx:33-54` sets `submitting=true` on
+  every mount, flashing the button spinner even when no redirect is
+  pending — only show it once a pending redirect actually starts
+  resolving to a user. `shop/Orders.tsx` accept flow: unchecking an
+  item silently marks it out of stock globally (deliberate, P1-d) but
+  nothing says so — add one quiet line under the checklist ("Unchecked
+  items are also marked out of stock").
+
+#### F13–F24 — the beauty pass
+
+- **F13 · Login as the set-piece.** First impression of the whole
+  product, currently the plainest screen. One orchestrated load
+  sequence, ≤ 600 ms total: the ticket card rises (`slide-up`), then
+  the "Order ahead · Skip the line" line lands as a rubber stamp
+  (`animate-stamp`, slight rotation, `stamp` red) over the K-mark
+  moment. Static under reduced motion. No new assets — type, tokens,
+  and the existing keyframes only.
+- **F14 · The Ready moment** (`OrderStatus.tsx` ReadyBanner +
+  OrderTicket). This is what the dead keyframes were written for: when
+  status transitions to `ready`, the banner enters with
+  `animate-ready-pop` and idles with `animate-ready-glow`; the token
+  ticket itself pops once. Chime/vibration/push already exist —
+  this completes the moment visually. The stamp row (`StatusStamps`)
+  already lands `READY`; make sure the choreography reads as one
+  event, not three competing ones.
+- **F15 · Skeletons over spinners.** Replace `FullPageSpinner` on
+  Menu, Orders, Prep, History, MenuManage first-loads with
+  paper-toned skeleton chits — `paper` blocks, `edge` bones,
+  `animate-soft-pulse` shimmer (already in the reduced-motion kill
+  list). Shaped like the real cards (menu row = photo square + two
+  text bones + stepper block) so the page doesn't reflow when data
+  lands.
+- **F16 · Empty states with a face.** `EmptyState.tsx` is a bare text
+  box. Add a small optional inline SVG glyph slot — hand-drawn-feel
+  ink-line style (1.5–2 px stroke, `ink/25`): empty plate (menu), a
+  blank chit (orders), a cold flame (prep), a ledger line (history).
+  Quiet, ≤ 48 px, no color washes.
+- **F17 · Menu-card photo parity.** `TrendingRail` has a kraft
+  initial-letter placeholder when an item has no photo;
+  `MenuItemCard` just omits the image, so list rows lose their
+  rhythm. Add the same placeholder treatment to `MenuItemCard`.
+- **F18 · Order age on incoming cards** (`shop/Orders.tsx`,
+  IncomingOrderCard). The shopkeeper's real triage signal is *how
+  long has this student been waiting* — show "2 min" (tabular mono,
+  from `created_at`, tick every 30 s), quiet by default, `turmeric`
+  past 5 min, `stamp` past 10. No layout change — it slots next to
+  the existing `#token · time` line.
+- **F19 · Prep board totals + tick.** Top strip above the prep grid:
+  "14 units across 5 items" in the chalkboard voice (ink block, paper
+  digits — the PrepRow tally style). On a successful Done, the row's
+  tally re-renders with `animate-tick-pop` (dead keyframe, written
+  for exactly this).
+- **F20 · Shopkeeper tablet layout** (§ 9.1.1's 768–1024 target).
+  `shop/Orders.tsx` keeps the phone segmented-control on a tablet
+  where both columns fit — at `lg:` show New and In-progress
+  side-by-side (two columns, headers instead of tabs, badges intact).
+  Check the bottom nav on tablet too: 4 tabs stretched across
+  `max-w-6xl` is a reach — cap the nav grid (`max-w-md mx-auto`)
+  while keeping the bar full-width.
+- **F21 · Status-bar seam.** `theme_color` is brand-dark `#2c4434`
+  (index.html + manifest) but the header/page is steel `#DCE4DE` — on
+  Android the system bar shows a dark green band over a pale app.
+  Decide once: either theme-color → steel to make the seam invisible,
+  or restyle the header as a brand-dark band (paper text, K-mark
+  inverted) so the app "hangs from the awning". The second is the
+  braver, more identity-forward choice; prototype both at 375 px
+  before committing. Update index.html and vite.config.ts together.
+- **F22 · Modal a11y.** `Modal.tsx` has Escape/backdrop/scroll-lock
+  but no focus management: move focus into the dialog on open, trap
+  Tab inside, return focus on close. `AvatarMenu` (Layout.tsx) could
+  take arrow-key navigation, lower priority.
+- **F23 · Copy pass** (writing rules above): unify canteen/shop
+  naming, make every error state say the next action, sentence case
+  throughout, replace remaining generic "Something went wrong" where
+  a specific message exists. Small diffs, many files — batch as one
+  commit.
+- **F24 · Keyframe reconciliation.** After F13/F14/F19, `status-in`
+  is the only still-unused animation — either wire it (history/list
+  entrances) or delete it from `tailwind.config.js` *and* the
+  reduced-motion kill list in `index.css`. No dead design tokens.
+
+#### Per-file review verdicts (2026-07-19 — what was checked, what was found)
+
+| File | Verdict |
+|---|---|
+| `App.tsx`, `main.tsx`, `vite-env.d.ts` | Clean — route-group lazy pattern is right, keep it. |
+| `index.html`, `vite.config.ts` | Clean except the theme-color seam → F21. |
+| `index.css`, `tailwind.config.js` | Clean; 4 dead keyframes → F13/F14/F19/F24. |
+| `pages/Login.tsx` | Works; spinner flash → F12; design set-piece → F13. |
+| `pages/student/Menu.tsx` | Biggest file, mostly sound → F1 (chip safe-area), F2 (chips), F6 (cart bar), F7 (observer), F10 (permission race), F15. |
+| `pages/student/OrderStatus.tsx` | Sound → F2 (stars), F14 (ready moment), F15. |
+| `pages/shop/Orders.tsx` | Sound → F8, F12 (stock-out hint), F18, F20, F15. |
+| `pages/shop/Prep.tsx` | Sound; chalkboard tally is the best moment in the shop UI → F8, F19, F15. |
+| `pages/shop/History.tsx` | Sound → F3 (date input), F8, F11, F15. |
+| `pages/shop/MenuManage.tsx` | Sound → F3 (inputMode), F4 (off-token colors), F8, F15. |
+| `components/Layout.tsx` | Sound; tablet nav width → F20. |
+| `components/Button.tsx`, `Card.tsx`, `Spinner.tsx`, `VegMark.tsx`, `OrderTicket.tsx`, `QtyStepper.tsx` | Clean — the component floor is solid. |
+| `components/Modal.tsx` | Sound (portal rationale documented) → F22 focus management. |
+| `components/ConfirmDialog.tsx` | Clean → F8 (default labels). |
+| `components/Toast.tsx` | Sound → F1 (safe-area). Top placement is fine, keep. |
+| `components/StatusStamps.tsx` | Signature component, love it → F5 (useId). |
+| `components/StatusBadge.tsx`, `DietFilter.tsx` | Clean → F2 (DietFilter hit area). |
+| `components/MenuItemCard.tsx`, `TrendingRail.tsx` | Clean → F17 (placeholder parity). TrendingRail's rank numbering is genuinely ordinal — keep. |
+| `components/EmptyState.tsx` | Clean → F16. |
+| `components/OrderModal.tsx` | Sound → F8. |
+| `components/ShopStatusControl.tsx` | Sound → F8. |
+| `components/InstallPrompt.tsx`, `PushNotificationSetup.tsx` | Working → F2, F9. |
+| `components/ErrorBoundary.tsx`, `ProtectedRoute.tsx` | Clean. |
+| `components/StudentRealtime.tsx`, `ShopRealtime.tsx`, `shopNotifications.ts` | Clean — transition logic re-verified this pass (vibrate is feature-detected, SW notification path correct). |
+| `context/AuthContext.tsx`, `LanguageContext.tsx` | Clean. |
+| `hooks/useSSE.ts`, `useOnlineStatus.ts` | Clean (R28 jitter present and correct). |
+| `lib/cart.ts`, `format.ts`, `image.ts`, `sound.ts`, `firebase.ts` | Clean; sound design (distinct chimes per event) is good. |
+| `api/*` | Clean — covered by R1–R31 passes + tests; nothing design-facing. |
+| `sw.ts` | Clean (R30 fallback + url routing present). |
+| All `*.test.*`, `test/setup.ts` | Not design surface; 50/50 green at last GATE. |
 
 ### Deployment (the remaining milestone — needs real infra, not just code)
 
