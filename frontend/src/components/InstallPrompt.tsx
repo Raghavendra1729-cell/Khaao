@@ -11,34 +11,44 @@ interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
 }
 
+/**
+ * Whether the iOS "add to home screen" hint should show, computed
+ * synchronously from state that's all available without any async work
+ * (userAgent/maxTouchPoints/matchMedia/localStorage). This used to be set
+ * via `setShowIosHint(true)` inside a mount effect, which meant the true
+ * value only existed one render-tick after mount — late enough that
+ * PushNotificationSetup's own one-shot mount effect (which checks
+ * `promptCoordination`'s flag to avoid showing both prompt cards at once,
+ * F9) could run its check *before* this component had announced it was
+ * showing, letting both stack on a fresh iOS visit. Computing it as the
+ * initial state value instead means it's correct on the very first render,
+ * so the coordination effect below reports the right thing on the first
+ * pass.
+ */
+function computeShowIosHint(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const isStandalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    ('standalone' in navigator && (navigator as any).standalone === true);
+  if (isStandalone) return false;
+
+  // iPadOS 13+ reports a desktop-Mac userAgent (no "iPad" substring) —
+  // navigator.maxTouchPoints > 1 is what actually distinguishes it from a
+  // real Mac, which reports 0.
+  const isIos =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  if (!isIos) return false;
+
+  return !localStorage.getItem('khaao_install_dismissed');
+}
+
 export function InstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [showIosHint, setShowIosHint] = useState(false);
+  const [showIosHint, setShowIosHint] = useState(computeShowIosHint);
 
   useEffect(() => {
-    // Check if already installed
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      ('standalone' in navigator && (navigator as any).standalone === true);
-
-    if (isStandalone) {
-      return;
-    }
-
-    // Check for iOS Safari. iPadOS 13+ reports a desktop-Mac userAgent (no
-    // "iPad" substring) — navigator.maxTouchPoints > 1 is what actually
-    // distinguishes it from a real Mac, which reports 0.
-    const isIos =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-    if (isIos) {
-      const dismissed = localStorage.getItem('khaao_install_dismissed');
-      if (!dismissed) {
-        setShowIosHint(true);
-      }
-    }
-
     // Listen for the install prompt event
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
