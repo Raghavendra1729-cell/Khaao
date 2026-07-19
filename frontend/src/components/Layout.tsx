@@ -257,6 +257,12 @@ function LayoutInner() {
   // Shopkeepers are mobile-first (375-430px target) but also need to work on a
   // counter tablet — max-w-6xl gives room on wider screens without capping mobile.
   const contentMaxWidth = isShop ? 'max-w-6xl' : 'max-w-md';
+  // The bottom nav bar itself stays full-bleed at any width (the `<nav>`
+  // element below has no max-width), but its grid of tap targets is its own,
+  // narrower concern: stretching 4 shop tabs across max-w-6xl on a
+  // 768-1024px counter tablet spreads them into an uncomfortable thumb
+  // reach, so the grid is capped independently of contentMaxWidth (F20).
+  const navMaxWidth = 'max-w-md';
 
   // Badge data rides the same query keys the pages use, so SSE invalidation
   // keeps the bar live without extra plumbing.
@@ -332,7 +338,7 @@ function LayoutInner() {
       <PushNotificationSetup isShop={isShop} />
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-edge bg-paper/95 pb-safe shadow-bar backdrop-blur">
-        <div className={`mx-auto grid ${contentMaxWidth} ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
+        <div className={`mx-auto grid ${navMaxWidth} ${isShop ? 'grid-cols-4' : 'grid-cols-2'}`}>
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
