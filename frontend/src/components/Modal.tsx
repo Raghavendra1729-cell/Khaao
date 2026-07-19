@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalProps {
@@ -17,6 +17,9 @@ const SIZES: Record<NonNullable<ModalProps['size']>, string> = {
   md: 'max-w-lg',
 };
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * A medium overlay dialog. Renders as a bottom sheet on phones and a centered
  * card on wider screens. Tapping the backdrop or pressing Escape closes it, and
@@ -24,10 +27,35 @@ const SIZES: Record<NonNullable<ModalProps['size']>, string> = {
  * so error feedback from an action inside the modal stays visible.
  */
 export function Modal({ open, onClose, title, subtitle, children, footer, size = 'md' }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // Trap Tab inside the dialog — without this, tabbing past the last
+      // focusable element lands back on the page underneath, which a
+      // keyboard/screen-reader user can't tell is meant to be inert while
+      // the dialog is open (F22).
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter((el) => el.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
@@ -37,6 +65,20 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
       document.body.style.overflow = prevOverflow;
     };
   }, [open, onClose]);
+
+  // Move focus into the dialog the moment it opens, and hand it back to
+  // whatever had focus beforehand (the button that opened it, typically)
+  // once it closes — otherwise a keyboard user's focus silently stays on
+  // page content that's now sitting under the backdrop (F22).
+  useEffect(() => {
+    if (!open) return;
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    (firstFocusable ?? dialogRef.current)?.focus();
+    return () => {
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -54,10 +96,12 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
       role="presentation"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-slide-up flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-edge bg-paper shadow-ticket sm:max-h-[88vh] sm:rounded-2xl ${SIZES[size]}`}
+        className={`animate-slide-up flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-edge bg-paper shadow-ticket outline-none sm:max-h-[88vh] sm:rounded-2xl ${SIZES[size]}`}
       >
         {(title || subtitle) && (
           <div className="flex items-start justify-between gap-3 border-b border-edge px-5 py-4">
