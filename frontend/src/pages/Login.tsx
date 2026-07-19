@@ -29,10 +29,16 @@ export function Login() {
   }, []);
 
   // Standalone-PWA sign-in hands the window off via signInWithRedirect and
-  // comes back here — pick up the result once on mount.
+  // comes back here — pick up the result once on mount. In the common case
+  // there's no pending redirect and this resolves near-instantly, so don't
+  // flip the spinner on synchronously — that just flashes it for one frame.
+  // Instead, only show it if completeGoogleRedirect() is still pending after
+  // a short delay, which is the "a real redirect is actually resolving" case.
   useEffect(() => {
     let cancelled = false;
-    setSubmitting(true);
+    const spinnerDelay = window.setTimeout(() => {
+      if (!cancelled) setSubmitting(true);
+    }, 180);
     completeGoogleRedirect()
       .then((loggedInUser) => {
         if (cancelled || !loggedInUser) return;
@@ -45,10 +51,12 @@ export function Login() {
         );
       })
       .finally(() => {
+        window.clearTimeout(spinnerDelay);
         if (!cancelled) setSubmitting(false);
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(spinnerDelay);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -84,13 +92,16 @@ export function Login() {
             K
           </span>
           <h1 className="font-display text-2xl font-bold uppercase tracking-[0.15em] text-ink">Khaao</h1>
-          <p className="font-display text-xs uppercase tracking-widest text-ink/50">
+          <p
+            className="animate-stamp font-display text-xs uppercase tracking-widest text-ink/50"
+            style={{ '--stamp-rot': '-3deg', animationDelay: '200ms' } as CSSProperties}
+          >
             Order ahead · Skip the line
           </p>
         </div>
 
         <div
-          className="ticket-notch relative flex flex-col items-center rounded-2xl border-2 border-dashed border-ink/25 bg-paper p-6 shadow-ticket"
+          className="ticket-notch animate-slide-up relative flex flex-col items-center rounded-2xl border-2 border-dashed border-ink/25 bg-paper p-6 shadow-ticket"
           style={{ '--ticket-notch-bg': '#dce4de' } as CSSProperties}
         >
           <h2 className="mb-4 font-display text-sm font-semibold uppercase tracking-widest text-ink/70">
