@@ -108,7 +108,10 @@ export function StudentRealtime() {
                 } else if (order.status === 'completed') {
                   showToast(`Token #${order.order_no} is completed. Thank you!`, 'success');
                 } else if (order.status === 'rejected') {
-                  showToast(`Token #${order.order_no} was declined by the canteen — some items may be unavailable. Please place a new order.`, 'error');
+                  showToast(
+                    `Token #${order.order_no} was declined by the canteen — some items may be unavailable. Please place a new order.`,
+                    'error',
+                  );
                 } else if (order.status === 'expired') {
                   showToast(`Token #${order.order_no} expired — the pickup window was missed.`, 'error');
                 } else if (order.status === 'cancelled') {
@@ -116,7 +119,10 @@ export function StudentRealtime() {
                 }
               } else {
                 if (order.status === 'rejected') {
-                  showToast(`Token #${order.order_no} was declined by the canteen — some items may be unavailable. Please place a new order.`, 'error');
+                  showToast(
+                    `Token #${order.order_no} was declined by the canteen — some items may be unavailable. Please place a new order.`,
+                    'error',
+                  );
                 } else if (order.status === 'expired') {
                   showToast(`Token #${order.order_no} expired — the pickup window was missed.`, 'error');
                 }

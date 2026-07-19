@@ -39,7 +39,7 @@ export async function cancelOrder(orderId: number): Promise<Order> {
 
 export async function submitRatings(
   orderId: number,
-  ratings: { order_item_id: number; stars: number }[]
+  ratings: { order_item_id: number; stars: number }[],
 ): Promise<void> {
   await apiFetch(`/orders/${orderId}/ratings`, {
     method: 'POST',

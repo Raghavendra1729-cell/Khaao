@@ -84,7 +84,9 @@ export function StatusStamps({ status }: { status: OrderStatus }) {
                 ? `${STAMP_BASE} animate-stamp ${s.ink}`
                 : `${STAMP_BASE} border-dashed border-edge bg-transparent text-ink/25`
             }
-            style={isLanded ? ({ '--stamp-rot': s.rot, filter: `url(#${filterId})` } as CSSProperties) : undefined}
+            style={
+              isLanded ? ({ '--stamp-rot': s.rot, filter: `url(#${filterId})` } as CSSProperties) : undefined
+            }
           >
             {s.label}
           </span>

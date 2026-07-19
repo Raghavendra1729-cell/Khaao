@@ -9,8 +9,17 @@ import { Modal } from './Modal';
 import { useToast } from './Toast';
 import { useLanguage } from '../context/LanguageContext';
 
-const STATE_META: Record<ShopState, { label: string; labelHi: string; dot: string; text: string; chip: string }> = {
-  open: { label: 'Open', labelHi: 'खुला', dot: 'bg-brand', text: 'text-brand-dark', chip: 'border-brand/40 bg-brand-light' },
+const STATE_META: Record<
+  ShopState,
+  { label: string; labelHi: string; dot: string; text: string; chip: string }
+> = {
+  open: {
+    label: 'Open',
+    labelHi: 'खुला',
+    dot: 'bg-brand',
+    text: 'text-brand-dark',
+    chip: 'border-brand/40 bg-brand-light',
+  },
   paused: {
     label: 'Paused',
     labelHi: 'रुका हुआ',
@@ -18,7 +27,13 @@ const STATE_META: Record<ShopState, { label: string; labelHi: string; dot: strin
     text: 'text-turmeric-deep',
     chip: 'border-turmeric/40 bg-turmeric-pale',
   },
-  closed: { label: 'Closed', labelHi: 'बंद', dot: 'bg-stamp', text: 'text-stamp-dark', chip: 'border-stamp/40 bg-stamp-light' },
+  closed: {
+    label: 'Closed',
+    labelHi: 'बंद',
+    dot: 'bg-stamp',
+    text: 'text-stamp-dark',
+    chip: 'border-stamp/40 bg-stamp-light',
+  },
 };
 
 const OPTIONS: ShopState[] = ['open', 'paused', 'closed'];
@@ -97,7 +112,9 @@ export function ShopStatusControl() {
         className={`flex min-h-[36px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-semibold transition active:scale-[0.97] ${meta.chip} ${meta.text}`}
         aria-label={`Canteen status: ${meta.label}. Tap to change.`}
       >
-        <span className={`h-2 w-2 rounded-full ${meta.dot} ${current !== 'open' ? 'animate-soft-pulse' : ''}`} />
+        <span
+          className={`h-2 w-2 rounded-full ${meta.dot} ${current !== 'open' ? 'animate-soft-pulse' : ''}`}
+        />
         <span>{language === 'hi' ? meta.labelHi : meta.label}</span>
       </button>
 
@@ -121,7 +138,9 @@ export function ShopStatusControl() {
                 type="button"
                 onClick={() => pick(opt)}
                 className={`flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-sm font-semibold transition ${
-                  active ? `${m.chip} ${m.text} ring-2 ring-brand/40` : 'border-edge bg-paper text-ink/60 hover:bg-ink/5'
+                  active
+                    ? `${m.chip} ${m.text} ring-2 ring-brand/40`
+                    : 'border-edge bg-paper text-ink/60 hover:bg-ink/5'
                 }`}
               >
                 <span className={`h-2.5 w-2.5 rounded-full ${m.dot}`} />
@@ -162,7 +181,8 @@ export function ShopStatusControl() {
 
             {(target === 'paused' || target === 'closed') && (
               <p className="text-xs text-ink/50">
-                Pending orders will be automatically declined. Already-accepted orders must be finished or cancelled first.
+                Pending orders will be automatically declined. Already-accepted orders must be finished or
+                cancelled first.
               </p>
             )}
 

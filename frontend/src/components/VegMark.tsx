@@ -15,7 +15,7 @@ interface VegMarkProps {
  */
 export function VegMark({ diet, size = 15, className = '' }: VegMarkProps) {
   const isVeg = diet === 'veg';
-  const color = isVeg ? '#3F5D48' /* brand moss */ : '#AE3327' /* stamp red */;
+  const color = isVeg ? '#3F5D48' /* brand moss */ : '#AE3327'; /* stamp red */
   const inner = Math.round(size * 0.52);
   const border = Math.max(1, Math.round(size / 12));
 

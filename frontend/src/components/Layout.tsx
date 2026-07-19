@@ -35,9 +35,11 @@ function Icon({ d }: { d: string }) {
 // Simple single-path icons keep the bar light; shapes echo what each tab does.
 const ICONS = {
   menu: 'M4 5h7v7H4zM13 5h7v7h-7zM4 15h7v5H4zM13 15h7v5h-7z',
-  ticket: 'M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4zM14 6v12',
+  ticket:
+    'M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4zM14 6v12',
   inbox: 'M4 13l2-7h12l2 7M4 13v5h16v-5M4 13h5a3 3 0 0 0 6 0h5',
-  flame: 'M12 3c1 3-3 4.5-3 8a3 3 0 0 0 6 0c0-1.5-.8-2.5-.8-2.5C16.5 9.5 18 11 18 13.5A6 6 0 0 1 6 13.5C6 8.5 10.5 7 12 3z',
+  flame:
+    'M12 3c1 3-3 4.5-3 8a3 3 0 0 0 6 0c0-1.5-.8-2.5-.8-2.5C16.5 9.5 18 11 18 13.5A6 6 0 0 1 6 13.5C6 8.5 10.5 7 12 3z',
   clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   tag: 'M4 4h7l9 9-7 7-9-9zM8.5 8.5h0',
 };
@@ -104,7 +106,10 @@ function ShopBell() {
   }, [isOnOrders, hasNotification]);
 
   return (
-    <div className="relative flex items-center" aria-label={hasNotification ? 'New activity — tap Orders to view' : undefined}>
+    <div
+      className="relative flex items-center"
+      aria-label={hasNotification ? 'New activity — tap Orders to view' : undefined}
+    >
       <BellIcon />
       {hasNotification && (
         <span

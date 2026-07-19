@@ -17,8 +17,8 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
  * this — they're English-only by design regardless of what's stored here.
  */
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>(
-    () => (localStorage.getItem(STORAGE_KEY) === 'hi' ? 'hi' : 'en'),
+  const [language, setLanguage] = useState<Language>(() =>
+    localStorage.getItem(STORAGE_KEY) === 'hi' ? 'hi' : 'en',
   );
 
   useEffect(() => {
@@ -29,9 +29,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLanguage((prev) => (prev === 'en' ? 'hi' : 'en'));
   }
 
-  return (
-    <LanguageContext.Provider value={{ language, toggleLanguage }}>{children}</LanguageContext.Provider>
-  );
+  return <LanguageContext.Provider value={{ language, toggleLanguage }}>{children}</LanguageContext.Provider>;
 }
 
 export function useLanguage(): LanguageContextValue {

@@ -64,7 +64,10 @@ export function Menu() {
     if (!hasItems) {
       localStorage.removeItem(CART_STORAGE_KEY);
     } else {
-      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ date: todayKey(), items: cart } satisfies StoredCart));
+      localStorage.setItem(
+        CART_STORAGE_KEY,
+        JSON.stringify({ date: todayKey(), items: cart } satisfies StoredCart),
+      );
     }
   }, [cart]);
 
@@ -219,7 +222,7 @@ export function Menu() {
       },
       {
         rootMargin: '-100px 0px -60% 0px',
-      }
+      },
     );
 
     allCategories.forEach((cat) => {
@@ -278,9 +281,7 @@ export function Menu() {
           to="/order"
           className="mb-5 flex items-center justify-between rounded-2xl border border-brand bg-brand text-white px-4 py-3 text-sm font-semibold shadow-card hover:bg-brand-dark transition"
         >
-          <span>
-            You have an order in progress — token #{activeOrder.order_no}
-          </span>
+          <span>You have an order in progress — token #{activeOrder.order_no}</span>
           <span aria-hidden>→</span>
         </Link>
       )}
@@ -302,9 +303,7 @@ export function Menu() {
           />
 
           <div className="mb-4 mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-edge pb-2">
-            <h2 className="font-display text-sm font-bold uppercase tracking-[0.18em] text-ink">
-              Main Menu
-            </h2>
+            <h2 className="font-display text-sm font-bold uppercase tracking-[0.18em] text-ink">Main Menu</h2>
             <DietFilter value={dietFilter} onChange={setDietFilter} />
           </div>
 
@@ -380,9 +379,18 @@ export function Menu() {
               <p className="text-sm font-semibold text-ink">
                 {cartCount} item{cartCount > 1 ? 's' : ''}
               </p>
-              <p className="tabular font-display text-lg font-bold text-brand-dark">{formatPrice(cartTotal)}</p>
+              <p className="tabular font-display text-lg font-bold text-brand-dark">
+                {formatPrice(cartTotal)}
+              </p>
             </div>
-            <Button size="lg" type="button" onClick={(e) => { e.stopPropagation(); setShowCheckout(true); }}>
+            <Button
+              size="lg"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCheckout(true);
+              }}
+            >
               View cart
             </Button>
           </div>
@@ -398,7 +406,9 @@ export function Menu() {
             <>
               <div className="mb-4 flex items-center justify-between">
                 <span className="text-lg font-bold text-ink">Total</span>
-                <span className="font-display text-2xl font-bold text-brand-dark">{formatPrice(cartTotal)}</span>
+                <span className="font-display text-2xl font-bold text-brand-dark">
+                  {formatPrice(cartTotal)}
+                </span>
               </div>
               <Button
                 size="lg"
@@ -424,19 +434,20 @@ export function Menu() {
               return (
                 <div key={item.id} className="flex items-center justify-between py-3">
                   <div className="flex flex-col">
-                    <span className="font-semibold text-ink">
-                      {item.name}
-                    </span>
+                    <span className="font-semibold text-ink">{item.name}</span>
                     <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="tabular font-display text-sm font-bold text-brand-dark">
                       {formatPrice(item.price * entry.qty)}
                     </span>
-                    <QtyStepper value={entry.qty} onChange={(next) => {
-                      setQty(item.id, next);
-                      if (cartCount - entry.qty + next === 0) setShowCheckout(false);
-                    }} />
+                    <QtyStepper
+                      value={entry.qty}
+                      onChange={(next) => {
+                        setQty(item.id, next);
+                        if (cartCount - entry.qty + next === 0) setShowCheckout(false);
+                      }}
+                    />
                   </div>
                 </div>
               );

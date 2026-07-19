@@ -36,11 +36,7 @@ const BASE_BACKOFF_MS = 1_000;
  * normally keeps fresh, so a client that missed an event while disconnected
  * (network blip, tab backgrounded, server restart) still ends up correct.
  */
-export function useSSE(
-  path: string | null,
-  onMessage: (msg: SSEMessage) => void,
-  onOpen?: () => void,
-): void {
+export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void, onOpen?: () => void): void {
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
   const onOpenRef = useRef(onOpen);
@@ -120,4 +116,3 @@ export function useSSE(
     };
   }, [path]);
 }
-

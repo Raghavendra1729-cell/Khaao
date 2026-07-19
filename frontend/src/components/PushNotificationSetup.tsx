@@ -4,9 +4,7 @@ import { useLanguage } from '../context/LanguageContext';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
 
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
@@ -66,7 +64,7 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
       }
 
       const registration = await navigator.serviceWorker.ready;
-      
+
       const { public_key } = await getVapidPublicKey();
       const applicationServerKey = urlBase64ToUint8Array(public_key);
 
@@ -80,11 +78,7 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
         throw new Error('Invalid subscription format');
       }
 
-      await subscribeToPush(
-        subData.endpoint,
-        subData.keys.p256dh,
-        subData.keys.auth
-      );
+      await subscribeToPush(subData.endpoint, subData.keys.p256dh, subData.keys.auth);
 
       setShowPrompt(false);
     } catch (err) {
@@ -119,7 +113,15 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink/50 transition hover:bg-ink/5 hover:text-ink"
           aria-label="Dismiss"
         >
-          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>

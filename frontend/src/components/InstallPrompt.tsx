@@ -79,7 +79,8 @@ export function InstallPrompt() {
         <div className="flex-1">
           {showIosHint ? (
             <p className="text-sm font-medium text-ink">
-              Add to your home screen: tap <span className="font-semibold">Share</span>, then <span className="font-semibold">"Add to Home Screen"</span>.
+              Add to your home screen: tap <span className="font-semibold">Share</span>, then{' '}
+              <span className="font-semibold">"Add to Home Screen"</span>.
             </p>
           ) : (
             <>
@@ -93,12 +94,20 @@ export function InstallPrompt() {
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink/50 hover:bg-ink/5 hover:text-ink transition"
           aria-label="Dismiss"
         >
-          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
-      
+
       {!showIosHint && (
         <button
           onClick={handleInstallClick}

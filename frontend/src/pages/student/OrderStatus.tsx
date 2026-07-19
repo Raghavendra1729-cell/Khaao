@@ -4,7 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
 import { ApiError } from '../../api/client';
 import type { Order, OrderStatus as OrderStatusType } from '../../api/types';
-import { cloudinaryThumb, formatCountdown, formatDateTime, formatPrice, secondsUntil } from '../../lib/format';
+import {
+  cloudinaryThumb,
+  formatCountdown,
+  formatDateTime,
+  formatPrice,
+  secondsUntil,
+} from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -46,7 +52,9 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
       {order.status === 'ready' && <ReadyBanner order={order} />}
       {order.status === 'awaiting_payment' && (
         <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-turmeric px-4 py-5 text-center text-white shadow-ticket">
-          <p className="text-xl font-bold tracking-tight">Pay {formatPrice(order.total_price)} at the counter</p>
+          <p className="text-xl font-bold tracking-tight">
+            Pay {formatPrice(order.total_price)} at the counter
+          </p>
           <p className="text-sm font-semibold text-white/90">All items are ready.</p>
         </div>
       )}
@@ -233,7 +241,9 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
                       />
                     </div>
                   )}
-                  <span>{item.name} ×{item.qty}</span>
+                  <span>
+                    {item.name} ×{item.qty}
+                  </span>
                 </div>
               ))}
             </div>
@@ -304,8 +314,7 @@ export function OrderStatusPage() {
 
   const pastOrders = history.filter((o) => o.id !== activeOrder?.id);
   const mostRecentCompleted = pastOrders.find((o) => o.status === 'completed');
-  const showRatingPrompt =
-    mostRecentCompleted && !ratedOrders.includes(mostRecentCompleted.id);
+  const showRatingPrompt = mostRecentCompleted && !ratedOrders.includes(mostRecentCompleted.id);
 
   // A student who has never ordered has neither an active order nor any
   // history — show one welcoming prompt instead of two stacked empty states.

@@ -173,7 +173,10 @@ function MenuItemForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-edge bg-brand-light/40 p-4">
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-3 rounded-xl border border-edge bg-brand-light/40 p-4"
+    >
       {validationError && (
         <div className="rounded-lg border border-stamp/40 bg-stamp-light px-3 py-2 text-sm font-medium text-stamp-dark">
           {validationError}
@@ -205,7 +208,7 @@ function MenuItemForm({
           placeholder="40.00"
         />
       </label>
-      
+
       <label className="block">
         <span className="mb-1 block text-sm font-semibold text-ink/70">Diet</span>
         <select
@@ -343,7 +346,7 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
   const { language } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [armed, setArmed] = useState(false);
-  
+
   useEffect(() => {
     if (!armed) return;
     const timer = setTimeout(() => setArmed(false), 3000);
@@ -438,7 +441,8 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
         <p className="tabular text-sm text-ink/60">{formatPrice(item.price)}</p>
         {item.rating_count > 0 && (
           <p className="mt-0.5 flex items-center gap-0.5 text-xs font-semibold text-ink/70">
-            <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} ({item.rating_count})
+            <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} (
+            {item.rating_count})
           </p>
         )}
         {(item.avail_from || item.avail_to) && (
@@ -455,14 +459,20 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
             {item.diet === 'veg' ? 'Veg' : 'Non-veg'}
           </span>
           {item.tags?.map((tag) => (
-            <span key={tag} className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-dark">
+            <span
+              key={tag}
+              className="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-dark"
+            >
               {tag}
             </span>
           ))}
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-3" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-3"
+        onClick={(e) => e.stopPropagation()}
+      >
         <Button variant="ghost" onClick={() => setEditing(true)} className="flex-1">
           <span>{language === 'hi' ? 'संपादित करें' : 'Edit'}</span>
         </Button>

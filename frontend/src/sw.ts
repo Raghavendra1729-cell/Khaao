@@ -16,10 +16,7 @@ const navigationRoute = new NavigationRoute(handler, {
 registerRoute(navigationRoute);
 
 // API calls should always go to the network (never cache or buffer)
-registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/'),
-  new NetworkOnly()
-);
+registerRoute(({ url }) => url.pathname.startsWith('/api/'), new NetworkOnly());
 
 self.addEventListener('push', (event) => {
   if (!event.data) return;
@@ -30,7 +27,7 @@ self.addEventListener('push', (event) => {
       self.registration.showNotification(data.title || 'Notification', {
         body: data.body || '',
         icon: '/icon-192.png',
-      })
+      }),
     );
   } catch (err) {
     console.error('push: failed to parse json', err);
@@ -53,6 +50,6 @@ self.addEventListener('notificationclick', (event) => {
       if (self.clients.openWindow) {
         return self.clients.openWindow('/');
       }
-    })
+    }),
   );
 });

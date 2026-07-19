@@ -1,11 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  acceptOrder,
-  getShopOrders,
-  rejectOrder,
-  setMenuItemStock,
-} from '../../api/shop';
+import { acceptOrder, getShopOrders, rejectOrder, setMenuItemStock } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { Order } from '../../api/types';
 import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
@@ -42,9 +37,7 @@ function RejectDialog({
     Object.fromEntries(items.map((i) => [i.menu_item_id, false])),
   );
 
-  const unavailableMenuItemIds = items
-    .filter((i) => checked[i.menu_item_id])
-    .map((i) => i.menu_item_id);
+  const unavailableMenuItemIds = items.filter((i) => checked[i.menu_item_id]).map((i) => i.menu_item_id);
 
   return (
     <Modal
@@ -81,9 +74,7 @@ function RejectDialog({
             <input
               type="checkbox"
               checked={checked[item.menu_item_id] ?? false}
-              onChange={(e) =>
-                setChecked((prev) => ({ ...prev, [item.menu_item_id]: e.target.checked }))
-              }
+              onChange={(e) => setChecked((prev) => ({ ...prev, [item.menu_item_id]: e.target.checked }))}
               className="h-5 w-5 accent-stamp"
             />
             {item.photo_url && (
@@ -122,9 +113,7 @@ function IncomingOrderCard({ order }: { order: Order }) {
     mutationFn: async () => {
       const rejectedItems = pendingItems.filter((i) => !checked[i.id]);
       const rejectedItemIds = rejectedItems.map((i) => i.id);
-      await Promise.allSettled(
-        rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
-      );
+      await Promise.allSettled(rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)));
       return acceptOrder(order.id, rejectedItemIds);
     },
     onSuccess: () => {
@@ -277,9 +266,7 @@ function ItemStatusDots({ order }: { order: Order }) {
               </span>
             ) : (
               <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  readyToGive ? 'bg-turmeric' : 'border border-ink/30'
-                }`}
+                className={`h-2.5 w-2.5 rounded-full ${readyToGive ? 'bg-turmeric' : 'border border-ink/30'}`}
               />
             )}
             <span className={handedOver ? 'text-ink/40 line-through' : ''}>
@@ -293,13 +280,7 @@ function ItemStatusDots({ order }: { order: Order }) {
   );
 }
 
-function InProgressOrderCard({
-  order,
-  onOpenModal,
-}: {
-  order: Order;
-  onOpenModal: (order: Order) => void;
-}) {
+function InProgressOrderCard({ order, onOpenModal }: { order: Order; onOpenModal: (order: Order) => void }) {
   const activeItems = order.items.filter((i) => i.status !== 'rejected');
   const ready = isFullyReady(order) || order.status === 'awaiting_payment';
 
@@ -308,9 +289,7 @@ function InProgressOrderCard({
       type="button"
       onClick={() => onOpenModal(order)}
       className={`w-full rounded-2xl border p-4 text-left transition active:scale-[0.98] ${
-        ready
-          ? 'border-brand/40 bg-brand-light/50 shadow-sm'
-          : 'border-edge bg-paper hover:border-brand/30'
+        ready ? 'border-brand/40 bg-brand-light/50 shadow-sm' : 'border-edge bg-paper hover:border-brand/30'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -394,9 +373,7 @@ export function ShopOrdersPage() {
           id="tab-new-orders"
           onClick={() => setSubpage('new')}
           className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
-            subpage === 'new'
-              ? 'bg-brand text-white shadow-sm'
-              : 'text-ink/60 hover:text-ink'
+            subpage === 'new' ? 'bg-brand text-white shadow-sm' : 'text-ink/60 hover:text-ink'
           }`}
         >
           <span>{language === 'hi' ? 'नए ऑर्डर' : 'New orders'}</span>
@@ -415,9 +392,7 @@ export function ShopOrdersPage() {
           id="tab-in-progress"
           onClick={() => setSubpage('inprogress')}
           className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
-            subpage === 'inprogress'
-              ? 'bg-brand text-white shadow-sm'
-              : 'text-ink/60 hover:text-ink'
+            subpage === 'inprogress' ? 'bg-brand text-white shadow-sm' : 'text-ink/60 hover:text-ink'
           }`}
         >
           <span>{language === 'hi' ? 'प्रगति में' : 'In progress'}</span>
@@ -456,11 +431,7 @@ export function ShopOrdersPage() {
             />
           ) : (
             allInProgress.map((order) => (
-              <InProgressOrderCard
-                key={order.id}
-                order={order}
-                onOpenModal={setModalOrder}
-              />
+              <InProgressOrderCard key={order.id} order={order} onOpenModal={setModalOrder} />
             ))
           )}
         </div>

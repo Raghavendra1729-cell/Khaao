@@ -131,7 +131,9 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
               </div>
             </div>
           ) : (
-            stillToCook > 0 && <p className="text-xs italic text-ink/40">Waiting on the cook to mark this done.</p>
+            stillToCook > 0 && (
+              <p className="text-xs italic text-ink/40">Waiting on the cook to mark this done.</p>
+            )
           )}
 
           {item.handed_qty === 0 && (
@@ -183,7 +185,8 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
       showToast(`Order #${order.order_no} paid.`, 'success');
       onClose();
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not collect payment.', 'error'),
+    onError: (err) =>
+      showToast(err instanceof ApiError ? err.message : 'Could not collect payment.', 'error'),
   });
 
   const cancelOrderMutation = useMutation({
@@ -218,7 +221,9 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
             onClick={() => markPaidMutation.mutate()}
           >
             <span>
-              {language === 'hi' ? `भुगतान लें ${formatPrice(order.total_price)}` : `Collect ${formatPrice(order.total_price)}`}
+              {language === 'hi'
+                ? `भुगतान लें ${formatPrice(order.total_price)}`
+                : `Collect ${formatPrice(order.total_price)}`}
             </span>
           </Button>
           {canCancelOrder && (

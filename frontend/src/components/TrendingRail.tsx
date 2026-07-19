@@ -93,7 +93,8 @@ export function TrendingRail({
               </span>
               {item.rating_count > 0 && (
                 <div className="mt-0.5 flex items-center gap-0.5 text-xs font-semibold text-ink/70">
-                  <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} ({item.rating_count})
+                  <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} (
+                  {item.rating_count})
                 </div>
               )}
 

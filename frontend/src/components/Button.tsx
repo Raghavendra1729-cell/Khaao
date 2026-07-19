@@ -42,7 +42,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={`${BASE} ${SIZES[size]} ${VARIANTS[variant]} ${fullWidth ? 'w-full' : ''} ${className}`}
       {...props}
     >
-      {loading && <Spinner size={18} className={variant === 'secondary' || variant === 'ghost' ? '' : 'text-white'} />}
+      {loading && (
+        <Spinner size={18} className={variant === 'secondary' || variant === 'ghost' ? '' : 'text-white'} />
+      )}
       {children}
     </button>
   );

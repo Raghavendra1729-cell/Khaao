@@ -97,10 +97,7 @@ export async function getShopStatus(): Promise<ShopStatus> {
  * The backend returns 409 ("Finish or cancel the N active order(s) first.") if
  * pausing/closing while any order is still active.
  */
-export async function setShopStatus(
-  state: ShopState,
-  reopenAt?: string | null,
-): Promise<ShopStatus> {
+export async function setShopStatus(state: ShopState, reopenAt?: string | null): Promise<ShopStatus> {
   return apiFetch<ShopStatus>('/shop/status', {
     method: 'POST',
     body: { state, reopen_at: reopenAt ?? null },
@@ -198,11 +195,7 @@ export async function getVapidPublicKey(): Promise<{ public_key: string }> {
   return apiFetch<{ public_key: string }>('/push/vapid-public-key');
 }
 
-export async function subscribeToPush(
-  endpoint: string,
-  p256dh: string,
-  auth: string,
-): Promise<void> {
+export async function subscribeToPush(endpoint: string, p256dh: string, auth: string): Promise<void> {
   await apiFetch('/push/subscribe', {
     method: 'POST',
     body: { endpoint, keys: { p256dh, auth } },

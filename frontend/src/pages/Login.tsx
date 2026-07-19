@@ -40,7 +40,9 @@ export function Login() {
       })
       .catch((err: any) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : err?.message || 'Something went wrong. Please try again.');
+        setError(
+          err instanceof ApiError ? err.message : err?.message || 'Something went wrong. Please try again.',
+        );
       })
       .finally(() => {
         if (!cancelled) setSubmitting(false);
@@ -66,7 +68,9 @@ export function Login() {
       }
     } catch (err: any) {
       if (err?.code === 'auth/popup-closed-by-user') return;
-      setError(err instanceof ApiError ? err.message : err.message || 'Something went wrong. Please try again.');
+      setError(
+        err instanceof ApiError ? err.message : err.message || 'Something went wrong. Please try again.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -103,9 +107,7 @@ export function Login() {
             Continue with Google
           </Button>
 
-          <p className="mt-4 text-center text-sm text-ink/60">
-            Use your @{domain} account
-          </p>
+          <p className="mt-4 text-center text-sm text-ink/60">Use your @{domain} account</p>
         </div>
       </div>
     </div>
