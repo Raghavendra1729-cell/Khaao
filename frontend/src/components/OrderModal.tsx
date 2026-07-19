@@ -154,7 +154,6 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
         title="Remove item?"
         body={`Remove "${item.name}" from this order? Any prepared units go back to the pool.`}
         confirmLabel="Remove"
-        busy={removeMutation.isPending}
         checkboxLabel="Also mark out of stock"
         onCancel={() => setConfirmingRemove(false)}
         onConfirm={(alsoOutOfStock) => {
@@ -250,7 +249,6 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
         title="Cancel this order?"
         body={`Cancel order #${order.order_no}? Use this only if something unexpected came up — the student will be notified to reorder. This can't be undone.`}
         confirmLabel="Cancel order"
-        busy={cancelOrderMutation.isPending}
         onCancel={() => setConfirmingCancel(false)}
         onConfirm={() => {
           setConfirmingCancel(false);

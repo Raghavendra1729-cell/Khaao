@@ -492,7 +492,6 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
         title="Delete this item?"
         body={`Delete "${item.name}"? This cannot be undone.`}
         confirmLabel="Delete"
-        busy={deleteMutation.isPending}
         onCancel={() => setConfirmingDelete(false)}
         onConfirm={() => {
           setConfirmingDelete(false);

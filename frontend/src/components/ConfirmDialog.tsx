@@ -9,7 +9,6 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'primary' | 'danger';
-  busy?: boolean;
   onCancel: () => void;
   /** Called with the checkbox's checked state (false if no checkboxLabel was given). */
   onConfirm: (checked: boolean) => void;
@@ -30,7 +29,6 @@ export function ConfirmDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   variant = 'danger',
-  busy = false,
   onCancel,
   onConfirm,
   checkboxLabel,
@@ -58,16 +56,10 @@ export function ConfirmDialog({
           </label>
         )}
         <div className="flex gap-2">
-          <Button variant="ghost" className="flex-1" disabled={busy} onClick={onCancel}>
+          <Button variant="ghost" className="flex-1" onClick={onCancel}>
             {cancelLabel}
           </Button>
-          <Button
-            variant={variant}
-            className="flex-1"
-            disabled={busy}
-            loading={busy}
-            onClick={() => onConfirm(checked)}
-          >
+          <Button variant={variant} className="flex-1" onClick={() => onConfirm(checked)}>
             {confirmLabel}
           </Button>
         </div>
