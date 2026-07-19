@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
@@ -33,12 +33,18 @@ function ReadyBanner({ order }: { order: Order }) {
   const expiringSoon = remaining <= 60;
 
   return (
-    <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-stamp px-4 py-5 text-center text-white shadow-ticket">
-      <p className="text-lg font-bold tracking-tight">Ready — pick up before the timer, pay at counter</p>
-      <p className={`tabular font-display text-3xl font-bold ${expiringSoon ? 'animate-soft-pulse' : ''}`}>
-        {remaining > 0 ? formatCountdown(remaining) : "Time's up"}
-      </p>
-      <p className="text-xs text-white/80">Show your token number at the counter.</p>
+    // Two layers so the mount-in pop (one-shot, transform+opacity) and the
+    // ambient glow (infinite, box-shadow) can run as separate `animate-*`
+    // utilities without fighting over the same `animation` property on one
+    // element — the outer div carries the glow "halo", the inner card pops.
+    <div className="mb-5 w-full animate-ready-glow rounded-2xl">
+      <div className="flex w-full animate-ready-pop flex-col items-center gap-1 rounded-2xl bg-stamp px-4 py-5 text-center text-white shadow-ticket">
+        <p className="text-lg font-bold tracking-tight">Ready — pick up before the timer, pay at counter</p>
+        <p className={`tabular font-display text-3xl font-bold ${expiringSoon ? 'animate-soft-pulse' : ''}`}>
+          {remaining > 0 ? formatCountdown(remaining) : "Time's up"}
+        </p>
+        <p className="text-xs text-white/80">Show your token number at the counter.</p>
+      </div>
     </div>
   );
 }
@@ -46,6 +52,26 @@ function ReadyBanner({ order }: { order: Order }) {
 function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => void }) {
   const droppedItems = order.items.filter((i) => i.status === 'rejected');
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  // The ticket should pop exactly once, on the transition INTO "ready" — not
+  // on every re-render while already ready, and not on first mount if the
+  // order happens to *arrive* already ready (e.g. a page refresh while
+  // ready). `prevStatusRef` starts at `null` ("unknown prior state") and a
+  // `null` prior status never counts as a transition, mirroring the
+  // prevStatusRef idiom in components/StudentRealtime.tsx (which likewise
+  // treats an unseeded prior status as "don't notify").
+  const prevStatusRef = useRef<OrderStatusType | null>(null);
+  const [ticketPopping, setTicketPopping] = useState(false);
+
+  useEffect(() => {
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = order.status;
+    if (prevStatus !== null && prevStatus !== 'ready' && order.status === 'ready') {
+      setTicketPopping(true);
+      const id = window.setTimeout(() => setTicketPopping(false), 350);
+      return () => window.clearTimeout(id);
+    }
+  }, [order.status]);
 
   return (
     <Card className="p-5">
@@ -68,7 +94,13 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
         </div>
       )}
 
-      <div className="mb-6 flex justify-center">
+      <div
+        className={`mb-6 flex justify-center ${ticketPopping ? 'animate-tick-pop' : ''}`}
+        // Staggered a beat behind the ready banner's own animate-ready-pop
+        // (no delay) so the two reads as one choreographed moment rather
+        // than two animations firing at once.
+        style={ticketPopping ? { animationDelay: '120ms' } : undefined}
+      >
         <OrderTicket id={order.order_no} size="lg" />
       </div>
 
