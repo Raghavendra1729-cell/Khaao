@@ -145,9 +145,20 @@ func (m *mockOrderRepo) SumOrderedQtyByDate(_ context.Context, date string) (map
 
 type mockMenuRepo struct {
 	items []models.MenuItem
+	// blockFindAll, if set, is read from before FindAll returns — lets a
+	// test deterministically pause a read mid-flight to interleave a
+	// concurrent mutation/invalidation (see TestMenuListAvailableCacheRace).
+	blockFindAll <-chan struct{}
+	// findAllCalls counts FindAll invocations so a test can tell whether a
+	// later ListAvailable call hit the cache or triggered a fresh repo read.
+	findAllCalls int
 }
 
 func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuItem, error) {
+	m.findAllCalls++
+	if m.blockFindAll != nil {
+		<-m.blockFindAll
+	}
 	if avail {
 		out := make([]models.MenuItem, 0, len(m.items))
 		for _, it := range m.items {

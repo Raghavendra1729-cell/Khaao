@@ -159,6 +159,14 @@ type MenuService struct {
 
 	cacheMu sync.Mutex
 	cache   *menuCacheEntry
+	// cacheGen bumps on every invalidateCache call. ListAvailable stamps the
+	// generation it read at before doing the (slow, unlocked) DB work, and
+	// only commits its result to s.cache if the generation is still current
+	// — otherwise a mutation that landed mid-read would have its
+	// invalidateCache() overwritten by a stale write racing in afterward,
+	// serving pre-mutation data for a full TTL despite the doc comment
+	// above promising a shopkeeper's own change is never masked.
+	cacheGen uint64
 }
 
 func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
@@ -168,6 +176,7 @@ func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ra
 func (s *MenuService) invalidateCache() {
 	s.cacheMu.Lock()
 	s.cache = nil
+	s.cacheGen++
 	s.cacheMu.Unlock()
 }
 
@@ -185,6 +194,7 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 		s.cacheMu.Unlock()
 		return items, nil
 	}
+	gen := s.cacheGen
 	s.cacheMu.Unlock()
 
 	items, err := s.repo.FindAll(ctx, true)
@@ -202,7 +212,12 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 	resp := toMenuResponses(items, s.now(), counts, aggs)
 
 	s.cacheMu.Lock()
-	s.cache = &menuCacheEntry{items: resp, expiresAt: time.Now().Add(availableMenuCacheTTL)}
+	// Only commit if nothing invalidated the cache while we were reading —
+	// otherwise this stale read would clobber a fresher invalidation and
+	// serve pre-mutation data for a full TTL.
+	if s.cacheGen == gen {
+		s.cache = &menuCacheEntry{items: resp, expiresAt: time.Now().Add(availableMenuCacheTTL)}
+	}
 	s.cacheMu.Unlock()
 
 	return resp, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"khaao/internal/models"
@@ -55,6 +56,57 @@ func TestMenuListAvailableCache(t *testing.T) {
 	}
 	if len(fresh) != 2 {
 		t.Fatalf("expected fresh response with 2 items after invalidation, got %d", len(fresh))
+	}
+}
+
+// TestMenuListAvailableCacheRace guards against a TOCTOU race in the cache:
+// a ListAvailable call that started reading BEFORE a mutation invalidated
+// the cache must not clobber that invalidation when it finishes writing
+// AFTER it — otherwise the just-committed mutation gets masked by a stale
+// write for a full cache TTL, contradicting the "a shopkeeper's own change
+// is never masked" guarantee. Detected via a repo call counter rather than
+// item content: the bug is about whether a *later* read hits the (wrongly
+// repopulated) cache or correctly falls through to a fresh repo read, which
+// content-based assertions can't distinguish if the racing read happens to
+// return the same data a correct read would.
+func TestMenuListAvailableCacheRace(t *testing.T) {
+	ctx := context.Background()
+	svc, _, menuRepo := newMenuService()
+	menuRepo.items = []models.MenuItem{{ID: 1, Name: "Chai", Price: 100, IsAvailable: true}}
+
+	unblock := make(chan struct{})
+	menuRepo.blockFindAll = unblock
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.ListAvailable(ctx)
+		done <- err
+	}()
+
+	// Let the goroutine above reach FindAll and block there — it has now
+	// missed the cache and is mid-read, but hasn't written anything yet.
+	time.Sleep(20 * time.Millisecond)
+
+	// Mutate concurrently: invalidateCache() bumps the generation while the
+	// read above is still blocked, having captured the pre-bump generation.
+	if _, err := svc.SetStock(ctx, 1, true); err != nil {
+		t.Fatalf("SetStock: %v", err)
+	}
+
+	// Let the blocked read finish and attempt its (now-stale) cache write.
+	close(unblock)
+	if err := <-done; err != nil {
+		t.Fatalf("ListAvailable: %v", err)
+	}
+	menuRepo.blockFindAll = nil
+
+	callsBeforeSecondRead := menuRepo.findAllCalls
+	if _, err := svc.ListAvailable(ctx); err != nil {
+		t.Fatalf("ListAvailable (post-race): %v", err)
+	}
+	if menuRepo.findAllCalls == callsBeforeSecondRead {
+		t.Fatalf("post-race ListAvailable served from cache instead of re-reading — " +
+			"the racing stale write clobbered the invalidation")
 	}
 }
 
