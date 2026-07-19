@@ -7,12 +7,35 @@ import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
-import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 import { OrderModal } from '../../components/OrderModal';
 import { Modal } from '../../components/Modal';
 import { clearShopNotification } from '../../components/shopNotifications';
 import { useLanguage } from '../../context/LanguageContext';
+
+// ─── Order-age display (F18) ──────────────────────────────────────────────────
+// Kept local to this file — lib/format.ts is owned by a parallel group this
+// pass, so no shared helper is added there.
+
+/** Ticks every `intervalMs` so age labels stay roughly live without a timer
+ * per card — one interval shared by the whole page. */
+function useTicker(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function orderAgeMinutes(createdAt: string, now: number): number {
+  return Math.max(0, Math.floor((now - new Date(createdAt).getTime()) / 60_000));
+}
+
+function formatOrderAge(minutes: number, language: 'en' | 'hi'): string {
+  if (minutes < 1) return language === 'hi' ? 'अभी-अभी' : 'just now';
+  return language === 'hi' ? `${minutes} मिनट पहले` : `${minutes} min ago`;
+}
 
 // ─── New orders subpage ───────────────────────────────────────────────────────
 
@@ -43,12 +66,12 @@ function RejectDialog({
     <Modal
       open
       onClose={onCancel}
-      title={`Reject order #${order.order_no}`}
+      title={language === 'hi' ? `ऑर्डर #${order.order_no} अस्वीकार करें` : `Reject order #${order.order_no}`}
       size="sm"
       footer={
         <div className="flex gap-2">
           <Button variant="ghost" className="flex-1" disabled={busy} onClick={onCancel}>
-            Cancel
+            <span>{language === 'hi' ? 'रद्द करें' : 'Cancel'}</span>
           </Button>
           <Button
             variant="danger"
@@ -63,7 +86,9 @@ function RejectDialog({
       }
     >
       <p className="mb-4 text-sm text-ink/60">
-        Tick any items that are unavailable — they'll be marked out of stock automatically.
+        {language === 'hi'
+          ? 'जो आइटम उपलब्ध नहीं हैं उन्हें टिक करें — उन्हें अपने आप स्टॉक से बाहर कर दिया जाएगा।'
+          : "Tick any items that are unavailable — they'll be marked out of stock automatically."}
       </p>
       <div className="flex flex-col gap-2">
         {items.map((item) => (
@@ -96,7 +121,7 @@ function RejectDialog({
   );
 }
 
-function IncomingOrderCard({ order }: { order: Order }) {
+function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { language } = useLanguage();
@@ -120,7 +145,15 @@ function IncomingOrderCard({ order }: { order: Order }) {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not accept order.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'ऑर्डर स्वीकार नहीं हो सका।'
+            : 'Could not accept order.',
+        'error',
+      ),
   });
 
   const rejectMutation = useMutation({
@@ -136,19 +169,33 @@ function IncomingOrderCard({ order }: { order: Order }) {
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
       setShowRejectDialog(false);
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not reject order.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'ऑर्डर अस्वीकार नहीं हो सका।'
+            : 'Could not reject order.',
+        'error',
+      ),
   });
 
   const busy = acceptMutation.isPending || rejectMutation.isPending;
+  const minutesWaiting = orderAgeMinutes(order.created_at, now);
+  const ageClass = minutesWaiting >= 10 ? 'text-stamp' : minutesWaiting >= 5 ? 'text-turmeric-deep' : '';
 
   return (
     <>
       <Card className="p-4">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
-            <p className="font-bold text-ink">{order.student_name || 'Student'}</p>
+            <p className="font-bold text-ink">
+              {order.student_name || (language === 'hi' ? 'छात्र' : 'Student')}
+            </p>
             <p className="tabular font-display text-xs text-ink/50">
               #{order.order_no} · {formatTime(order.created_at)}
+              {' · '}
+              <span className={ageClass}>{formatOrderAge(minutesWaiting, language)}</span>
             </p>
           </div>
           <span className="tabular font-display text-sm font-semibold text-brand-dark">
@@ -158,7 +205,9 @@ function IncomingOrderCard({ order }: { order: Order }) {
 
         {lockedItems.length > 0 && (
           <div className="mb-3 flex flex-col gap-1.5 rounded-lg bg-ink/5 p-2.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">Already accepted</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">
+              {language === 'hi' ? 'पहले से स्वीकृत' : 'Already accepted'}
+            </p>
             {lockedItems.map((item) => (
               <div key={item.id} className="flex items-center justify-between text-sm text-ink/50">
                 <span>
@@ -173,7 +222,11 @@ function IncomingOrderCard({ order }: { order: Order }) {
         )}
 
         {pendingItems.length > 1 && (
-          <p className="mb-1.5 text-xs text-ink/50">Uncheck anything you're out of, then Accept the rest.</p>
+          <p className="mb-1.5 text-xs text-ink/50">
+            {language === 'hi'
+              ? 'जो खत्म हो गया है उसे अनचेक करें, फिर बाकी स्वीकारें — अनचेक किए गए आइटम अपने आप स्टॉक से बाहर कर दिए जाते हैं।'
+              : "Uncheck anything you're out of, then Accept the rest — unchecked items get marked out of stock."}
+          </p>
         )}
         <div className="mb-4 flex flex-col gap-2">
           {pendingItems.map((item) => (
@@ -281,6 +334,7 @@ function ItemStatusDots({ order }: { order: Order }) {
 }
 
 function InProgressOrderCard({ order, onOpenModal }: { order: Order; onOpenModal: (order: Order) => void }) {
+  const { language } = useLanguage();
   const activeItems = order.items.filter((i) => i.status !== 'rejected');
   const ready = isFullyReady(order) || order.status === 'awaiting_payment';
 
@@ -297,13 +351,18 @@ function InProgressOrderCard({ order, onOpenModal }: { order: Order; onOpenModal
           <div className="flex items-center gap-2">
             {ready && (
               <span className="shrink-0 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                Ready
+                {language === 'hi' ? 'तैयार' : 'Ready'}
               </span>
             )}
-            <p className="truncate font-bold text-ink">{order.student_name || 'Student'}</p>
+            <p className="truncate font-bold text-ink">
+              {order.student_name || (language === 'hi' ? 'छात्र' : 'Student')}
+            </p>
           </div>
           <p className="tabular mt-0.5 font-display text-xs text-ink/50">
-            #{order.order_no} · {activeItems.length} item{activeItems.length !== 1 ? 's' : ''}
+            #{order.order_no} ·{' '}
+            {language === 'hi'
+              ? `${activeItems.length} आइटम`
+              : `${activeItems.length} item${activeItems.length !== 1 ? 's' : ''}`}
           </p>
         </div>
         <span className="tabular shrink-0 font-display text-sm font-semibold text-brand-dark">
@@ -313,8 +372,101 @@ function InProgressOrderCard({ order, onOpenModal }: { order: Order; onOpenModal
 
       <ItemStatusDots order={order} />
 
-      <p className="mt-2 text-xs font-medium text-brand-dark/70">Tap to manage →</p>
+      <p className="mt-2 text-xs font-medium text-brand-dark/70">
+        {language === 'hi' ? 'प्रबंधित करने के लिए टैप करें →' : 'Tap to manage →'}
+      </p>
     </button>
+  );
+}
+
+// ─── Loading skeleton (F15) ───────────────────────────────────────────────────
+// Paper-toned bones shaped like the real cards, so the page doesn't reflow
+// once data lands. Local to this file, mirrors Card's own tokens.
+
+function OrderCardSkeleton() {
+  return (
+    <Card className="animate-soft-pulse p-4">
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-2">
+          <div className="h-4 w-28 rounded bg-ink/10" />
+          <div className="h-3 w-20 rounded bg-ink/10" />
+        </div>
+        <div className="h-4 w-14 rounded bg-ink/10" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="h-11 rounded-lg bg-ink/10" />
+        <div className="h-11 rounded-lg bg-ink/10" />
+      </div>
+    </Card>
+  );
+}
+
+function OrdersSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="h-11 animate-soft-pulse rounded-xl border border-edge bg-paper" />
+      <div className="flex flex-col gap-3">
+        <OrderCardSkeleton />
+        <OrderCardSkeleton />
+        <OrderCardSkeleton />
+      </div>
+    </div>
+  );
+}
+
+// ─── Subpage lists (shared between the phone tabs and the lg+ columns) ────────
+// Extracted once so F20's side-by-side tablet layout doesn't duplicate card
+// render logic against the phone's segmented-tab layout.
+
+function NewOrdersList({ incoming, now, language }: { incoming: Order[]; now: number; language: 'en' | 'hi' }) {
+  if (incoming.length === 0) {
+    return (
+      <EmptyState
+        title={language === 'hi' ? 'कोई नया ऑर्डर नहीं' : 'No new orders'}
+        hint={
+          language === 'hi'
+            ? 'नए ऑर्डर यहां दिखेंगे — स्वीकार या अस्वीकार करने के लिए।'
+            : 'New orders will appear here for you to accept or reject.'
+        }
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {incoming.map((order) => (
+        <IncomingOrderCard key={order.id} order={order} now={now} />
+      ))}
+    </div>
+  );
+}
+
+function InProgressList({
+  allInProgress,
+  onOpenModal,
+  language,
+}: {
+  allInProgress: Order[];
+  onOpenModal: (order: Order) => void;
+  language: 'en' | 'hi';
+}) {
+  if (allInProgress.length === 0) {
+    return (
+      <EmptyState
+        title={language === 'hi' ? 'प्रगति में कुछ नहीं' : 'Nothing in progress'}
+        hint={
+          language === 'hi'
+            ? 'स्वीकृत ऑर्डर यहां दिखेंगे। हैंडओवर और भुगतान प्रबंधित करने के लिए किसी ऑर्डर पर टैप करें।'
+            : 'Accepted orders appear here. Tap an order to manage handover and payment.'
+        }
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {allInProgress.map((order) => (
+        <InProgressOrderCard key={order.id} order={order} onOpenModal={onOpenModal} />
+      ))}
+    </div>
   );
 }
 
@@ -327,13 +479,14 @@ export function ShopOrdersPage() {
   const ordersQuery = useQuery({ queryKey: ['shop', 'orders'], queryFn: getShopOrders });
   const [subpage, setSubpage] = useState<Subpage>('new');
   const [modalOrder, setModalOrder] = useState<Order | null>(null);
+  const now = useTicker(30_000);
 
   // When the shopkeeper lands on this page, clear the notification dot.
   useEffect(() => {
     clearShopNotification();
   }, []);
 
-  if (ordersQuery.isLoading) return <FullPageSpinner />;
+  if (ordersQuery.isLoading) return <OrdersSkeleton />;
 
   // isError also fires after a failed *background* refetch, while data
   // still holds the last good response — only replace the screen with an
@@ -341,8 +494,14 @@ export function ShopOrdersPage() {
   if (ordersQuery.isError && ordersQuery.data === undefined) {
     return (
       <EmptyState
-        title="Couldn't load orders"
-        hint={ordersQuery.error instanceof ApiError ? ordersQuery.error.message : 'Please try again.'}
+        title={language === 'hi' ? 'ऑर्डर लोड नहीं हो सके' : "Couldn't load orders"}
+        hint={
+          ordersQuery.error instanceof ApiError
+            ? ordersQuery.error.message
+            : language === 'hi'
+              ? 'कृपया पुनः प्रयास करें।'
+              : 'Please try again.'
+        }
       />
     );
   }
@@ -366,8 +525,10 @@ export function ShopOrdersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Segmented control */}
-      <div className="flex rounded-xl border border-edge bg-paper p-1">
+      {/* Segmented control — phone / tablet-portrait only (below lg). At lg+
+          (768-1024px shopkeeper tablets and up) both lists fit side by side,
+          so plain column headers replace the tabs instead. */}
+      <div className="flex rounded-xl border border-edge bg-paper p-1 lg:hidden">
         <button
           type="button"
           id="tab-new-orders"
@@ -408,34 +569,39 @@ export function ShopOrdersPage() {
         </button>
       </div>
 
-      {/* Subpage content */}
-      {subpage === 'new' && (
-        <div className="flex flex-col gap-3">
-          {newCount === 0 ? (
-            <EmptyState
-              title="No new orders"
-              hint="New orders will appear here for you to accept or reject."
-            />
-          ) : (
-            incoming.map((order) => <IncomingOrderCard key={order.id} order={order} />)
-          )}
+      {/* Below lg: whichever subpage is active. At lg+: both columns, always —
+          each section's own class flips from "hidden below lg" to "always
+          visible" depending on whether it's the active tab, so a tablet in
+          landscape sees New + In-progress side by side regardless of subpage. */}
+      <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4">
+        <div className={subpage === 'new' ? 'flex flex-col gap-3' : 'hidden lg:flex lg:flex-col lg:gap-3'}>
+          <div className="hidden items-center gap-2 px-1 lg:flex">
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide text-ink/60">
+              {language === 'hi' ? 'नए ऑर्डर' : 'New orders'}
+            </h2>
+            {newCount > 0 && (
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-turmeric px-1 text-[10px] font-bold text-white">
+                {newCount}
+              </span>
+            )}
+          </div>
+          <NewOrdersList incoming={incoming} now={now} language={language} />
         </div>
-      )}
 
-      {subpage === 'inprogress' && (
-        <div className="flex flex-col gap-3">
-          {inProgressCount === 0 ? (
-            <EmptyState
-              title="Nothing in progress"
-              hint="Accepted orders appear here. Tap an order to manage handover and payment."
-            />
-          ) : (
-            allInProgress.map((order) => (
-              <InProgressOrderCard key={order.id} order={order} onOpenModal={setModalOrder} />
-            ))
-          )}
+        <div className={subpage === 'inprogress' ? 'flex flex-col gap-3' : 'hidden lg:flex lg:flex-col lg:gap-3'}>
+          <div className="hidden items-center gap-2 px-1 lg:flex">
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide text-ink/60">
+              {language === 'hi' ? 'प्रगति में' : 'In progress'}
+            </h2>
+            {inProgressCount > 0 && (
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-ink/15 px-1 text-[10px] font-bold text-ink/70">
+                {inProgressCount}
+              </span>
+            )}
+          </div>
+          <InProgressList allInProgress={allInProgress} onOpenModal={setModalOrder} language={language} />
         </div>
-      )}
+      </div>
 
       {/* Order modal — rendered outside the subpage so it survives subpage switches */}
       {modalOrder && (

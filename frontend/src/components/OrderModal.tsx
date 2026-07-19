@@ -38,7 +38,15 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
   const handoverMutation = useMutation({
     mutationFn: (qty: number) => handoverItem(order.id, item.id, qty),
     onSuccess: invalidate,
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not hand over item.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम सौंपा नहीं जा सका।'
+            : 'Could not hand over item.',
+        'error',
+      ),
   });
 
   const removeMutation = useMutation({
@@ -54,9 +62,17 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
     onSuccess: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
-      showToast('Item removed.', 'success');
+      showToast(language === 'hi' ? 'आइटम हटा दिया गया।' : 'Item removed.', 'success');
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not remove item.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम हटाया नहीं जा सका।'
+            : 'Could not remove item.',
+        'error',
+      ),
   });
 
   const busy = handoverMutation.isPending || removeMutation.isPending;
@@ -82,13 +98,17 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
             <OrderItemStatusBadge status={item.status} />
           </div>
           <p className="tabular mt-0.5 text-xs text-ink/50">
-            ready {item.allocated_qty}/{item.qty} · handed over {item.handed_qty}/{item.qty}
+            {language === 'hi'
+              ? `तैयार ${item.allocated_qty}/${item.qty} · सौंपा गया ${item.handed_qty}/${item.qty}`
+              : `ready ${item.allocated_qty}/${item.qty} · handed over ${item.handed_qty}/${item.qty}`}
           </p>
         </div>
       </div>
 
       {fullyHanded ? (
-        <p className="mt-2 text-sm font-semibold text-brand-dark">✓ Handed over</p>
+        <p className="mt-2 text-sm font-semibold text-brand-dark">
+          {language === 'hi' ? '✓ सौंप दिया गया' : '✓ Handed over'}
+        </p>
       ) : (
         <div className="mt-3 flex flex-col gap-2.5">
           {/* Cooking progress is read-only here — only the cook (Prep page)
@@ -106,7 +126,9 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
           {readyToGive > 0 ? (
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-ink/60">{readyToGive} ready</span>
+                <span className="text-xs font-semibold text-ink/60">
+                  {language === 'hi' ? `${readyToGive} तैयार` : `${readyToGive} ready`}
+                </span>
                 {readyToGive > 1 && (
                   <button
                     type="button"
@@ -114,7 +136,7 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
                     onClick={() => setGiveQty(readyToGive)}
                     className="rounded-md border border-edge px-1.5 py-0.5 text-[11px] font-semibold text-ink/60 transition hover:bg-ink/5 disabled:opacity-40"
                   >
-                    All
+                    {language === 'hi' ? 'सभी' : 'All'}
                   </button>
                 )}
               </div>
@@ -132,7 +154,11 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
             </div>
           ) : (
             stillToCook > 0 && (
-              <p className="text-xs italic text-ink/40">Waiting on the cook to mark this done.</p>
+              <p className="text-xs italic text-ink/40">
+                {language === 'hi'
+                  ? 'रसोइया द्वारा पूरा किए जाने की प्रतीक्षा है।'
+                  : 'Waiting on the cook to mark this done.'}
+              </p>
             )
           )}
 
@@ -151,10 +177,15 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
 
       <ConfirmDialog
         open={confirmingRemove}
-        title="Remove item?"
-        body={`Remove "${item.name}" from this order? Any prepared units go back to the pool.`}
-        confirmLabel="Remove"
-        checkboxLabel="Also mark out of stock"
+        title={language === 'hi' ? 'आइटम हटाएं?' : 'Remove item?'}
+        body={
+          language === 'hi'
+            ? `"${item.name}" को इस ऑर्डर से हटाएं? तैयार यूनिट वापस पूल में चली जाएंगी।`
+            : `Remove "${item.name}" from this order? Any prepared units go back to the pool.`
+        }
+        confirmLabel={language === 'hi' ? 'हटाएं' : 'Remove'}
+        cancelLabel={language === 'hi' ? 'रद्द करें' : 'Cancel'}
+        checkboxLabel={language === 'hi' ? 'स्टॉक से भी बाहर करें' : 'Also mark out of stock'}
         onCancel={() => setConfirmingRemove(false)}
         onConfirm={(alsoOutOfStock) => {
           setConfirmingRemove(false);
@@ -181,11 +212,21 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
       queryClient.invalidateQueries({ queryKey: ['shop', 'history'] });
-      showToast(`Order #${order.order_no} paid.`, 'success');
+      showToast(
+        language === 'hi' ? `ऑर्डर #${order.order_no} का भुगतान हो गया।` : `Order #${order.order_no} paid.`,
+        'success',
+      );
       onClose();
     },
     onError: (err) =>
-      showToast(err instanceof ApiError ? err.message : 'Could not collect payment.', 'error'),
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'भुगतान नहीं लिया जा सका।'
+            : 'Could not collect payment.',
+        'error',
+      ),
   });
 
   const cancelOrderMutation = useMutation({
@@ -193,10 +234,19 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shop', 'orders'] });
       queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
-      showToast(`Order #${order.order_no} cancelled.`, 'success');
+      showToast(
+        language === 'hi'
+          ? `ऑर्डर #${order.order_no} रद्द कर दिया गया।`
+          : `Order #${order.order_no} cancelled.`,
+        'success',
+      );
       onClose();
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not cancel order.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError ? err.message : language === 'hi' ? 'ऑर्डर रद्द नहीं हो सका।' : 'Could not cancel order.',
+        'error',
+      ),
   });
 
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -205,12 +255,18 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
     <Modal
       open
       onClose={onClose}
-      title={`#${order.order_no} · ${order.student_name || 'Student'}`}
-      subtitle={`${items.length} item${items.length === 1 ? '' : 's'} · ${formatPrice(order.total_price)}`}
+      title={`#${order.order_no} · ${order.student_name || (language === 'hi' ? 'छात्र' : 'Student')}`}
+      subtitle={
+        language === 'hi'
+          ? `${items.length} आइटम · ${formatPrice(order.total_price)}`
+          : `${items.length} item${items.length === 1 ? '' : 's'} · ${formatPrice(order.total_price)}`
+      }
       footer={
         <div className="flex flex-col gap-1.5">
           {!canCollect && (
-            <p className="text-center text-xs text-ink/50">Hand over every item to collect payment.</p>
+            <p className="text-center text-xs text-ink/50">
+              {language === 'hi' ? 'भुगतान लेने के लिए हर आइटम सौंपें।' : 'Hand over every item to collect payment.'}
+            </p>
           )}
           <Button
             size="lg"
@@ -246,9 +302,14 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
 
       <ConfirmDialog
         open={confirmingCancel}
-        title="Cancel this order?"
-        body={`Cancel order #${order.order_no}? Use this only if something unexpected came up — the student will be notified to reorder. This can't be undone.`}
-        confirmLabel="Cancel order"
+        title={language === 'hi' ? 'यह ऑर्डर रद्द करें?' : 'Cancel this order?'}
+        body={
+          language === 'hi'
+            ? `ऑर्डर #${order.order_no} रद्द करें? इसका उपयोग केवल किसी अप्रत्याशित स्थिति में करें — छात्र को दोबारा ऑर्डर करने की सूचना दी जाएगी। इसे वापस नहीं किया जा सकता।`
+            : `Cancel order #${order.order_no}? Use this only if something unexpected came up — the student will be notified to reorder. This can't be undone.`
+        }
+        confirmLabel={language === 'hi' ? 'ऑर्डर रद्द करें' : 'Cancel order'}
+        cancelLabel={language === 'hi' ? 'रद्द करें' : 'Cancel'}
         onCancel={() => setConfirmingCancel(false)}
         onConfirm={() => {
           setConfirmingCancel(false);

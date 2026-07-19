@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getPrep, markPrepDone } from '../../api/shop';
 import { ApiError } from '../../api/client';
@@ -7,7 +7,6 @@ import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
-import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -28,13 +27,38 @@ function PrepRow({ item }: { item: PrepItem }) {
     setSelected((prev) => Math.max(1, Math.min(prev, item.remaining_qty)));
   }, [item.remaining_qty]);
 
+  // F19: tick the tally digit when a successful Done lands and the count
+  // actually changes. expectTickRef is armed in the mutation's onSuccess and
+  // consumed the next time remaining_qty differs from what we last saw — that
+  // way an unrelated SSE-driven change to remaining_qty doesn't also "tick".
+  const prevRemainingRef = useRef(item.remaining_qty);
+  const expectTickRef = useRef(false);
+  const [ticked, setTicked] = useState(false);
+
+  useEffect(() => {
+    if (expectTickRef.current && item.remaining_qty !== prevRemainingRef.current) {
+      setTicked(true);
+      expectTickRef.current = false;
+    }
+    prevRemainingRef.current = item.remaining_qty;
+  }, [item.remaining_qty]);
+
   const doneMutation = useMutation({
     mutationFn: () => markPrepDone(item.menu_item_id, selected),
     onSuccess: () => {
+      expectTickRef.current = true;
       queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
       setSelected(1);
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not mark item done.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम पूर्ण के रूप में चिह्नित नहीं हो सका।'
+            : 'Could not mark item done.',
+        'error',
+      ),
   });
 
   return (
@@ -42,7 +66,12 @@ function PrepRow({ item }: { item: PrepItem }) {
       {/* The one chalkboard moment in the app — a kitchen prep board reads its
           "left to cook" tally in chalk, not brand-colored digits on paper. */}
       <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-md bg-ink">
-        <span className="tabular font-display text-3xl font-bold leading-none text-paper">
+        <span
+          onAnimationEnd={() => setTicked(false)}
+          className={`tabular font-display text-3xl font-bold leading-none text-paper ${
+            ticked ? 'animate-tick-pop' : ''
+          }`}
+        >
           {item.remaining_qty}
         </span>
       </div>
@@ -64,10 +93,63 @@ function PrepRow({ item }: { item: PrepItem }) {
   );
 }
 
+/** Chalkboard-style summary strip above the grid — same tally-block language
+ * (ink bg, paper mono digits) as PrepRow's own tally, extended into a header
+ * line rather than a new visual idea (F19). */
+function PrepSummaryStrip({ items, language }: { items: PrepItem[]; language: 'en' | 'hi' }) {
+  const totalUnits = items.reduce((sum, item) => sum + item.remaining_qty, 0);
+  const itemCount = items.length;
+  return (
+    <div className="mb-4 flex items-center gap-4 rounded-xl bg-ink px-4 py-3">
+      <span className="tabular font-display text-3xl font-bold leading-none text-paper">{totalUnits}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-paper/70">
+        {language === 'hi'
+          ? `${itemCount} आइटम में कुल ${totalUnits} यूनिट`
+          : `unit${totalUnits === 1 ? '' : 's'} across ${itemCount} item${itemCount === 1 ? '' : 's'}`}
+      </span>
+    </div>
+  );
+}
+
+// ─── Loading skeleton (F15) ───────────────────────────────────────────────────
+
+function PrepRowSkeleton() {
+  return (
+    <Card className="flex animate-soft-pulse items-center gap-4 p-4">
+      <div className="h-16 w-16 shrink-0 rounded-md bg-ink/10" />
+      <div className="flex flex-1 flex-col gap-2">
+        <div className="h-4 w-24 rounded bg-ink/10" />
+        <div className="h-3 w-16 rounded bg-ink/10" />
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-2">
+        <div className="h-9 w-24 rounded-lg bg-ink/10" />
+        <div className="h-9 w-24 rounded-lg bg-ink/10" />
+      </div>
+    </Card>
+  );
+}
+
+function PrepSkeleton() {
+  return (
+    <div>
+      <div className="mb-1 h-7 w-32 animate-soft-pulse rounded bg-ink/10" />
+      <div className="mb-5 h-4 w-56 animate-soft-pulse rounded bg-ink/10" />
+      <div className="mb-4 h-[60px] animate-soft-pulse rounded-xl bg-ink/10" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <PrepRowSkeleton />
+        <PrepRowSkeleton />
+        <PrepRowSkeleton />
+        <PrepRowSkeleton />
+      </div>
+    </div>
+  );
+}
+
 export function ShopPrepPage() {
+  const { language } = useLanguage();
   const prepQuery = useQuery({ queryKey: ['shop', 'prep'], queryFn: getPrep });
 
-  if (prepQuery.isLoading) return <FullPageSpinner />;
+  if (prepQuery.isLoading) return <PrepSkeleton />;
 
   // isError also fires after a failed *background* refetch, while data
   // still holds the last good response — only replace the screen with an
@@ -75,8 +157,14 @@ export function ShopPrepPage() {
   if (prepQuery.isError && prepQuery.data === undefined) {
     return (
       <EmptyState
-        title="Couldn't load the prep list"
-        hint={prepQuery.error instanceof ApiError ? prepQuery.error.message : 'Please try again.'}
+        title={language === 'hi' ? 'तैयारी सूची लोड नहीं हो सकी' : "Couldn't load the prep list"}
+        hint={
+          prepQuery.error instanceof ApiError
+            ? prepQuery.error.message
+            : language === 'hi'
+              ? 'कृपया पुनः प्रयास करें।'
+              : 'Please try again.'
+        }
       />
     );
   }
@@ -88,17 +176,31 @@ export function ShopPrepPage() {
 
   return (
     <div>
-      <h1 className="mb-1 font-display text-2xl font-bold tracking-tight text-ink">Prep list</h1>
-      <p className="mb-5 text-sm text-ink/60">Aggregate demand across all accepted orders.</p>
+      <h1 className="mb-1 font-display text-2xl font-bold tracking-tight text-ink">
+        {language === 'hi' ? 'तैयारी सूची' : 'Prep list'}
+      </h1>
+      <p className="mb-5 text-sm text-ink/60">
+        {language === 'hi' ? 'सभी स्वीकृत ऑर्डर की कुल मांग।' : 'Aggregate demand across all accepted orders.'}
+      </p>
 
       {items.length === 0 ? (
-        <EmptyState title="Nothing to prep" hint="All caught up — accepted orders will add items here." />
+        <EmptyState
+          title={language === 'hi' ? 'पकाने के लिए कुछ नहीं' : 'Nothing to prep'}
+          hint={
+            language === 'hi'
+              ? 'सब पूरा हो गया — स्वीकृत ऑर्डर यहां आइटम जोड़ेंगे।'
+              : 'All caught up — accepted orders will add items here.'
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {items.map((item) => (
-            <PrepRow key={item.menu_item_id} item={item} />
-          ))}
-        </div>
+        <>
+          <PrepSummaryStrip items={items} language={language} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {items.map((item) => (
+              <PrepRow key={item.menu_item_id} item={item} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
