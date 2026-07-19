@@ -54,11 +54,29 @@ func (c *Client) Messages() <-chan []byte {
 	return c.ch
 }
 
+// send delivers payload to c's channel. If it's full (a slow consumer not
+// draining fast enough), c is dropped and its channel closed instead of
+// silently discarding the event — otherwise the client wouldn't learn it
+// missed something until whatever future event happens to land after it
+// catches up, which could leave a stale screen up indefinitely. Closing the
+// channel ends the SSE handler's read loop immediately (its `msg, ok :=
+// <-client.Messages()` sees ok=false and returns), which the browser sees
+// as a closed connection and reconnects to — useSSE's onOpen then refetches
+// everything fresh, so a dropped client self-heals on its next event burst
+// rather than staying silently stale.
+//
+// Must be called with h.mu already held — every caller (sendToUser,
+// broadcastRole, broadcastAll) holds it for the whole fan-out loop. Deletes
+// from h.clients directly rather than calling the public Unregister method,
+// which would deadlock re-acquiring the same lock. Deleting the loop's
+// current map key mid-range is well-defined in Go (safe, no skipped/
+// re-visited entries), so this is safe to call from inside those loops.
 func (h *Hub) send(c *Client, payload []byte) {
 	select {
 	case c.ch <- payload:
 	default:
-		// slow consumer; drop rather than block the whole hub.
+		delete(h.clients, c)
+		close(c.ch)
 	}
 }
 
