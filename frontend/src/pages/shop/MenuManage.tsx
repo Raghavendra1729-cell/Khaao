@@ -512,7 +512,10 @@ export function ShopMenuManagePage() {
 
   if (menuQuery.isLoading) return <FullPageSpinner />;
 
-  if (menuQuery.isError) {
+  // isError also fires after a failed *background* refetch, while data
+  // still holds the last good response — only replace the screen with an
+  // error state if there's nothing cached to show instead (R25).
+  if (menuQuery.isError && menuQuery.data === undefined) {
     return (
       <EmptyState
         title="Couldn't load the menu"

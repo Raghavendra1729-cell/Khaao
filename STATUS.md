@@ -9,27 +9,32 @@
 ## Current state (2026-07-19)
 
 **2026-07-19: the entire R1–R24 review backlog from 2026-07-18 is
-implemented, verified, and now fully committed** (C-1 done). The R12–R24
-batch (32 files, ~3.6k insertions) that was sitting uncommitted went in as
-10 logical commits — `git log --oneline` from `08be195` through `b47e7a6`
-— split by R-item/coherent group (backend service-layer commits separated
-from frontend UI/tooling commits, signature-changing refactors like R14
-kept buildable at each commit). One extra fix not in the original R-list
-rode along: a TOCTOU race in the R8 menu-response cache (a read that
-started before a concurrent `invalidateCache()` could clobber it on
-write-back, serving pre-mutation data for a full TTL) — `08be195`, found
-during this session's review of the batch, not part of R1–R24.
+implemented, verified, and fully committed.** R1–R11 landed as one commit
+each; the R12–R24 batch landed as 10 logical commits (`08be195`…`b47e7a6`,
+including one extra fix found while reviewing the batch: a TOCTOU race in
+the R8 menu-response cache). Per-item detail lives in `git log`, per this
+file's charter.
 
-Re-verified clean 2026-07-19 on the now-committed tree (not just the old
-working copy): `go build ./... && go vet ./... && go test ./... -race` ✓ ·
-`golangci-lint run` 0 issues ✓ · `npx tsc -b --noEmit` ✓ ·
-`npm run lint` 0 errors ✓ · `npm test` 45/45 ✓ · `npm run build` ✓
-(index 247 KB raw, Firebase 155 KB lazy — unchanged from pre-commit).
+**R25 is now done too** — all six data pages (`student/Menu.tsx`,
+`student/OrderStatus.tsx`, `shop/Orders.tsx`, `shop/Prep.tsx`,
+`shop/History.tsx`, `shop/MenuManage.tsx`) gate their error UI on
+`isError && data === undefined`, so a failed *background* refetch no
+longer replaces a perfectly good cached screen with "Couldn't load" —
+only a genuine no-data failure does. Covered by a new
+`student/Menu.test.tsx` (2 tests: cached data survives a failed
+refetch; a real no-data failure still shows the error state) —
+verified the test actually catches the regression by reverting the
+fix locally and watching it fail, before restoring the fix. `npm test`
+now 47/47. **R26 is the next task.**
 
-A same-day review of the batch (before it was committed) found a small
-number of new follow-ups (§ 9: R25–R27) — none are launch blockers on the
-scale of the original P0s. **R25 is the next task.** After that, what's
-left is the Deployment milestone (D-1..D-7).
+Rechecked 2026-07-19 (second pass, clean tree) before R25: backend
+`go build ./... && go vet ./... && go test ./... -race` ✓ ·
+`golangci-lint run` 0 issues ✓ · frontend `npx tsc -b --noEmit` ✓ ·
+`npm run lint` 0 errors ✓ · `npm build` ✓ (index 247 KB raw, Firebase
+155 KB lazy — unchanged by R25). After R26–R27 and the § 9 pre-deploy
+gate, the only remaining milestone is Deployment (D-1..D-7) —
+`deploy/RUNBOOK.md` is the step-by-step guide, and most of it needs a
+human with domain/server/dashboard access, not an agent.
 
 The entire pre-2026-07-15 backlog from the previous session's handoff is
 **done, live-verified, and committed**. Everything in § 8 plus everything
@@ -334,16 +339,17 @@ endpoints, state machines). Added since that doc was written:
 > lowest priority — evaluate every change on a 375px viewport first, and
 > follow § 9.1 (mobile design rules) for anything that touches the frontend.
 
-C-1 (commit the R12–R24 batch) is **done** — see Current state above for
-the commit range. Start at R25.
+The R1–R24 backlog and its commit (C-1) are **done**, and so is R25 — see
+Current state. What remains, in order: two small follow-ups (R26–R27),
+then the pre-deploy gate, then the Deployment milestone.
 
 ### Backlog
 
 | # | Priority | What | Detail |
 |---|---|---|---|
-| R25 | **P1** | **`isError` hides cached data on failed background refetch** | All six data pages (`student/Menu.tsx:242`, `student/OrderStatus.tsx:288`, `shop/Orders.tsx:359`, `shop/Prep.tsx:72`, `shop/History.tsx:45`, `shop/MenuManage.tsx:515`) do `if (query.isError) return <EmptyState …>`. TanStack Query sets `isError` after a failed **background refetch** too, while `query.data` still holds the last good response — so on flaky campus Wi-Fi (the exact scenario R3/R17 target) a perfectly renderable cached screen gets replaced by "Couldn't load". Fix: gate the error UI on `query.isError && query.data === undefined`; with cached data, render it (the R17 offline banner already communicates the degraded state). Add a vitest for the Menu case (cached data + refetch failure → menu still rendered). This completes R17's "let TanStack keep showing the last cached menu — verify" step, which the batch asserted but didn't actually verify. |
 | R26 | **P3** | **Finish the Prettier adoption** | `.prettierrc.json`/`.prettierignore` and the `format`/`format:check` scripts exist, but `npm run format:check` currently fails on **27 files** (never ran `--write`) and CI doesn't enforce it — a half-adopted formatter is drift waiting to happen. Run `npm run format`, eyeball the diff (formatting only), commit it separately from everything else, then add `npm run format:check` to the frontend CI job. |
 | R27 | **P3** | **`ConfirmDialog`'s `busy` prop is dead at every call site** | Every `onConfirm` handler does `setConfirming(false); mutation.mutate()` — the dialog is gone before `isPending` can ever render, so `busy={mutation.isPending}` never shows. Either keep the dialog open until the mutation settles (close in `onSuccess`/`onError`, letting `busy` disable double-taps) or drop the prop. Cosmetic; failures already surface via toast. |
+| GATE | **after R27** | **Pre-deploy verification gate** | The "code done" line before anyone touches infrastructure. (1) Full § 6 suite green. (2) `scripts/smoke.sh` live against local Postgres — full golden-path lifecycle (mind § 10's orphaned-process lesson if `dropdb` complains). (3) Integration suite against real Postgres: `TEST_DATABASE_URL=… go test -tags=integration -p 1 ./... -race`. (4) Optional but recommended: scale `scripts/loadtest.js` toward the § 1 rush-hour numbers per `scripts/loadtest.md` — it has only ever run at smoke scale (15–32 VUs). (5) CI green on `main`. After this gate, code changes should only come from real-device findings during D-6. |
 
 **Caveats worth knowing from the R12–R24 batch (recorded, not tasks):**
 
@@ -423,19 +429,27 @@ a phone or counter tablet. These are standing rules, not suggestions:
 12. **Orientation:** never lock it — the manifest deliberately has no
     `orientation` key (R18); shopkeeper tablets go landscape.
 
-### Deployment (deferred milestone — needs real infra, not just code)
+### Deployment (the remaining milestone — needs real infra, not just code)
 
-**Artifacts ready and committed:** `deploy/Caddyfile` (tool-validated with `caddy validate`), `deploy/khaao-backend.service`, `deploy/RUNBOOK.md` — a config-and-runbook head start for D-3 through D-6 below. Still needs a human with actual server/domain/dashboard access to execute.
+**`deploy/RUNBOOK.md` is the expanded, step-by-step version of this table**
+(each D-item maps to a runbook section) — follow it, don't re-derive.
+Artifacts ready and committed: `deploy/Caddyfile` (tool-validated with
+`caddy validate`), `deploy/khaao-backend.service`, `deploy/RUNBOOK.md`.
+**Agent/human split:** almost everything below needs a human with
+domain/server/dashboard access. An agent's useful roles here are (a) pair
+on D-4/D-5 config and debugging once the human has access set up, (b)
+verify D-6 findings and fix anything they surface, (c) keep this table and
+the runbook in sync with reality as steps complete.
 
 | # | What | Notes |
 |---|---|---|
-| D-1 | **Provision managed Postgres** | Supabase/Neon/Railway/cloud provider. Daily backups, test a restore. Confirm `citext` extension available. |
-| D-2 | **Firebase setup** | Enable Google sign-in → **add authorized domains** (the #1 launch gotcha — sign-in silently fails on an unauthorized domain). |
-| ~~D-3~~ | ~~Cloudinary account check~~ | **Done (2026-07-15).** Live-verified via a direct signed-upload test against Cloudinary's API. Current `backend/.env` (cloud `r2avfle3`) is a working Programmable Media account. |
-| D-4 | **Deploy backend** | One instance (replicas=1 enforced). Raise `ulimit -n`. Caddy/nginx in front, `proxy_buffering off` on `/api/stream`, long read timeout for SSE. |
-| D-5 | **Deploy frontend** | Static host (Netlify/Vercel/Cloudflare Pages), `VITE_FIREBASE_*` set at build time. |
-| D-6 | **End-to-end production verification** | One real student + one real shopkeeper account complete a full order lifecycle on production. **Must include real-device checks from the § 9 review:** (R4) Google sign-in *inside* the installed PWA on iOS and Android — not just in the browser tab; (R5) the "ready" moment on a locked/backgrounded phone (push arrives, notification shows); CSP console check per § 11.5 (no "Refused to …" errors during login or photo upload). |
-| D-7 | **Runbook** | How to: rotate `JWT_SECRET`, add/remove a shopkeeper, restore a backup, check logs. |
+| D-1 | **Provision managed Postgres** | Runbook § 1. Supabase/Neon/Railway. Daily backups on from day one, test a restore *before* go-live. Confirm `citext` available. `?sslmode=require`. |
+| D-2 | **Firebase setup** | Runbook § 2. Enable Google sign-in → **add authorized domains** (the #1 launch gotcha — sign-in silently fails on an unauthorized domain, and R4's redirect flow depends on it too). |
+| ~~D-3~~ | ~~Cloudinary account check~~ | **Done (2026-07-15).** Live-verified via a direct signed-upload test against Cloudinary's API. Current `backend/.env` (cloud `r2avfle3`) is a working Programmable Media account. **Never regenerate the credentials** (§ 5). |
+| D-4 | **Deploy backend** | Runbook § 4 + § 6. ONE instance (replicas=1 enforced). Raise `ulimit -n` (the systemd unit's `LimitNOFILE` covers it). Caddy in front: `proxy_buffering off` on `/api/stream`, long SSE read timeout — the committed Caddyfile already encodes this. `APP_ENV=production` (fail-closed config validates the rest). |
+| D-5 | **Deploy frontend** | Runbook § 5. Static host (Netlify/Vercel/Cloudflare Pages), `VITE_FIREBASE_*` set at build time. |
+| D-6 | **End-to-end production verification** | Runbook § 7. One real student + one real shopkeeper complete a full order lifecycle on production. **Must include the real-device checks:** (R4) Google sign-in *inside* the installed PWA on iOS and Android — not just in a browser tab (iOS standalone has separate storage, so this is the only place the redirect flow is truly exercised); (R5) the "ready" moment on a locked/backgrounded phone — push arrives, SW notification shows, chime plays after first-touch unlock; CSP console check per § 11.5 (no "Refused to …" errors during real Firebase login or Cloudinary photo upload — the CSP has never been exercised against the real providers). |
+| D-7 | **Runbook for ongoing ops** | **Written** — Runbook § 8 covers rotate `JWT_SECRET`, add/remove a shopkeeper, check logs, restore a backup. Remaining: validate the steps against the real deployment during/after D-6 (a runbook that's never been executed is a draft). |
 
 ---
 

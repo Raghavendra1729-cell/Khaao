@@ -356,7 +356,10 @@ export function ShopOrdersPage() {
 
   if (ordersQuery.isLoading) return <FullPageSpinner />;
 
-  if (ordersQuery.isError) {
+  // isError also fires after a failed *background* refetch, while data
+  // still holds the last good response — only replace the screen with an
+  // error state if there's nothing cached to show instead (R25).
+  if (ordersQuery.isError && ordersQuery.data === undefined) {
     return (
       <EmptyState
         title="Couldn't load orders"

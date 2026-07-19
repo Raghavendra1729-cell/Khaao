@@ -285,7 +285,10 @@ export function OrderStatusPage() {
 
   if (activeOrderQuery.isLoading || historyQuery.isLoading) return <FullPageSpinner />;
 
-  if (activeOrderQuery.isError) {
+  // isError also fires after a failed *background* refetch, while data
+  // still holds the last good response — only replace the screen with an
+  // error state if there's nothing cached to show instead (R25).
+  if (activeOrderQuery.isError && activeOrderQuery.data === undefined) {
     const err = activeOrderQuery.error;
     return (
       <EmptyState
