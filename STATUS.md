@@ -6,7 +6,38 @@
 > a descriptive message) — this file only tracks the *current* picture, not a
 > session-by-session diary.
 
-## Current state (2026-07-19)
+## Current state (2026-07-20)
+
+**2026-07-20: the § 9.2 F-series design-polish backlog (F1–F24) is fully
+implemented, reviewed, and committed.** Executed as five parallel agents in
+isolated git worktrees, one per disjoint file-ownership group (student Menu
+surface; Order Status/ready-moment; shop Orders/Prep/OrderModal/Layout; shop
+History/MenuManage; shared components + Login + PWA meta) — each briefed
+with the exact F-items and files in scope, each self-verified against the
+tsc/lint/test/build gate, each reviewed diff-by-diff before merging (not
+just trusted on their self-report). All five merged clean, no conflicts.
+Two real issues surfaced in review and were fixed directly rather than sent
+back: `ConfirmDialog`'s Hindi-paired defaults were correctly gated on
+`user.role === 'shopkeeper'` (not just `language`) by the implementing
+agent itself, catching a real leak-into-student-session bug on a shared
+device before it shipped; a narrower timing gap in `InstallPrompt`'s
+iOS-hint announcement (computed inside a mount effect, one render-tick too
+late for `PushNotificationSetup`'s F9 coordination check to see it on a
+fresh iOS visit) was caught in review and fixed by making the check
+synchronous. A final integration pass then closed out the remaining items
+that don't belong to any one file-group: F22 (Modal focus trap — every
+overlay in the app routes through this one component), F16 (wired quiet
+ink-line glyphs into the four highest-traffic empty states), F24 (the one
+still-dead keyframe, `animate-status-in`, now drives history-card entrances
+— zero dead animation tokens left), plus one Hindi-pairing miss (the
+MenuManage page header) spotted during review. Gate on the fully merged
+tree: `tsc -b --noEmit` clean, `npm run lint` 0 errors (23 pre-existing
+warnings, none new), `npm test` 53/53, `npm run build` succeeds at 249.37 KB
+raw initial student JS (still under the ~250 KB do-not-regress line from
+R24, though it's now snug — see § 9.1.8 before adding more to the eager
+bundle). § 9.2 below is left as a historical record of the plan; nothing
+further is pending from it. **The only remaining milestone is Deployment
+(D-1..D-7)** — see below, human-led.
 
 **2026-07-19: the entire R1–R24 review backlog from 2026-07-18 is
 implemented, verified, and fully committed.** R1–R11 landed as one commit
@@ -391,25 +422,25 @@ endpoints, state machines). Added since that doc was written:
 
 ---
 
-## 9. What's LEFT (2026-07-19, next agent starts here)
+## 9. What's LEFT (2026-07-20, next agent starts here)
 
-**Everything code-side is done.** R1–R31 (the full 2026-07-18 review
-backlog plus the 2026-07-19 third-pass follow-ups) are implemented,
-tested, and committed — see Current state for the detail and commit
-range. The pre-deploy GATE has run clean: § 6 suite green,
+**Everything code-side is done, including the design pass.** R1–R31 (the
+full 2026-07-18 review backlog plus the 2026-07-19 third-pass follow-ups)
+and F1–F24 (the 2026-07-20 § 9.2 frontend design-polish backlog) are all
+implemented, tested, and committed — see Current state for the detail and
+commit range. The pre-deploy GATE has run clean: § 6 suite green,
 `scripts/smoke.sh` 15/15, the real-Postgres integration suite green,
 `scripts/loadtest.js` green at smoke scale (after fixing two bugs in
 the script itself — see Current state), and CI green on `main`.
 
-**Two milestones remain: the § 9.2 frontend design-polish backlog
-(F-series — code work an agent can do now) and Deployment (D-1..D-7 —
-human-led).** If you're an agent picking this up: read § 9.1 (mobile
-design rules) before touching ANY frontend file, then work § 9.2 in
-its stated order. Beyond those two lists, don't start a new backlog
-here — new work items only get added when D-6 real-device testing
-actually surfaces something. (The F-series was authorized by the
-project owner on 2026-07-19 as a deliberate design pass; it is the
-one sanctioned exception to the earlier "no new backlog" rule.)
+**The only thing left is Deployment (D-1..D-7) below** — a human/agent
+pairing task needing real infra access, not more code. If you're an
+agent picking this up: read § 9.1 (mobile design rules) before touching
+ANY frontend file even for a deployment-driven fix, and don't start a
+new backlog here — real work items only get added when D-6 real-device
+testing actually surfaces something. § 9.2 is kept below as a historical
+record of the design pass (per-file verdicts, what shipped) — there is
+nothing actionable left in it.
 
 **Caveats worth knowing from the R12–R24 batch (recorded, not tasks):**
 
@@ -489,7 +520,14 @@ a phone or counter tablet. These are standing rules, not suggestions:
 12. **Orientation:** never lock it — the manifest deliberately has no
     `orientation` key (R18); shopkeeper tablets go landscape.
 
-### 9.2 Frontend design-polish backlog (F-series) — added 2026-07-19
+### 9.2 Frontend design-polish backlog (F-series) — added 2026-07-19, **DONE 2026-07-20**
+
+**Status: complete.** F1–F24 all implemented, reviewed file-by-file, and
+committed — see Current state (2026-07-20) for how it was executed (five
+parallel worktree agents by file-ownership group, each diff reviewed
+before merging) and the final gate numbers. Kept below verbatim as the
+historical plan/spec, including the per-file verdict table — nothing here
+is an open task anymore.
 
 Authorized by the project owner: make both faces of the app — the
 student PWA and the shopkeeper counter tool — genuinely beautiful,
