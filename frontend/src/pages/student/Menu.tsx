@@ -11,13 +11,13 @@ import { deriveCartEntries, staleCartIds } from '../../lib/cart';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
-import { FullPageSpinner } from '../../components/Spinner';
 import { useToast } from '../../components/Toast';
 import { Modal } from '../../components/Modal';
 
 import { TrendingRail } from '../../components/TrendingRail';
 import { DietFilter, type DietFilterValue } from '../../components/DietFilter';
 import { MenuItemCard } from '../../components/MenuItemCard';
+import { MenuSkeleton } from '../../components/MenuSkeleton';
 
 const CART_STORAGE_KEY = 'khaao_cart_v2';
 
@@ -32,6 +32,15 @@ interface StoredCart {
 function todayKey(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function prefersReducedMotion(): boolean {
+  // Optional chaining, matching lib/firebase.ts's pattern — jsdom (tests) and
+  // some older webviews don't implement matchMedia at all (§ 9.1.9: feature-
+  // detect everything).
+  return Boolean(
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+  );
 }
 
 function loadStoredCart(): Record<number, number> {
@@ -127,6 +136,13 @@ export function Menu() {
       queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
       showToast('Order placed — track it on Order status.', 'success');
       navigate('/order');
+      // F10: was inside the Place-order click, landing the native permission
+      // dialog at the same instant as submit + navigation. Ask only once the
+      // order actually exists, after the student has already landed on
+      // Order status.
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
     },
     onError: (err) => {
       showToast(err instanceof ApiError ? err.message : 'Could not submit your order.', 'error');
@@ -205,12 +221,24 @@ export function Menu() {
     return list;
   }, [categories, filteredItems]);
 
+  // Split from the observer effect below (F7): this one only ever needs to
+  // run when the category list itself changes (e.g. the diet filter drops a
+  // category out from under the current selection). A functional update
+  // means it doesn't need to read `activeCategory` from render scope, so it
+  // doesn't need it as a dependency either.
   useEffect(() => {
     if (allCategories.length === 0) return;
+    setActiveCategory((prev) =>
+      prev && allCategories.some((c) => c.name === prev) ? prev : allCategories[0].name,
+    );
+  }, [allCategories]);
 
-    if (!activeCategory || !allCategories.some((c) => c.name === activeCategory)) {
-      setActiveCategory(allCategories[0].name);
-    }
+  // The scroll-spy observer. Deliberately keyed only on `allCategories` — it
+  // also *sets* activeCategory from its own callback, so listing
+  // activeCategory as a dependency here would tear the observer down and
+  // rebuild it on every single scroll transition (F7).
+  useEffect(() => {
+    if (allCategories.length === 0) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -231,16 +259,31 @@ export function Menu() {
     });
 
     return () => observer.disconnect();
-  }, [allCategories, activeCategory]);
+  }, [allCategories]);
+
+  // Keep the highlighted chip visible inside its own horizontal scroll
+  // strip as the active category changes on long menus (F7).
+  useEffect(() => {
+    if (!activeCategory) return;
+    const chip = document.getElementById(`chip-${activeCategory}`);
+    // jsdom (tests) doesn't implement scrollIntoView at all — feature-detect
+    // rather than assume (§ 9.1.9).
+    if (!chip || typeof chip.scrollIntoView !== 'function') return;
+    chip.scrollIntoView({
+      inline: 'nearest',
+      block: 'nearest',
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    });
+  }, [activeCategory]);
 
   const scrollToCategory = (name: string) => {
     const element = document.getElementById(`category-${name}`);
     if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
+      element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
     }
   };
 
-  if (menuQuery.isLoading || shopStatusQuery.isLoading) return <FullPageSpinner />;
+  if (menuQuery.isLoading || shopStatusQuery.isLoading) return <MenuSkeleton />;
 
   // isError also fires after a failed *background* refetch, while data
   // still holds the last good response — only replace the screen with an
@@ -314,15 +357,21 @@ export function Menu() {
           ) : (
             <>
               {allCategories.length > 0 && (
-                <div className="sticky top-14 z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
+                // F1: top-14 alone ignores the notch inset the header already
+                // respects via pt-safe — this bar would slide under it in
+                // installed-PWA standalone mode on a notched iPhone.
+                <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
                   {allCategories.map((cat) => {
                     const isActive = activeCategory === cat.name;
                     return (
                       <button
                         key={cat.name}
+                        id={`chip-${cat.name}`}
                         type="button"
                         onClick={() => scrollToCategory(cat.name)}
-                        className={`shrink-0 rounded-full border px-3.5 py-1 text-xs font-semibold uppercase tracking-wider transition ${
+                        // F2: visual chip stays compact; the invisible
+                        // ::before expands the real hit target to >=44px.
+                        className={`relative shrink-0 rounded-full border px-3.5 py-1 text-xs font-semibold uppercase tracking-wider transition before:absolute before:-inset-3 before:content-[''] ${
                           isActive
                             ? 'bg-brand text-white border-brand shadow-sm'
                             : 'bg-paper text-ink/75 border-edge hover:bg-edge/40'
@@ -369,10 +418,18 @@ export function Menu() {
         </>
       )}
 
-      {cartCount > 0 && !hasActiveOrder && !showCheckout && isShopOpen && (
-        <div
-          className="fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-50 border-t border-edge bg-paper/95 px-4 py-3 backdrop-blur cursor-pointer hover:bg-paper"
+      {/* F6: the whole bar is one real <button> now (was a clickable <div>
+          nesting a <Button> that stopPropagation()'d to do the same thing —
+          not keyboard reachable, no role, invalid nesting once you think
+          about it as a button-in-button). Not gated on isShopOpen anymore
+          either: if the shop pauses/closes with items sitting in the cart,
+          the student can still open it and see what they picked — the Modal
+          below already disables "Place order" while the shop isn't open. */}
+      {cartCount > 0 && !hasActiveOrder && !showCheckout && (
+        <button
+          type="button"
           onClick={() => setShowCheckout(true)}
+          className="animate-slide-up fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+56px)] z-50 w-full border-t border-edge bg-paper/95 px-4 py-3 text-left backdrop-blur transition hover:bg-paper active:bg-edge/40"
         >
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
             <div>
@@ -383,18 +440,11 @@ export function Menu() {
                 {formatPrice(cartTotal)}
               </p>
             </div>
-            <Button
-              size="lg"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowCheckout(true);
-              }}
-            >
+            <span className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-brand px-6 py-3.5 text-lg font-semibold text-white shadow-sm">
               View cart
-            </Button>
+            </span>
           </div>
-        </div>
+        </button>
       )}
 
       {showCheckout && (
@@ -402,6 +452,17 @@ export function Menu() {
           open
           onClose={() => setShowCheckout(false)}
           title="Your order"
+          // F6: the cart bar can now open this Modal even while the shop
+          // isn't open (view-only), so the disabled "Place order" button
+          // below is reachable in a state that used to be impossible — spell
+          // out why it's disabled instead of leaving a mute button.
+          subtitle={
+            !isShopOpen
+              ? shopStatus.state === 'paused'
+                ? `On a break — back at ${formatTime(shopStatus.reopen_at) || '--:--'}. You can still review your cart.`
+                : 'The canteen is closed — no new orders right now. You can still review your cart.'
+              : undefined
+          }
           footer={
             <>
               <div className="mb-4 flex items-center justify-between">
@@ -415,12 +476,7 @@ export function Menu() {
                 fullWidth
                 loading={submitMutation.isPending}
                 disabled={!isShopOpen}
-                onClick={() => {
-                  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                    void Notification.requestPermission();
-                  }
-                  submitMutation.mutate();
-                }}
+                onClick={() => submitMutation.mutate()}
               >
                 Place order
               </Button>
