@@ -41,7 +41,7 @@ export function MenuItemCard({
         dimmed ? 'opacity-70' : ''
       }`}
     >
-      {item.photo_url && (
+      {item.photo_url ? (
         <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-edge">
           <img
             src={cloudinaryThumb(item.photo_url, 128) ?? undefined}
@@ -49,6 +49,13 @@ export function MenuItemCard({
             className="h-full w-full object-cover"
             loading="lazy"
           />
+        </div>
+      ) : (
+        // Same kraft-initial placeholder as TrendingRail's no-photo fallback,
+        // sized to this card's h-16 w-16 slot, so rows keep their rhythm
+        // instead of losing the image column entirely.
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-edge bg-steel/40 font-display text-xl font-bold text-ink/25">
+          {item.name.slice(0, 1).toUpperCase()}
         </div>
       )}
 
