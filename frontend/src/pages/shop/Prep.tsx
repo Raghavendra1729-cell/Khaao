@@ -7,6 +7,7 @@ import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
+import { ColdFlameIcon } from '../../components/EmptyStateIcons';
 import { useToast } from '../../components/Toast';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -185,6 +186,7 @@ export function ShopPrepPage() {
 
       {items.length === 0 ? (
         <EmptyState
+          icon={<ColdFlameIcon />}
           title={language === 'hi' ? 'पकाने के लिए कुछ नहीं' : 'Nothing to prep'}
           hint={
             language === 'hi'

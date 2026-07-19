@@ -11,6 +11,7 @@ import { deriveCartEntries, staleCartIds } from '../../lib/cart';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
+import { EmptyPlateIcon } from '../../components/EmptyStateIcons';
 import { useToast } from '../../components/Toast';
 import { Modal } from '../../components/Modal';
 
@@ -331,6 +332,7 @@ export function Menu() {
 
       {items.length === 0 ? (
         <EmptyState
+          icon={<EmptyPlateIcon />}
           title="No items on the menu right now"
           hint="Check back soon — the canteen updates this list throughout the day."
         />

@@ -7,6 +7,7 @@ import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
+import { EmptyTicketIcon } from '../../components/EmptyStateIcons';
 import { useToast } from '../../components/Toast';
 import { OrderModal } from '../../components/OrderModal';
 import { Modal } from '../../components/Modal';
@@ -422,6 +423,7 @@ function NewOrdersList({ incoming, now, language }: { incoming: Order[]; now: nu
   if (incoming.length === 0) {
     return (
       <EmptyState
+        icon={<EmptyTicketIcon />}
         title={language === 'hi' ? 'कोई नया ऑर्डर नहीं' : 'No new orders'}
         hint={
           language === 'hi'

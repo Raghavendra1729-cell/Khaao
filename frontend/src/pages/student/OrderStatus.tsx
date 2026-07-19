@@ -14,6 +14,7 @@ import {
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
+import { LedgerLineIcon } from '../../components/EmptyStateIcons';
 import { OrderTicket } from '../../components/OrderTicket';
 import { StatusStamps } from '../../components/StatusStamps';
 import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/StatusBadge';
@@ -298,7 +299,13 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
   const past = orders.filter((o) => o.id !== activeOrderId);
 
   if (past.length === 0) {
-    return <EmptyState title="No past orders yet" hint="Your order history will show up here." />;
+    return (
+      <EmptyState
+        icon={<LedgerLineIcon />}
+        title="No past orders yet"
+        hint="Your order history will show up here."
+      />
+    );
   }
 
   return (
@@ -306,7 +313,7 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
       {past.map((order) => {
         const hint = historyStatusHint(order.status);
         return (
-          <Card key={order.id} className="p-4">
+          <Card key={order.id} className="animate-status-in p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-bold text-ink">Token #{order.order_no}</p>
