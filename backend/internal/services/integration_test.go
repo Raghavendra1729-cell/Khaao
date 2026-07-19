@@ -199,8 +199,8 @@ func TestIntegration_ConcurrentOrderCreate_OnlyOneActiveOrderSurvives(t *testing
 	successes := 0
 	conflicts := 0
 	for _, err := range []error{err1, err2} {
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			successes++
 		default:
 			if appErr, ok := err.(*services.AppError); ok && appErr.Status == 409 {
@@ -472,5 +472,123 @@ func TestIntegration_ExpiryTick_ExpiresAndReallocatesFCFS(t *testing.T) {
 	}
 	if got := pool[mi.ID]; got != 1 {
 		t.Errorf("expected 1 leftover unit in pool (2 returned - 1 re-consumed), got %d", got)
+	}
+}
+
+// TestIntegration_ConcurrentAcceptAndSetPaused_CheckNeverMissesConcurrentAccept
+// is the real-DB proof behind R14's fix: ShopStatusService.Set's
+// accepted-order check and its save now happen inside one uow.WithTx, taking
+// the same Postgres advisory lock every PoolEngine mutation (including
+// Accept) takes — so Set's check-then-save can no longer straddle a
+// concurrent Accept that commits in the gap between them.
+//
+// Before the fix, CountAccepted() and the subsequent Save() were two
+// separate, lock-free calls: a concurrent Accept could run to completion
+// entirely inside that gap, so the check's "0 accepted" result would already
+// be stale by the time Save() unconditionally persisted "paused" — leaving
+// the shop paused with an accepted order the check never saw. After the
+// fix, whichever of Set's transaction or Accept's transaction acquires the
+// advisory lock first runs to completion before the other starts, so there
+// is no gap left for this to happen in: either Accept has already fully
+// committed before Set's check runs (Set must then see it and 409), or
+// Accept hasn't started at all when Set's transaction commits (in which
+// case it's a legitimate subsequent event, not a check that missed
+// something happening concurrently underneath it).
+//
+// Run as a stress loop (fresh order/user each trial) rather than a single
+// shot, since which side wins the real lock race is not something a test
+// can force — repeating it samples different interleavings across trials.
+// The one outcome pair that must never appear is (Set succeeds, Accept
+// succeeds via an accept that had already committed before Set's check ran)
+// — that specific case is unreachable given the lock, and every trial's
+// outcome must be internally self-consistent (see assertions below).
+func TestIntegration_ConcurrentAcceptAndSetPaused_CheckNeverMissesConcurrentAccept(t *testing.T) {
+	db := openIntegrationDB(t)
+	repos := newIntegrationRepos(db)
+	cfg := &config.Config{HoldMinutes: 15, BusinessTimezone: "Asia/Kolkata"}
+	hub := realtime.NewHub()
+
+	engine := newIntegrationEngine(repos, cfg)
+	statusSvc := services.NewShopStatusService(repos.statusRepo, repos.orderRepo, repos.uow, hub)
+	statusSvc.SetPool(engine)
+
+	mi := seedIntegrationMenuItem(t, db, "Race Vada Pav", 1500)
+	ctx := context.Background()
+
+	const trials = 15
+	for i := 0; i < trials; i++ {
+		// Reset the shop to open before each trial (Set(paused) is a no-op
+		// success if it's already paused, which would break the outcome
+		// bookkeeping below). Upsert since the singleton row doesn't exist
+		// until the first-ever Set() call creates it.
+		if err := db.Exec(`INSERT INTO shop_statuses (id, state, reopen_at, updated_at)
+			VALUES (1, 'open', NULL, now())
+			ON CONFLICT (id) DO UPDATE SET state = 'open', reopen_at = NULL`).Error; err != nil {
+			t.Fatalf("trial %d: reset shop status: %v", i, err)
+		}
+
+		student := seedIntegrationUser(t, db, fmt.Sprintf("pause-race-%d@sst.scaler.com", i))
+		order, err := engine.CreateOrder(ctx, student.ID, []services.OrderItemInput{{MenuItemID: mi.ID, Qty: 1}})
+		if err != nil {
+			t.Fatalf("trial %d: setup CreateOrder: %v", i, err)
+		}
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var acceptErr, setErr error
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, acceptErr = engine.Accept(ctx, order.ID, nil)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, setErr = statusSvc.Set(ctx, "paused", nil)
+		}()
+		close(start)
+		wg.Wait()
+
+		acceptOK := acceptErr == nil
+		setOK := setErr == nil
+
+		if !acceptOK {
+			if appErr, ok := acceptErr.(*services.AppError); !ok || appErr.Status != 409 {
+				t.Fatalf("trial %d: unexpected Accept error: %v", i, acceptErr)
+			}
+		}
+		if !setOK {
+			if appErr, ok := setErr.(*services.AppError); !ok || appErr.Status != 409 {
+				t.Fatalf("trial %d: unexpected Set error: %v", i, setErr)
+			}
+			// Set can only fail because it saw an accepted order — which
+			// means Accept must have won the race and succeeded.
+			if !acceptOK {
+				t.Fatalf("trial %d: Set failed with 409 but Accept also failed (%v) — nothing should have been accepted for Set to see", i, acceptErr)
+			}
+		}
+
+		// Whatever happened, the persisted state must be internally
+		// consistent — no torn writes, no impossible combination.
+		reloadedOrder, err := repos.orderRepo.FindByID(ctx, order.ID)
+		if err != nil || reloadedOrder == nil {
+			t.Fatalf("trial %d: reload order: %v", i, err)
+		}
+		var status models.ShopStatus
+		if err := db.First(&status, 1).Error; err != nil {
+			t.Fatalf("trial %d: reload shop status: %v", i, err)
+		}
+
+		if acceptOK && reloadedOrder.Status == models.OrderSubmitted {
+			t.Errorf("trial %d: Accept succeeded but order is still submitted", i)
+		}
+		if setOK && status.State != string(models.ShopPaused) {
+			t.Errorf("trial %d: Set succeeded but shop state is %q, not paused", i, status.State)
+		}
+		if !setOK && status.State == string(models.ShopPaused) {
+			t.Errorf("trial %d: Set failed but shop ended up paused anyway", i)
+		}
 	}
 }

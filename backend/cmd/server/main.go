@@ -73,7 +73,7 @@ func main() {
 	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
 	menuSvc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, hub, cfg)
 	orderSvc := services.NewOrderService(orderRepo)
-	shopStatusSvc := services.NewShopStatusService(shopStatusRepo, orderRepo, hub)
+	shopStatusSvc := services.NewShopStatusService(shopStatusRepo, orderRepo, uow, hub)
 	ratingsSvc := services.NewRatingsService(ratingRepo, orderRepo)
 	pushSvc := services.NewPushService(cfg, pushRepo)
 	ssTicketSvc := services.NewSSETicketService()

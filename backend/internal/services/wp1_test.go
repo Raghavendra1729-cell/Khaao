@@ -44,7 +44,7 @@ func TestShopStatusGuard(t *testing.T) {
 	t.Run("allowed_when_no_active_orders", func(t *testing.T) {
 		orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
 		statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
-		svc := services.NewShopStatusService(statusRepo, orderRepo, hub)
+		svc := services.NewShopStatusService(statusRepo, orderRepo, &mockUoW{}, hub)
 
 		reopen := time.Now().Add(30 * time.Minute)
 		resp, err := svc.Set(ctx, "paused", &reopen)
@@ -75,7 +75,7 @@ func TestShopStatusGuard(t *testing.T) {
 			3: {ID: 3, Status: models.OrderCompleted}, // terminal, not counted
 		}}
 		statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
-		svc := services.NewShopStatusService(statusRepo, orderRepo, hub)
+		svc := services.NewShopStatusService(statusRepo, orderRepo, &mockUoW{}, hub)
 
 		_, err := svc.Set(ctx, "closed", nil)
 		appErr := asAppError(t, err)
@@ -96,7 +96,7 @@ func TestShopStatusGuard(t *testing.T) {
 	t.Run("invalid_state", func(t *testing.T) {
 		orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
 		statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
-		svc := services.NewShopStatusService(statusRepo, orderRepo, hub)
+		svc := services.NewShopStatusService(statusRepo, orderRepo, &mockUoW{}, hub)
 		_, err := svc.Set(ctx, "sleeping", nil)
 		if appErr := asAppError(t, err); appErr.Status != 400 {
 			t.Errorf("status = %d, want 400", appErr.Status)

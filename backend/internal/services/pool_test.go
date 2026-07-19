@@ -572,7 +572,7 @@ func TestPaidGuards(t *testing.T) {
 func setupShopStatusSvc(engine *services.PoolEngine, orderRepo *mockOrderRepo) (*services.ShopStatusService, *mockShopStatusRepo) {
 	shopStatusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
 	hub := realtime.NewHub()
-	svc := services.NewShopStatusService(shopStatusRepo, orderRepo, hub)
+	svc := services.NewShopStatusService(shopStatusRepo, orderRepo, &mockUoW{}, hub)
 	svc.SetPool(engine)
 	return svc, shopStatusRepo
 }
