@@ -1,0 +1,21 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - misspell
+  settings:
+    errcheck:
+      # Deferred Close() on a response body whose read already succeeded is
+      # a standard, low-risk Go idiom — not the class of silently-swallowed
+      # error errcheck exists to catch (see R12: ignored FindInProgress
+      # errors that masked real allocation failures).
+      exclude-functions:
+        - (io.Closer).Close
+
+run:
+  timeout: 5m

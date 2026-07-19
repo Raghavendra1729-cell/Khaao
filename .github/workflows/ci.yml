@@ -35,6 +35,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: backend
+          version: v2.12.2
+
       - name: go test (fast unit suite, no Postgres, -race)
         run: go test ./... -race
 
@@ -84,6 +90,13 @@ jobs:
 
       - name: go vet (integration tag)
         run: go vet -tags=integration ./...
+
+      - name: golangci-lint (integration tag)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: backend
+          version: v2.12.2
+          args: --build-tags=integration
 
       # -p 1 is required, not optional: every integration test truncates
       # every application table at the start of the test. `go test ./...`
