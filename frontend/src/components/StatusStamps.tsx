@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useId, type CSSProperties } from 'react';
 import type { OrderStatus } from '../api/types';
 
 /**
@@ -42,17 +42,11 @@ const VOID_LABEL: Partial<Record<OrderStatus, string>> = {
   expired: 'EXPIRED',
 };
 
-let filterSeq = 0;
-function nextFilterId(): string {
-  filterSeq += 1;
-  return `stamp-rough-${filterSeq.toString(36)}`;
-}
-
 const STAMP_BASE =
   'inline-flex items-center justify-center whitespace-nowrap rounded-full border-2 bg-current/10 px-2.5 py-1.5 font-display text-[10px] font-bold uppercase tracking-wider';
 
 export function StatusStamps({ status }: { status: OrderStatus }) {
-  const filterId = nextFilterId();
+  const filterId = useId();
   const voidLabel = VOID_LABEL[status];
 
   if (voidLabel) {
