@@ -136,7 +136,10 @@ func (v *FirebaseVerifier) getCert(ctx context.Context, kid string) (*x509.Certi
 		p = strings.TrimSpace(p)
 		if strings.HasPrefix(p, "max-age=") {
 			var secs int
-			fmt.Sscanf(p, "max-age=%d", &secs)
+			// secs stays 0 on a parse failure, which the size check below
+			// already treats as "ignore, keep the fallback" — no separate
+			// error handling needed.
+			_, _ = fmt.Sscanf(p, "max-age=%d", &secs)
 			if secs > 0 {
 				maxAge = time.Duration(secs) * time.Second
 			}

@@ -16,12 +16,10 @@ func NewError(status int, message string) *AppError {
 	return &AppError{Status: status, Message: message}
 }
 
-var (
-	ErrBadRequest   = func(msg string) *AppError { return NewError(400, msg) }
-	ErrUnauthorized = func(msg string) *AppError { return NewError(401, msg) }
-	ErrForbidden    = func(msg string) *AppError { return NewError(403, msg) }
-	ErrNotFound     = func(msg string) *AppError { return NewError(404, msg) }
-	ErrConflict     = func(msg string) *AppError { return NewError(409, msg) }
-	ErrUnorderable  = func(msg string) *AppError { return NewError(422, msg) }
-	ErrInternal     = func(msg string) *AppError { return NewError(500, msg) }
-)
+func ErrBadRequest(msg string) *AppError   { return NewError(400, msg) }
+func ErrUnauthorized(msg string) *AppError { return NewError(401, msg) }
+func ErrForbidden(msg string) *AppError    { return NewError(403, msg) }
+func ErrNotFound(msg string) *AppError     { return NewError(404, msg) }
+func ErrConflict(msg string) *AppError     { return NewError(409, msg) }
+func ErrUnorderable(msg string) *AppError  { return NewError(422, msg) }
+func ErrInternal(msg string) *AppError     { return NewError(500, msg) }

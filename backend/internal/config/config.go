@@ -12,8 +12,10 @@ import (
 )
 
 // devDefaultDatabaseURL is the local development fallback DSN. Production must
-// override it — Validate() rejects a production boot that still uses it.
-const devDefaultDatabaseURL = "postgres://lingaraghavendra@localhost:5432/khaao?sslmode=disable"
+// override it — Validate() rejects a production boot that still uses it. No
+// username in the URL — libpq/pgx default to the OS login user, so this
+// isn't tied to any one developer's machine.
+const devDefaultDatabaseURL = "postgres://localhost:5432/khaao?sslmode=disable"
 
 // Config holds all environment-derived settings for the server.
 type Config struct {
@@ -37,11 +39,16 @@ type Config struct {
 	VapidSubject        string
 
 	loc *time.Location
+	// envErrors collects env vars that were set but failed to parse (e.g.
+	// HOLD_MINUTES=1O) — Validate() fails closed on these instead of
+	// silently keeping the default, so a typo doesn't go unnoticed.
+	envErrors []string
 }
 
 // Load reads env vars, falling back to spec-defined defaults.
 func Load() *Config {
 	loadDotEnv()
+	var envErrors []string
 	return &Config{
 		Port:               envOr("PORT", "8080"),
 		AppEnv:             strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "dev"))),
@@ -50,10 +57,10 @@ func Load() *Config {
 		FirebaseProjectID:  envOr("FIREBASE_PROJECT_ID", ""),
 		AllowedEmailDomain: envOr("ALLOWED_EMAIL_DOMAIN", "sst.scaler.com"),
 		ShopkeeperEmails:   envOr("SHOPKEEPER_EMAILS", ""),
-		AuthFake:           envOrBool("AUTH_FAKE", false),
-		HoldMinutes:        envOrInt("HOLD_MINUTES", 15),
+		AuthFake:           envOrBool(&envErrors, "AUTH_FAKE", false),
+		HoldMinutes:        envOrInt(&envErrors, "HOLD_MINUTES", 15),
 		FrontendOrigin:     envOr("FRONTEND_ORIGIN", "http://localhost:5173"),
-		SeedSampleMenu:     envOrBool("SEED_SAMPLE_MENU", true),
+		SeedSampleMenu:     envOrBool(&envErrors, "SEED_SAMPLE_MENU", true),
 		BusinessTimezone:   envOr("BUSINESS_TIMEZONE", "Asia/Kolkata"),
 		CloudinaryCloudName: envOr("CLOUDINARY_CLOUD_NAME", ""),
 		CloudinaryAPIKey:    envOr("CLOUDINARY_API_KEY", ""),
@@ -61,6 +68,7 @@ func Load() *Config {
 		VapidPublicKey:      envOr("VAPID_PUBLIC_KEY", ""),
 		VapidPrivateKey:     envOr("VAPID_PRIVATE_KEY", ""),
 		VapidSubject:        envOr("VAPID_SUBJECT", ""),
+		envErrors:           envErrors,
 	}
 }
 
@@ -84,6 +92,13 @@ func (c *Config) Location() *time.Location {
 // is rejected rather than silently treated as development. Returns the first
 // problem found.
 func (c *Config) Validate() error {
+	if len(c.envErrors) > 0 {
+		return fmt.Errorf("invalid environment configuration: %s", strings.Join(c.envErrors, "; "))
+	}
+	if c.HoldMinutes <= 0 {
+		return fmt.Errorf("HOLD_MINUTES must be greater than 0 (got %d)", c.HoldMinutes)
+	}
+
 	loc, err := time.LoadLocation(c.BusinessTimezone)
 	if err != nil {
 		return fmt.Errorf("invalid BUSINESS_TIMEZONE %q: %w", c.BusinessTimezone, err)
@@ -154,7 +169,7 @@ func loadDotEnv() {
 		k = strings.TrimSpace(k)
 		v = strings.Trim(strings.TrimSpace(v), `"'`)
 		if k != "" && os.Getenv(k) == "" {
-			os.Setenv(k, v)
+			_ = os.Setenv(k, v) // only fails on a NUL byte in k/v, not reachable from a real .env file
 		}
 	}
 }
@@ -166,20 +181,22 @@ func envOr(key, def string) string {
 	return def
 }
 
-func envOrInt(key string, def int) int {
+func envOrInt(errs *[]string, key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+		*errs = append(*errs, fmt.Sprintf("%s=%q is not a valid integer", key, v))
 	}
 	return def
 }
 
-func envOrBool(key string, def bool) bool {
+func envOrBool(errs *[]string, key string, def bool) bool {
 	if v := os.Getenv(key); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
+		*errs = append(*errs, fmt.Sprintf("%s=%q is not a valid boolean (use true/false)", key, v))
 	}
 	return def
 }

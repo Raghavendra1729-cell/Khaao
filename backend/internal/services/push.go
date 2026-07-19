@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
@@ -13,6 +14,12 @@ import (
 	"khaao/internal/models"
 	"khaao/internal/repository"
 )
+
+// pushHTTPClient replaces webpush-go's default *http.Client, which has no
+// timeout — a hung push endpoint would otherwise strand goroutines forever
+// (send() is fired via `go` per-subscription, so nothing else waits on it,
+// but an unbounded goroutine leak on every hung push service is still real).
+var pushHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type PushService struct {
 	cfg  *config.Config
@@ -118,6 +125,7 @@ func (s *PushService) send(sub models.PushSubscription, payload []byte) {
 			Auth:   sub.Auth,
 		},
 	}, &webpush.Options{
+		HTTPClient:      pushHTTPClient,
 		Subscriber:      s.cfg.VapidSubject,
 		VAPIDPublicKey:  s.cfg.VapidPublicKey,
 		VAPIDPrivateKey: s.cfg.VapidPrivateKey,
