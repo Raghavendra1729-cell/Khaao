@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
 import { Button } from '../components/Button';
-import { app } from '../lib/firebase';
 import { fetchAuthConfig } from '../api/auth';
 
 export function Login() {
@@ -56,9 +55,9 @@ export function Login() {
     setError(null);
     setSubmitting(true);
     try {
-      if (!app) {
-        throw new Error('Firebase is not configured. Please check your environment variables (.env).');
-      }
+      // signInWithGoogle (dynamically imported inside loginWithGoogle) throws
+      // its own "Firebase is not configured" error if the SDK didn't init —
+      // no need to duplicate that check here.
       const loggedInUser = await loginWithGoogle();
       // null means standalone mode handed the window off via redirect — the
       // page is navigating away, nothing left to do here.

@@ -10,7 +10,6 @@ import { useNavigate } from 'react-router-dom';
 import * as authApi from '../api/auth';
 import { getStoredUser, getToken, onUnauthorized } from '../api/client';
 import type { User } from '../api/types';
-import { getGoogleRedirectResult, signInWithGoogle } from '../lib/firebase';
 
 interface AuthContextValue {
   user: User | null;
@@ -40,7 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loginWithGoogleAction(): Promise<User | null> {
     setAuthLoading(true);
     try {
-      const config = await authApi.fetchAuthConfig();
+      // Dynamic import — the Firebase SDK is only needed at the moment
+      // someone actually signs in, not on every page load for every
+      // already-authenticated student browsing the menu (R24).
+      const [{ signInWithGoogle }, config] = await Promise.all([
+        import('../lib/firebase'),
+        authApi.fetchAuthConfig(),
+      ]);
       const idToken = await signInWithGoogle(config.allowed_email_domain);
       if (!idToken) return null; // standalone mode: window is redirecting away
       const res = await authApi.loginWithFirebase(idToken);
@@ -52,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function completeGoogleRedirectAction(): Promise<User | null> {
+    const { getGoogleRedirectResult } = await import('../lib/firebase');
     const idToken = await getGoogleRedirectResult();
     if (!idToken) return null;
     setAuthLoading(true);

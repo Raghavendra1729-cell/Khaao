@@ -1,14 +1,25 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
-import { Menu } from './pages/student/Menu';
-import { OrderStatusPage } from './pages/student/OrderStatus';
-import { ShopOrdersPage } from './pages/shop/Orders';
-import { ShopPrepPage } from './pages/shop/Prep';
-import { ShopMenuManagePage } from './pages/shop/MenuManage';
-import { ShopHistoryPage } from './pages/shop/History';
+
+// Route-group chunks: a student's first load never needs to fetch the shop
+// pages (and vice versa), and neither needs to fetch the other role's pages
+// at all in the common case — one role per session (STATUS.md R24).
+const Menu = lazy(() => import('./pages/student/Menu').then((m) => ({ default: m.Menu })));
+const OrderStatusPage = lazy(() =>
+  import('./pages/student/OrderStatus').then((m) => ({ default: m.OrderStatusPage })),
+);
+const ShopOrdersPage = lazy(() => import('./pages/shop/Orders').then((m) => ({ default: m.ShopOrdersPage })));
+const ShopPrepPage = lazy(() => import('./pages/shop/Prep').then((m) => ({ default: m.ShopPrepPage })));
+const ShopMenuManagePage = lazy(() =>
+  import('./pages/shop/MenuManage').then((m) => ({ default: m.ShopMenuManagePage })),
+);
+const ShopHistoryPage = lazy(() =>
+  import('./pages/shop/History').then((m) => ({ default: m.ShopHistoryPage })),
+);
 
 function RoleHome() {
   const { user } = useAuth();
