@@ -53,6 +53,30 @@ func (s *PushService) Subscribe(ctx context.Context, userID uint, endpoint, p256
 type pushPayload struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
+	// URL is the app-relative path notificationclick should focus/open —
+	// distinct destinations per notification type (a shopkeeper's
+	// new-order alert vs a student's ready-alert), instead of always
+	// landing on / (R30).
+	URL string `json:"url,omitempty"`
+}
+
+// newOrderPayload and orderReadyPayload are pure so the exact bytes sent to
+// webpush-go are directly unit-testable without a fake push endpoint.
+
+func newOrderPayload(order *models.Order) ([]byte, error) {
+	return json.Marshal(pushPayload{
+		Title: "New order",
+		Body:  fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items)),
+		URL:   "/shop",
+	})
+}
+
+func orderReadyPayload(orderNo int) ([]byte, error) {
+	return json.Marshal(pushPayload{
+		Title: "Order ready!",
+		Body:  fmt.Sprintf("Order #%d is ready — head to the counter.", orderNo),
+		URL:   "/order",
+	})
 }
 
 // NotifyNewOrder fires a best-effort push to every shopkeeper subscription so
@@ -71,10 +95,7 @@ func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
 	if len(subs) == 0 {
 		return
 	}
-	payload, err := json.Marshal(pushPayload{
-		Title: "New order",
-		Body:  fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items)),
-	})
+	payload, err := newOrderPayload(order)
 	if err != nil {
 		slog.Error("khaao: push: could not marshal payload", "error", err)
 		return
@@ -101,10 +122,7 @@ func (s *PushService) NotifyOrderReady(ctx context.Context, userID uint, orderNo
 	if len(subs) == 0 {
 		return
 	}
-	payload, err := json.Marshal(pushPayload{
-		Title: "Order ready!",
-		Body:  fmt.Sprintf("Order #%d is ready — head to the counter.", orderNo),
-	})
+	payload, err := orderReadyPayload(orderNo)
 	if err != nil {
 		slog.Error("khaao: push: could not marshal payload", "error", err)
 		return
