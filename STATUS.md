@@ -31,10 +31,55 @@ Rechecked 2026-07-19 (second pass, clean tree) before R25: backend
 `go build ./... && go vet ./... && go test ./... -race` ✓ ·
 `golangci-lint run` 0 issues ✓ · frontend `npx tsc -b --noEmit` ✓ ·
 `npm run lint` 0 errors ✓ · `npm build` ✓ (index 247 KB raw, Firebase
-155 KB lazy — unchanged by R25). After R26–R27 and the § 9 pre-deploy
-gate, the only remaining milestone is Deployment (D-1..D-7) —
-`deploy/RUNBOOK.md` is the step-by-step guide, and most of it needs a
-human with domain/server/dashboard access, not an agent.
+155 KB lazy — unchanged by R25).
+
+**2026-07-19 (third pass): a fresh review of the corners the R1–R24
+review touched least** — SSE plumbing end-to-end (`useSSE.ts`,
+`sse_ticket.go`, the `streamSSE` handler, hub), the service worker
+(`sw.ts`), `api/client.ts`, the rate limiter, the FCFS allocator, and
+the server lifecycle — found four new small items (R28–R31) plus one
+accepted-risk note added to § 11 (an open SSE stream survives
+shopkeeper de-provisioning until it reconnects). Files verified clean
+in that pass and deliberately left alone: the ticket service
+(mint/consume/sweep all correct), the allocator, the rate limiter
+(bounded memory, correct per-role buckets), `StudentRealtime`'s
+transition logic, and the audio-unlock path.
+
+**2026-07-19 (fourth pass): R26–R31 all done, and the pre-deploy GATE
+is clear.** R26 (Prettier `--write` across 27 files + `format:check`
+in CI), R27 (dropped `ConfirmDialog`'s dead `busy` prop), R28 (jittered
+SSE reconnect backoff, 0.5x-1.5x, capped after jitter), R29
+(`Hub.CloseAll()` closes every SSE stream before `srv.Shutdown` so a
+graceful restart no longer stalls the full 10s timeout), R30 (push
+listener always shows a fallback notification + a `url` in the payload
+so `notificationclick` opens `/shop` or `/order` instead of always
+`/`), R31 (`apiFetch` now has a 15s `AbortSignal.timeout`) — each with
+a regression test verified to actually fail without its fix first.
+`npm test` now 50/50.
+
+Then the GATE itself, live: **`scripts/smoke.sh` 15/15** against local
+Postgres; **the full integration suite (5 `TestIntegration_*` cases,
+including R14's 15-trial concurrent-Accept-vs-Set-paused proof) green
+against real Postgres** (`TEST_DATABASE_URL=… go test -tags=integration
+-p 1 ./... -race`); **`scripts/loadtest.js` re-run at smoke scale**
+against a scratch backend — which surfaced and fixed two real bugs the
+script itself had accumulated: it still connected SSE with the
+pre-ticket-auth `?token=<jwt>` scheme (100% of SSE holds were silently
+401ing on `missing_ticket` — nobody had run this script since P1-b
+shipped), and the shopkeeper sweep fired all its mutations with zero
+pacing, blowing through the 40-token rate-limit burst every tick (an
+85% 429 rate). Both fixed (ticket minting; a 0.25s pace between
+mutations matching the limiter's 4/s sustained refill) and re-verified
+clean: every threshold passes, 0% errors. **CI is green on `main`**
+— catch a golangci-lint-action version mismatch along the way (`v6`
+doesn't support golangci-lint v2.x; bumped to `v7`) that had been
+silently failing every push since the R23 commit introduced it.
+
+**After this gate, the only remaining milestone is Deployment
+(D-1..D-7)** — `deploy/RUNBOOK.md` is the step-by-step guide, and most
+of it needs a human with domain/server/dashboard access, not an agent.
+Per the GATE's own rule, further code changes should only come from
+real-device findings during D-6.
 
 The entire pre-2026-07-15 backlog from the previous session's handoff is
 **done, live-verified, and committed**. Everything in § 8 plus everything
@@ -333,23 +378,20 @@ endpoints, state machines). Added since that doc was written:
 
 ## 9. What's LEFT (2026-07-19, next agent starts here)
 
-> Work the table top-to-bottom, commit each item separately, run the § 6
-> verification suite before every commit. This app is **mobile-only for
-> students** (phone PWA) and mobile-first for the shopkeeper; desktop is the
-> lowest priority — evaluate every change on a 375px viewport first, and
-> follow § 9.1 (mobile design rules) for anything that touches the frontend.
+**Everything code-side is done.** R1–R31 (the full 2026-07-18 review
+backlog plus the 2026-07-19 third-pass follow-ups) are implemented,
+tested, and committed — see Current state for the detail and commit
+range. The pre-deploy GATE has run clean: § 6 suite green,
+`scripts/smoke.sh` 15/15, the real-Postgres integration suite green,
+`scripts/loadtest.js` green at smoke scale (after fixing two bugs in
+the script itself — see Current state), and CI green on `main`.
 
-The R1–R24 backlog and its commit (C-1) are **done**, and so is R25 — see
-Current state. What remains, in order: two small follow-ups (R26–R27),
-then the pre-deploy gate, then the Deployment milestone.
-
-### Backlog
-
-| # | Priority | What | Detail |
-|---|---|---|---|
-| R26 | **P3** | **Finish the Prettier adoption** | `.prettierrc.json`/`.prettierignore` and the `format`/`format:check` scripts exist, but `npm run format:check` currently fails on **27 files** (never ran `--write`) and CI doesn't enforce it — a half-adopted formatter is drift waiting to happen. Run `npm run format`, eyeball the diff (formatting only), commit it separately from everything else, then add `npm run format:check` to the frontend CI job. |
-| R27 | **P3** | **`ConfirmDialog`'s `busy` prop is dead at every call site** | Every `onConfirm` handler does `setConfirming(false); mutation.mutate()` — the dialog is gone before `isPending` can ever render, so `busy={mutation.isPending}` never shows. Either keep the dialog open until the mutation settles (close in `onSuccess`/`onError`, letting `busy` disable double-taps) or drop the prop. Cosmetic; failures already surface via toast. |
-| GATE | **after R27** | **Pre-deploy verification gate** | The "code done" line before anyone touches infrastructure. (1) Full § 6 suite green. (2) `scripts/smoke.sh` live against local Postgres — full golden-path lifecycle (mind § 10's orphaned-process lesson if `dropdb` complains). (3) Integration suite against real Postgres: `TEST_DATABASE_URL=… go test -tags=integration -p 1 ./... -race`. (4) Optional but recommended: scale `scripts/loadtest.js` toward the § 1 rush-hour numbers per `scripts/loadtest.md` — it has only ever run at smoke scale (15–32 VUs). (5) CI green on `main`. After this gate, code changes should only come from real-device findings during D-6. |
+**The only thing left is Deployment (D-1..D-7) below** — a human/agent
+pairing task needing real infra access, not more code. If you're an
+agent picking this up: read § 9.1 (mobile design rules) before touching
+ANY frontend file even for a deployment-driven fix, and don't start a
+new backlog here — real work items only get added when D-6 real-device
+testing actually surfaces something.
 
 **Caveats worth knowing from the R12–R24 batch (recorded, not tasks):**
 
@@ -528,6 +570,28 @@ the runbook in sync with reality as steps complete.
   with no settings change in between. Don't assume one approved agy
   invocation means the next one will be; when denied, doing the work
   directly is a legitimate fallback, not a workaround.
+- **A GitHub Actions step can be silently broken from the moment it's
+  added and nobody notices until a human actually looks at the Actions
+  tab** — R23 added `golangci-lint-action@v6` with `version: v2.12.2`;
+  action v6 doesn't support golangci-lint v2.x at all ("you must update
+  to golangci-lint-action v7"), so every CI run from that commit onward
+  failed at the lint step, even though `golangci-lint run` was verified
+  clean locally before every commit (§ 6 doesn't run in CI's exact
+  container/action wrapper, so a locally-clean tool can still fail
+  there). `git push` succeeding is not the same as CI passing — if you
+  push and the user doesn't mention CI, check
+  `gh run list`/`api.github.com/repos/<owner>/<repo>/actions/runs`
+  yourself rather than assuming green. Fixed by bumping both
+  `golangci-lint-action@v6` occurrences to `@v7`.
+- **Local tool verification (`go test`, `golangci-lint run`, `npm test`,
+  a local k6/smoke run) and CI-green are two different claims** — this
+  session's GATE also caught `scripts/loadtest.js` itself carrying two
+  real bugs (stale SSE auth scheme, unpaced shopkeeper mutations) that
+  had sat undetected because the script simply hadn't been *run*
+  end-to-end since the features it exercises (SSE tickets, the rate
+  limiter) were added. A script/workflow that isn't part of routine
+  verification can drift silently — the fix isn't "trust it more," it's
+  "actually run it periodically."
 
 ---
 
@@ -575,6 +639,17 @@ the runbook in sync with reality as steps complete.
    perspective (login or photo upload just stops working) — check the
    browser console for "Refused to ..." errors the first time this runs
    against real Firebase/Cloudinary, before fully trusting it.
+6. **An already-open SSE stream survives shopkeeper de-provisioning**
+   (noted 2026-07-19 third-pass review). REST auth re-reads the role from
+   the DB on every request, so a removed shopkeeper is locked out of all
+   *actions* immediately — but their existing `/api/shop/stream` connection
+   was authorized at connect time and keeps delivering shop events
+   (order/prep/menu broadcasts, read-only) until it next drops and fails to
+   re-mint a ticket. Accepted as-is: exposure is read-only event metadata,
+   the population is a hand-picked allowlist, and any reconnect (network
+   blip, R21 drop, server restart) ends it. If it ever matters, the hook is
+   easy: close the user's hub clients when their role/allowlist entry
+   changes.
 
 Also this session: Gin now runs in `ReleaseMode` when `APP_ENV=production`
 (previously always defaulted to debug mode, which Gin's own startup banner
