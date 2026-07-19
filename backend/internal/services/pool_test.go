@@ -23,6 +23,12 @@ type mockOrderRepo struct {
 	// sumOverride lets a test stub SumOrderedQtyByDate directly, bypassing the
 	// in-memory computation over orders.
 	sumOverride map[uint]int
+	// findByIDCalls counts FindByID invocations — PoolEngine.broadcast calls
+	// it exactly once per order broadcast, so a test can assert the engine
+	// only reloaded/broadcast the orders it actually touched instead of
+	// every in-progress order (see TestReject/RemoveItem broadcast-scope
+	// tests).
+	findByIDCalls int
 }
 
 func (m *mockOrderRepo) Create(ctx context.Context, o *models.Order) error {
@@ -36,10 +42,16 @@ func (m *mockOrderRepo) Save(ctx context.Context, o *models.Order) error {
 }
 func (m *mockOrderRepo) SaveItem(ctx context.Context, i *models.OrderItem) error { return nil }
 func (m *mockOrderRepo) FindByID(ctx context.Context, id uint) (*models.Order, error) {
+	m.findByIDCalls++
 	return m.orders[id], nil
 }
 func (m *mockOrderRepo) FindByIDForUpdate(ctx context.Context, id uint) (*models.Order, error) {
-	return m.FindByID(ctx, id)
+	// Deliberately doesn't route through FindByID (and its findByIDCalls
+	// counter) — FindByIDForUpdate is the locking read used pervasively
+	// inside transactions, while findByIDCalls exists to isolate exactly
+	// how many times PoolEngine.broadcast (which only ever calls the
+	// non-locking FindByID) fired.
+	return m.orders[id], nil
 }
 func (m *mockOrderRepo) FindActiveByUserID(ctx context.Context, uid uint) (*models.Order, error) {
 	return nil, nil
@@ -264,7 +276,9 @@ func TestStatusRecompute(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			order := &models.Order{ID: 1, Status: models.OrderSubmitted, Items: tc.items}
-			repo.Create(context.Background(), order)
+			if err := repo.Create(context.Background(), order); err != nil {
+				t.Fatalf("setup Create: %v", err)
+			}
 
 			_, _ = engine.Accept(context.Background(), 1, nil)
 
@@ -287,10 +301,14 @@ func TestAllocation(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, Status: models.ItemQueued},
 		},
 	}
-	repo.Create(context.Background(), order1)
+	if err := repo.Create(context.Background(), order1); err != nil {
+		t.Fatalf("setup Create: %v", err)
+	}
 
 	// Handled by MarkDone which triggers allocation
-	engine.MarkDone(context.Background(), 10, 1)
+	if err := engine.MarkDone(context.Background(), 10, 1); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
 
 	o, _ := repo.FindByID(context.Background(), 1)
 	if o.Items[0].AllocatedQty != 1 {
@@ -303,7 +321,9 @@ func TestAllocation(t *testing.T) {
 		t.Errorf("expected partially ready, got %v", o.Status)
 	}
 
-	engine.MarkDone(context.Background(), 10, 1)
+	if err := engine.MarkDone(context.Background(), 10, 1); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
 	o, _ = repo.FindByID(context.Background(), 1)
 	if o.Items[0].AllocatedQty != 2 {
 		t.Errorf("expected 2 allocated, got %d", o.Items[0].AllocatedQty)
@@ -323,7 +343,7 @@ func TestMarkDoneCappedAtRemainingDemand(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, Status: models.ItemQueued},
 		},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	// Only 2 are actually needed — asking to mark 3 done must be refused,
 	// not silently accepted into an unclaimed pool.
@@ -367,7 +387,7 @@ func TestAcceptFullTrimZeroesTotalPrice(t *testing.T) {
 			{ID: 2, MenuItemID: 11, Qty: 3, PriceEach: 1000, Status: models.ItemPending},
 		},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	// Rejecting every line at accept time must behave like RemoveItem's
 	// full-trim path: order rejected and TotalPrice reset to 0, not left at
@@ -397,7 +417,7 @@ func TestRemoveItemRepools(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(context.Background(), order1)
+	_ = repo.Create(context.Background(), order1)
 
 	// order2 is waiting for 1 unit of the same item.
 	order2 := &models.Order{
@@ -407,7 +427,7 @@ func TestRemoveItemRepools(t *testing.T) {
 			{ID: 2, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
 		},
 	}
-	repo.Create(context.Background(), order2)
+	_ = repo.Create(context.Background(), order2)
 
 	// Shopkeeper trims order1's line -> its 2 prepared units return to the pool
 	// and the next FCFS order (order2) is served from them.
@@ -440,7 +460,7 @@ func TestRemoveItemRefusedAfterHandover(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 	if _, err := engine.RemoveItem(context.Background(), 1, 1); err == nil {
 		t.Errorf("expected an error when removing an item the student has started collecting")
 	}
@@ -453,7 +473,7 @@ func TestHandoverGuards(t *testing.T) {
 		Status: models.OrderSubmitted,
 		Items:  []models.OrderItem{{ID: 1, Qty: 2, AllocatedQty: 1}},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	// Submitted order cannot handover
 	_, err := engine.Handover(context.Background(), 1, 1, 1)
@@ -486,7 +506,7 @@ func TestRejectZeroesTotalPrice(t *testing.T) {
 			{ID: 2, MenuItemID: 11, Qty: 3, PriceEach: 1000, Status: models.ItemPending},
 		},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	if _, err := engine.Reject(context.Background(), 1); err != nil {
 		t.Fatalf("Reject: %v", err)
@@ -512,7 +532,7 @@ func TestCancelZeroesTotalPrice(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, PriceEach: 2000, Status: models.ItemPending},
 		},
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	if _, err := engine.Cancel(context.Background(), 1, 42); err != nil {
 		t.Fatalf("Cancel: %v", err)
@@ -533,7 +553,7 @@ func TestPaidGuards(t *testing.T) {
 		ID:     1,
 		Status: models.OrderReady, // Not awaiting payment
 	}
-	repo.Create(context.Background(), order)
+	_ = repo.Create(context.Background(), order)
 
 	_, err := engine.Paid(context.Background(), 1)
 	if err == nil {
@@ -572,7 +592,7 @@ func TestShopStatusGuardBlockedOnlyByAcceptedOrders(t *testing.T) {
 		Status: models.OrderSubmitted,
 		Items:  []models.OrderItem{{ID: 1, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemPending}},
 	}
-	orderRepo.Create(ctx, submitted)
+	_ = orderRepo.Create(ctx, submitted)
 
 	_, err := svc.Set(ctx, "paused", nil)
 	if err != nil {
@@ -589,7 +609,7 @@ func TestShopStatusGuardBlockedOnlyByAcceptedOrders(t *testing.T) {
 		Status: models.OrderPreparing,
 		Items:  []models.OrderItem{{ID: 2, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemQueued}},
 	}
-	orderRepo.Create(ctx, preparing)
+	_ = orderRepo.Create(ctx, preparing)
 
 	_, err = svc.Set(ctx, "paused", nil)
 	if err == nil {
@@ -606,7 +626,7 @@ func TestAutoRejectSubmittedOnClose(t *testing.T) {
 
 	// Two submitted orders, no accepted orders (so pause is allowed).
 	for i := 1; i <= 2; i++ {
-		orderRepo.Create(ctx, &models.Order{
+		_ = orderRepo.Create(ctx, &models.Order{
 			ID:     uint(i),
 			UserID: uint(i),
 			Status: models.OrderSubmitted,
@@ -646,7 +666,7 @@ func TestCancelRefusedAfterHandover(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 1, HandedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(ctx, order)
+	_ = repo.Create(ctx, order)
 
 	_, err := engine.Cancel(ctx, 1, 42)
 	if err == nil {
@@ -672,7 +692,7 @@ func TestCancelRefusedOnceAccepted(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 0, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(ctx, order)
+	_ = repo.Create(ctx, order)
 
 	_, err := engine.Cancel(ctx, 1, 42)
 	if err == nil {
@@ -697,7 +717,7 @@ func TestRejectAfterAcceptReallocates(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 0, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(ctx, order1)
+	_ = repo.Create(ctx, order1)
 
 	// order2: a second student waiting for 1 unit of the same item.
 	order2 := &models.Order{
@@ -708,7 +728,7 @@ func TestRejectAfterAcceptReallocates(t *testing.T) {
 			{ID: 2, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
 		},
 	}
-	repo.Create(ctx, order2)
+	_ = repo.Create(ctx, order2)
 
 	_, err := engine.Reject(ctx, 1)
 	if err != nil {
@@ -736,6 +756,106 @@ func TestRejectAfterAcceptReallocates(t *testing.T) {
 	}
 }
 
+// TestRejectBroadcastsOnlyTouchedOrders guards against the broadcast storm
+// bug: Reject used to reload and broadcast every in-progress order whenever
+// any pool units were returned, instead of just the ones FCFS reallocation
+// actually touched. order3 here is unrelated (different menu item, no
+// allocation change) and must never be reloaded/broadcast.
+func TestRejectBroadcastsOnlyTouchedOrders(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	ctx := context.Background()
+
+	order1 := &models.Order{
+		ID:         1,
+		UserID:     42,
+		Status:     models.OrderReady,
+		TotalPrice: 2000,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, HandedQty: 0, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	_ = repo.Create(ctx, order1)
+
+	order2 := &models.Order{
+		ID:     2,
+		UserID: 99,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 2, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
+		},
+	}
+	_ = repo.Create(ctx, order2)
+
+	// Unrelated in-progress order — a different menu item, untouched by
+	// item 10's reallocation. Must not be broadcast.
+	order3 := &models.Order{
+		ID:     3,
+		UserID: 7,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 3, MenuItemID: 20, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 500},
+		},
+	}
+	_ = repo.Create(ctx, order3)
+
+	before := repo.findByIDCalls
+	if _, err := engine.Reject(ctx, 1); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	broadcastCalls := repo.findByIDCalls - before
+
+	// Exactly 2: the acted-on order (1) plus the one order FCFS actually
+	// reallocated to (2). The old FindInProgress-based fallback would have
+	// also reloaded/broadcast order3, making this 3.
+	if broadcastCalls != 2 {
+		t.Errorf("expected exactly 2 broadcast reloads (acted-on + touched), got %d", broadcastCalls)
+	}
+}
+
+// TestMarkDoneBroadcastsOnlyTouchedOrders guards against the same storm bug
+// in MarkDone, which unconditionally reloaded/broadcast every in-progress
+// order on every call regardless of how many orders the allocation actually
+// reached — the most severe instance since it wasn't even gated on "did
+// anything change".
+func TestMarkDoneBroadcastsOnlyTouchedOrders(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	ctx := context.Background()
+
+	needsItem := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
+		},
+	}
+	_ = repo.Create(ctx, needsItem)
+
+	// Unrelated in-progress order waiting on a different menu item.
+	unrelated := &models.Order{
+		ID:     2,
+		UserID: 7,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 2, MenuItemID: 20, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 500},
+		},
+	}
+	_ = repo.Create(ctx, unrelated)
+
+	before := repo.findByIDCalls
+	if err := engine.MarkDone(ctx, 10, 1); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+	broadcastCalls := repo.findByIDCalls - before
+
+	// Exactly 1: the single order the allocator actually touched. The old
+	// FindInProgress-based broadcast would have also reloaded `unrelated`,
+	// making this 2.
+	if broadcastCalls != 1 {
+		t.Errorf("expected exactly 1 broadcast reload (touched order only), got %d", broadcastCalls)
+	}
+}
+
 // Reject is refused once the customer has started collecting — you can't
 // un-hand-over an item.
 func TestRejectAfterAcceptRefusedWhenHandedOver(t *testing.T) {
@@ -750,7 +870,7 @@ func TestRejectAfterAcceptRefusedWhenHandedOver(t *testing.T) {
 			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 1, HandedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
 		},
 	}
-	repo.Create(ctx, order)
+	_ = repo.Create(ctx, order)
 
 	_, err := engine.Reject(ctx, 1)
 	if err == nil {

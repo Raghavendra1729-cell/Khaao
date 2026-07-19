@@ -154,6 +154,36 @@ func (e *PoolEngine) notifyOrderReady(order *models.Order) {
 	go e.pushSvc.NotifyOrderReady(context.Background(), userID, orderNo)
 }
 
+// reallocate re-runs FCFS allocation for a menu item whose pool just grew
+// (stock freed by a reject/removal/mark-done/expiry), and recomputes+saves
+// every order the allocator touched. Returns the IDs of orders actually
+// found and saved — not the raw allocator output — so a caller that logs an
+// event or broadcasts per returned ID (MarkDone does both) never does so for
+// an ID that turned out not to exist. Must be called from inside the
+// caller's WithTx (txCtx), same as e.alloc.Allocate itself.
+func (e *PoolEngine) reallocate(txCtx context.Context, menuItemID uint) ([]uint, error) {
+	touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+	if err != nil {
+		return nil, err
+	}
+	saved := make([]uint, 0, len(touched))
+	for _, orderID := range touched {
+		order, err := e.orderRepo.FindByIDForUpdate(txCtx, orderID)
+		if err != nil {
+			return nil, err
+		}
+		if order == nil {
+			continue
+		}
+		e.recomputeStatus(order)
+		if err := e.orderRepo.Save(txCtx, order); err != nil {
+			return nil, err
+		}
+		saved = append(saved, orderID)
+	}
+	return saved, nil
+}
+
 func (e *PoolEngine) logEvent(ctx context.Context, orderID uint, typ models.EventType, payload any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -358,21 +388,8 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 
 		if !allRejected {
 			for menuItemID := range touchedMenuItems {
-				touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
-				if err != nil {
+				if _, err := e.reallocate(txCtx, menuItemID); err != nil {
 					return err
-				}
-				for _, touchedOrderID := range touched {
-					touchedOrder, err := e.orderRepo.FindByIDForUpdate(txCtx, touchedOrderID)
-					if err != nil {
-						return err
-					}
-					if touchedOrder != nil {
-						e.recomputeStatus(touchedOrder)
-						if err := e.orderRepo.Save(txCtx, touchedOrder); err != nil {
-							return err
-						}
-					}
 				}
 			}
 		}
@@ -408,6 +425,7 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 
 	var order *models.Order
 	returnedByMenuItem := make(map[uint]int)
+	var touchedOrderIDs []uint
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
 		var err error
 		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
@@ -461,23 +479,13 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 			if returned == 0 {
 				continue
 			}
-			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			touched, err := e.reallocate(txCtx, menuItemID)
 			if err != nil {
 				return err
 			}
 			for _, tid := range touched {
-				if tid == order.ID {
-					continue
-				}
-				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, tid)
-				if err != nil {
-					return err
-				}
-				if ord != nil {
-					e.recomputeStatus(ord)
-					if err := e.orderRepo.Save(txCtx, ord); err != nil {
-						return err
-					}
+				if tid != order.ID {
+					touchedOrderIDs = append(touchedOrderIDs, tid)
 				}
 			}
 		}
@@ -489,13 +497,8 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 	}
 
 	e.broadcast(orderID)
-	if len(returnedByMenuItem) > 0 {
-		orders, _ := e.orderRepo.FindInProgress(ctx)
-		for _, o := range orders {
-			if o.ID != orderID {
-				e.broadcast(o.ID)
-			}
-		}
+	for _, id := range touchedOrderIDs {
+		e.broadcast(id)
 	}
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
@@ -660,7 +663,7 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 
 // RemoveItem lets a shopkeeper drop a line from an already-accepted order.
 // Any prepared-but-unhanded units return to the pool and are re-allocated FCFS
-// to the next order waiting for that menu item (canttenapp re-pooling rule).
+// to the next order waiting for that menu item (canteen re-pooling rule).
 // Removal is refused once the student has taken any unit of the line.
 func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (OrderResponse, error) {
 	e.mu.Lock()
@@ -669,6 +672,7 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 	var order *models.Order
 	var menuItemID uint
 	returned := 0
+	var touchedOrderIDs []uint
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
 		var err error
 		order, err = e.orderRepo.FindByIDForUpdate(txCtx, orderID)
@@ -740,23 +744,13 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 
 		// Re-assign the freed units to the next FCFS order(s).
 		if returned > 0 {
-			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			touched, err := e.reallocate(txCtx, menuItemID)
 			if err != nil {
 				return err
 			}
 			for _, tid := range touched {
-				if tid == order.ID {
-					continue
-				}
-				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, tid)
-				if err != nil {
-					return err
-				}
-				if ord != nil {
-					e.recomputeStatus(ord)
-					if err := e.orderRepo.Save(txCtx, ord); err != nil {
-						return err
-					}
+				if tid != order.ID {
+					touchedOrderIDs = append(touchedOrderIDs, tid)
 				}
 			}
 		}
@@ -767,14 +761,9 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 	}
 
 	e.broadcast(orderID)
-	if returned > 0 {
-		// reallocation may have advanced other waiting orders
-		orders, _ := e.orderRepo.FindInProgress(ctx)
-		for _, o := range orders {
-			if o.ID != orderID {
-				e.broadcast(o.ID)
-			}
-		}
+	// reallocation may have advanced other waiting orders
+	for _, id := range touchedOrderIDs {
+		e.broadcast(id)
 	}
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
@@ -842,6 +831,7 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	var touchedOrderIDs []uint
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
 		mi, err := e.menuRepo.FindByID(txCtx, menuItemID)
 		if err != nil {
@@ -867,24 +857,14 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 			return err
 		}
 
-		touchedOrders, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+		touched, err := e.reallocate(txCtx, menuItemID)
 		if err != nil {
 			return err
 		}
+		touchedOrderIDs = touched
 
-		for _, orderID := range touchedOrders {
-			order, err := e.orderRepo.FindByIDForUpdate(txCtx, orderID)
-			if err != nil {
-				return err
-			}
-			if order == nil {
-				return ErrInternal("allocated order could not be reloaded")
-			}
-			e.recomputeStatus(order)
-			if err := e.orderRepo.Save(txCtx, order); err != nil {
-				return err
-			}
-			if err := e.logEvent(txCtx, order.ID, models.EventItemReady, map[string]any{"menu_item_id": menuItemID}); err != nil {
+		for _, orderID := range touched {
+			if err := e.logEvent(txCtx, orderID, models.EventItemReady, map[string]any{"menu_item_id": menuItemID}); err != nil {
 				return err
 			}
 		}
@@ -898,10 +878,8 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 	e.hub.NotifyShopPrepUpdate()
 	e.hub.NotifyShopOrdersUpdate()
 
-	// Broadcast to all touched orders (lazy but safe outside tx)
-	orders, _ := e.orderRepo.FindInProgress(ctx)
-	for _, o := range orders {
-		e.broadcast(o.ID)
+	for _, id := range touchedOrderIDs {
+		e.broadcast(id)
 	}
 	return nil
 }
@@ -956,24 +934,11 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 		}
 
 		for menuItemID := range touchedMenuItems {
-			touched, err := e.alloc.Allocate(txCtx, menuItemID, e.orderRepo, e.poolRepo)
+			touched, err := e.reallocate(txCtx, menuItemID)
 			if err != nil {
 				return err
 			}
-			for _, t := range touched {
-				touchedOrders = append(touchedOrders, t)
-				ord, err := e.orderRepo.FindByIDForUpdate(txCtx, t)
-				if err != nil {
-					return err
-				}
-				if ord == nil {
-					return ErrInternal("reallocated order could not be reloaded")
-				}
-				e.recomputeStatus(ord)
-				if err := e.orderRepo.Save(txCtx, ord); err != nil {
-					return err
-				}
-			}
+			touchedOrders = append(touchedOrders, touched...)
 		}
 		return nil
 	})
