@@ -16,10 +16,10 @@ import { downscaleImage } from '../../lib/image';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
-import { FullPageSpinner } from '../../components/Spinner';
 import { MenuStatusBadge } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { VegMark } from '../../components/VegMark';
 import { useLanguage } from '../../context/LanguageContext';
 
 const MENU_STATUS_LABEL_HI: Record<MenuItem['status'], string> = {
@@ -28,6 +28,52 @@ const MENU_STATUS_LABEL_HI: Record<MenuItem['status'], string> = {
   out_of_stock: 'स्टॉक में नहीं',
   unavailable: 'अनुपलब्ध',
 };
+
+const DIET_LABEL: Record<Diet, { en: string; hi: string; enShort: string; hiShort: string }> = {
+  veg: { en: 'Vegetarian', hi: 'शाकाहारी', enShort: 'Veg', hiShort: 'वेज' },
+  non_veg: { en: 'Non-Vegetarian', hi: 'मांसाहारी', enShort: 'Non-veg', hiShort: 'नॉन-वेज' },
+};
+
+/** Paper-toned skeleton shaped like a real menu item card (F15) — name +
+ * price + badge bones, and edit/delete button-sized bones — so the grid
+ * doesn't reflow when data lands. */
+function MenuItemRowSkeleton() {
+  return (
+    <Card className="flex h-full flex-col p-4" aria-hidden="true">
+      <div className="flex-1">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <div className="h-4 w-24 animate-soft-pulse rounded bg-edge" />
+          <div className="h-3 w-14 animate-soft-pulse rounded bg-edge/70" />
+        </div>
+        <div className="h-3 w-16 animate-soft-pulse rounded bg-edge/70" />
+        <div className="mt-2 h-4 w-20 animate-soft-pulse rounded bg-edge/50" />
+      </div>
+      <div className="mt-4 flex gap-2 border-t border-edge pt-3">
+        <div className="h-11 flex-1 animate-soft-pulse rounded-xl bg-edge/60" />
+        <div className="h-11 flex-1 animate-soft-pulse rounded-xl bg-edge/60" />
+      </div>
+    </Card>
+  );
+}
+
+function MenuManageSkeleton() {
+  return (
+    <div aria-hidden="true">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-2">
+          <div className="h-7 w-24 animate-soft-pulse rounded-md bg-edge" />
+          <div className="h-4 w-44 animate-soft-pulse rounded bg-edge/70" />
+        </div>
+        <div className="h-11 w-28 animate-soft-pulse rounded-xl border border-edge bg-paper" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <MenuItemRowSkeleton key={i} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface FormState {
   name: string;
@@ -139,7 +185,7 @@ function MenuItemForm({
       const url = await uploadMenuItemPhoto(resized);
       setForm((f) => ({ ...f, photo_url: url }));
     } catch {
-      showToast('Photo upload failed.', 'error');
+      showToast(language === 'hi' ? 'फ़ोटो अपलोड नहीं हो सकी।' : 'Photo upload failed.', 'error');
       setForm((f) => ({ ...f, photo_url: '' }));
     } finally {
       if (localPreviewRef.current === previewUrl) {
@@ -156,16 +202,22 @@ function MenuItemForm({
     setValidationError(null);
 
     if (!form.name.trim()) {
-      setValidationError('Name is required.');
+      setValidationError(language === 'hi' ? 'नाम आवश्यक है।' : 'Name is required.');
       return;
     }
     const price = rupeesToPaise(form.price);
     if (!(price > 0)) {
-      setValidationError('Price must be greater than ₹0.');
+      setValidationError(
+        language === 'hi' ? 'कीमत ₹0 से अधिक होनी चाहिए।' : 'Price must be greater than ₹0.',
+      );
       return;
     }
     if ((form.avail_from && !form.avail_to) || (!form.avail_from && form.avail_to)) {
-      setValidationError('Set both a start and end time, or leave both blank.');
+      setValidationError(
+        language === 'hi'
+          ? 'शुरू और खत्म दोनों समय सेट करें, या दोनों खाली छोड़ दें।'
+          : 'Set both a start and end time, or leave both blank.',
+      );
       return;
     }
 
@@ -184,21 +236,26 @@ function MenuItemForm({
       )}
 
       <label className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Name</span>
+        <span className="mb-1 block text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'नाम' : 'Name'}
+        </span>
         <input
           type="text"
           required
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
-          placeholder="e.g. Masala Dosa"
+          placeholder={language === 'hi' ? 'जैसे मसाला डोसा' : 'e.g. Masala Dosa'}
         />
       </label>
 
       <label className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Price (₹)</span>
+        <span className="mb-1 block text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'कीमत (₹)' : 'Price (₹)'}
+        </span>
         <input
           type="number"
+          inputMode="decimal"
           required
           min="0"
           step="0.01"
@@ -210,19 +267,23 @@ function MenuItemForm({
       </label>
 
       <label className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Diet</span>
+        <span className="mb-1 block text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'आहार प्रकार' : 'Diet'}
+        </span>
         <select
           value={form.diet}
           onChange={(e) => setForm((f) => ({ ...f, diet: e.target.value as Diet }))}
           className="min-h-[44px] w-full rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
         >
-          <option value="veg">Vegetarian</option>
-          <option value="non_veg">Non-Vegetarian</option>
+          <option value="veg">{language === 'hi' ? DIET_LABEL.veg.hi : DIET_LABEL.veg.en}</option>
+          <option value="non_veg">{language === 'hi' ? DIET_LABEL.non_veg.hi : DIET_LABEL.non_veg.en}</option>
         </select>
       </label>
 
       <div className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Tags (optional)</span>
+        <span className="mb-1 block text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'टैग (वैकल्पिक)' : 'Tags (optional)'}
+        </span>
         <div className="mb-2 flex flex-wrap gap-2">
           {form.tags.map((tag) => (
             <span
@@ -266,16 +327,18 @@ function MenuItemForm({
               }
             }}
             className="min-h-[44px] flex-1 rounded-xl border border-edge bg-steel/30 px-3 text-base focus:border-brand focus:bg-paper"
-            placeholder="Add new tag"
+            placeholder={language === 'hi' ? 'नया टैग जोड़ें' : 'Add new tag'}
           />
           <Button type="button" variant="secondary" onClick={() => addTag(tagInput)}>
-            Add
+            {language === 'hi' ? 'जोड़ें' : 'Add'}
           </Button>
         </div>
       </div>
 
       <label className="block">
-        <span className="mb-1 block text-sm font-semibold text-ink/70">Photo (optional)</span>
+        <span className="mb-1 block text-sm font-semibold text-ink/70">
+          {language === 'hi' ? 'फ़ोटो (वैकल्पिक)' : 'Photo (optional)'}
+        </span>
         <div className="flex items-center gap-3">
           {(localPreview || form.photo_url) && (
             <img
@@ -292,12 +355,18 @@ function MenuItemForm({
             className="block w-full text-sm text-ink/70 file:mr-4 file:rounded-full file:border-0 file:bg-brand/10 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-brand-dark hover:file:bg-brand/20"
           />
         </div>
-        {uploadingPhoto && <p className="mt-1 text-sm text-ink/60">Uploading...</p>}
+        {uploadingPhoto && (
+          <p className="mt-1 text-sm text-ink/60">
+            {language === 'hi' ? 'अपलोड हो रहा है...' : 'Uploading...'}
+          </p>
+        )}
       </label>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="mb-1 block text-sm font-semibold text-ink/70">Available from</span>
+          <span className="mb-1 block text-sm font-semibold text-ink/70">
+            {language === 'hi' ? 'उपलब्ध — शुरू' : 'Available from'}
+          </span>
           <input
             type="time"
             value={form.avail_from}
@@ -306,7 +375,9 @@ function MenuItemForm({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-sm font-semibold text-ink/70">Available to</span>
+          <span className="mb-1 block text-sm font-semibold text-ink/70">
+            {language === 'hi' ? 'उपलब्ध — खत्म' : 'Available to'}
+          </span>
           <input
             type="time"
             value={form.avail_to}
@@ -330,10 +401,10 @@ function MenuItemForm({
 
       <div className="flex gap-2">
         <Button type="button" variant="ghost" className="flex-1" onClick={onCancel}>
-          Cancel
+          {language === 'hi' ? 'रद्द करें' : 'Cancel'}
         </Button>
         <Button type="submit" className="flex-1" loading={submitting} disabled={uploadingPhoto}>
-          Save
+          {language === 'hi' ? 'सहेजें' : 'Save'}
         </Button>
       </div>
     </form>
@@ -364,7 +435,15 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
   const stockMutation = useMutation({
     mutationFn: () => setMenuItemStock(item.id, !item.out_of_stock),
     onSuccess: invalidate,
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not update stock.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'स्टॉक अपडेट नहीं हो सका।'
+            : 'Could not update stock.',
+        'error',
+      ),
   });
 
   const updateMutation = useMutation({
@@ -372,18 +451,34 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
     onSuccess: () => {
       invalidate();
       setEditing(false);
-      showToast('Item updated.', 'success');
+      showToast(language === 'hi' ? 'आइटम अपडेट हो गया।' : 'Item updated.', 'success');
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not update item.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम अपडेट नहीं हो सका।'
+            : 'Could not update item.',
+        'error',
+      ),
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteMenuItem(item.id),
     onSuccess: () => {
       invalidate();
-      showToast('Item deleted.', 'success');
+      showToast(language === 'hi' ? 'आइटम हटा दिया गया।' : 'Item deleted.', 'success');
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not delete item.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम हटाया नहीं जा सका।'
+            : 'Could not delete item.',
+        'error',
+      ),
   });
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -424,7 +519,7 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
     <Card
       className={`relative overflow-hidden flex h-full flex-col p-4 transition-colors ${
         item.out_of_stock ? 'opacity-60 grayscale-[0.3]' : 'hover:bg-steel/10 cursor-pointer'
-      } ${armed ? 'ring-2 ring-red-500' : ''}`}
+      } ${armed ? 'ring-2 ring-stamp' : ''}`}
       onClick={handleCardClick}
     >
       <div className="flex-1">
@@ -450,13 +545,10 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
             {item.avail_from ?? '00:00'} – {item.avail_to ?? '23:59'}
           </p>
         )}
-        <div className="mt-2 flex flex-wrap gap-1">
-          <span
-            className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-              item.diet === 'veg' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-            }`}
-          >
-            {item.diet === 'veg' ? 'Veg' : 'Non-veg'}
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ink/60">
+            <VegMark diet={item.diet} size={12} />
+            {language === 'hi' ? DIET_LABEL[item.diet].hiShort : DIET_LABEL[item.diet].enShort}
           </span>
           {item.tags?.map((tag) => (
             <span
@@ -482,16 +574,21 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
       </div>
 
       {armed && (
-        <div className="absolute bottom-0 left-0 right-0 animate-slide-up bg-red-500 py-3 text-center text-sm font-bold text-white">
+        <div className="absolute bottom-0 left-0 right-0 animate-slide-up bg-stamp py-3 text-center text-sm font-bold text-white">
           <span>{language === 'hi' ? 'फिर से टैप करें' : 'Tap again to mark unavailable'}</span>
         </div>
       )}
 
       <ConfirmDialog
         open={confirmingDelete}
-        title="Delete this item?"
-        body={`Delete "${item.name}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={language === 'hi' ? 'यह आइटम हटाएं?' : 'Delete this item?'}
+        body={
+          language === 'hi'
+            ? `"${item.name}" हटाएं? इसे वापस नहीं लाया जा सकता।`
+            : `Delete "${item.name}"? This cannot be undone.`
+        }
+        confirmLabel={language === 'hi' ? 'हटाएं' : 'Delete'}
+        cancelLabel={language === 'hi' ? 'रद्द करें' : 'Cancel'}
         onCancel={() => setConfirmingDelete(false)}
         onConfirm={() => {
           setConfirmingDelete(false);
@@ -514,12 +611,20 @@ export function ShopMenuManagePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
       setShowAddForm(false);
-      showToast('Item added.', 'success');
+      showToast(language === 'hi' ? 'आइटम जोड़ा गया।' : 'Item added.', 'success');
     },
-    onError: (err) => showToast(err instanceof ApiError ? err.message : 'Could not add item.', 'error'),
+    onError: (err) =>
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'आइटम जोड़ा नहीं जा सका।'
+            : 'Could not add item.',
+        'error',
+      ),
   });
 
-  if (menuQuery.isLoading) return <FullPageSpinner />;
+  if (menuQuery.isLoading) return <MenuManageSkeleton />;
 
   // isError also fires after a failed *background* refetch, while data
   // still holds the last good response — only replace the screen with an
@@ -527,8 +632,14 @@ export function ShopMenuManagePage() {
   if (menuQuery.isError && menuQuery.data === undefined) {
     return (
       <EmptyState
-        title="Couldn't load the menu"
-        hint={menuQuery.error instanceof ApiError ? menuQuery.error.message : 'Please try again.'}
+        title={language === 'hi' ? 'मेन्यू लोड नहीं हो सका' : "Couldn't load the menu"}
+        hint={
+          menuQuery.error instanceof ApiError
+            ? menuQuery.error.message
+            : language === 'hi'
+              ? 'कृपया फिर से कोशिश करें।'
+              : 'Please try again.'
+        }
       />
     );
   }
@@ -541,7 +652,11 @@ export function ShopMenuManagePage() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-ink">Menu</h1>
-          <p className="text-sm text-ink/60">Add, edit, and manage stock.</p>
+          <p className="text-sm text-ink/60">
+            {language === 'hi'
+              ? 'आइटम जोड़ें, संपादित करें और स्टॉक प्रबंधित करें।'
+              : 'Add, edit, and manage stock.'}
+          </p>
         </div>
         <Button variant="secondary" onClick={() => setShowAddForm((v) => !v)}>
           <span>
@@ -569,7 +684,14 @@ export function ShopMenuManagePage() {
       )}
 
       {items.length === 0 ? (
-        <EmptyState title="No menu items yet" hint="Add your first item to get started." />
+        <EmptyState
+          title={language === 'hi' ? 'अभी तक कोई मेन्यू आइटम नहीं' : 'No menu items yet'}
+          hint={
+            language === 'hi'
+              ? 'शुरू करने के लिए अपना पहला आइटम जोड़ें।'
+              : 'Add your first item to get started.'
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => (
