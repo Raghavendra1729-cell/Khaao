@@ -233,13 +233,19 @@ func (r *GormOrderRepo) FindActiveByUserIDForUpdate(ctx context.Context, userID 
 	return &order, nil
 }
 
+// historyPageSize bounds a single student's order history response — a
+// semester's worth of orders (plus items) had no limit at all, which is a
+// lot to ship to a phone. Newest first, no pagination yet; add it if a "see
+// more" is ever asked for.
+const historyPageSize = 20
+
 func (r *GormOrderRepo) FindHistoryByUserID(ctx context.Context, userID uint) ([]models.Order, error) {
 	var orders []models.Order
 	err := getDB(ctx, r.db).Preload("Items").
 		Where("user_id = ? AND status NOT IN ?", userID, []models.OrderStatus{
 			models.OrderSubmitted, models.OrderPreparing, models.OrderPartiallyReady, models.OrderReady, models.OrderAwaitingPayment,
 		}).
-		Order("created_at desc").Find(&orders).Error
+		Order("created_at desc").Limit(historyPageSize).Find(&orders).Error
 	return orders, err
 }
 

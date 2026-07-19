@@ -301,3 +301,41 @@ func TestHistoryInsightsMath(t *testing.T) {
 		}
 	}
 }
+
+// TestShopHistoryResponseCappedButInsightsFull verifies the response-list
+// cap (R13) only trims what's returned for display — totalPaid and
+// insights.OrderCount must still reflect every order that day, not just the
+// capped slice, or a busy day would silently under-report revenue/counts.
+func TestShopHistoryResponseCappedButInsightsFull(t *testing.T) {
+	ctx := context.Background()
+	const date = "2026-07-14"
+	const totalOrders = 250 // more than shopHistoryResponseLimit (200)
+
+	orders := make([]models.Order, 0, totalOrders)
+	for i := 0; i < totalOrders; i++ {
+		orders = append(orders, models.Order{
+			ID: uint(i + 1), Status: models.OrderCompleted, Paid: true, TotalPrice: 100,
+			User:  models.User{Name: "Student"},
+			Items: []models.OrderItem{{Name: "Chai", Qty: 1, Status: models.ItemHandedOver}},
+		})
+	}
+	orderRepo := &mockOrderRepo{
+		orders:         make(map[uint]*models.Order),
+		terminalByDate: map[string][]models.Order{date: orders},
+	}
+	svc := services.NewOrderService(orderRepo)
+
+	resp, totalPaid, insights, err := svc.ShopHistory(ctx, date)
+	if err != nil {
+		t.Fatalf("ShopHistory: %v", err)
+	}
+	if len(resp) != 200 {
+		t.Errorf("response list len = %d, want capped to 200", len(resp))
+	}
+	if totalPaid != totalOrders*100 {
+		t.Errorf("total_paid = %d, want %d (must cover every order, not just the capped list)", totalPaid, totalOrders*100)
+	}
+	if insights.OrderCount != totalOrders {
+		t.Errorf("order_count = %d, want %d (must cover every order, not just the capped list)", insights.OrderCount, totalOrders)
+	}
+}

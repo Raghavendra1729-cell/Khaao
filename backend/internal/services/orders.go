@@ -182,6 +182,15 @@ type HistoryInsights struct {
 	Customers  []HistoryCustomer  `json:"customers"`
 }
 
+// shopHistoryResponseLimit caps how many order rows ShopHistory returns for
+// display. It only trims the response list, not the query itself — the
+// insights below (totalPaid, item counts, customer counts) must still be
+// computed over every order that day or they'd silently undercount on a
+// busy day. FindTerminalByDate is already scoped to a single business day
+// so this is a display cap, not a correctness fix like FindHistoryByUserID's
+// LIMIT.
+const shopHistoryResponseLimit = 200
+
 func (s *OrderService) ShopHistory(ctx context.Context, date string) ([]OrderResponse, int, HistoryInsights, error) {
 	orders, err := s.orderRepo.FindTerminalByDate(ctx, date)
 	if err != nil {
@@ -238,5 +247,8 @@ func (s *OrderService) ShopHistory(ctx context.Context, date string) ([]OrderRes
 		return insights.Customers[i].Name < insights.Customers[j].Name
 	})
 
+	if len(out) > shopHistoryResponseLimit {
+		out = out[:shopHistoryResponseLimit] // orders is already newest-first
+	}
 	return out, totalPaid, insights, nil
 }
