@@ -97,7 +97,7 @@ jobs:
         run: go test -tags=integration -p 1 ./... -race
 
   frontend:
-    name: Frontend — typecheck + build
+    name: Frontend — lint, typecheck, test, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -114,8 +114,14 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npx tsc -b --noEmit
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

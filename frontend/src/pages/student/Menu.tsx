@@ -7,6 +7,7 @@ import { getShopStatus } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { MenuItem } from '../../api/types';
 import { formatPrice, formatTime } from '../../lib/format';
+import { deriveCartEntries, staleCartIds } from '../../lib/cart';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
@@ -79,15 +80,9 @@ export function Menu() {
   // Only ever surface entries for items still present in the current menu —
   // a shopkeeper can delete/hide an item that's sitting in a student's cart
   // (menu refetches live via SSE menu_update), and a stale entry here would
-  // crash checkout downstream.
-  const cartEntries = useMemo(() => {
-    const items = menuQuery.data;
-    if (!items) return [];
-    const validIds = new Set(items.map((i) => i.id));
-    return Object.entries(cart)
-      .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
-      .filter((e) => e.qty > 0 && validIds.has(e.menu_item_id));
-  }, [cart, menuQuery.data]);
+  // crash checkout downstream. Logic lives in lib/cart.ts so it's directly
+  // unit-testable without rendering this whole page.
+  const cartEntries = useMemo(() => deriveCartEntries(cart, menuQuery.data), [cart, menuQuery.data]);
 
   const cartTotal = useMemo(() => {
     const items = menuQuery.data ?? [];
@@ -105,12 +100,7 @@ export function Menu() {
 
   // Prune cart entries that fell out of the menu and let the student know.
   useEffect(() => {
-    const items = menuQuery.data;
-    if (!items) return;
-    const validIds = new Set(items.map((i) => i.id));
-    const staleIds = Object.entries(cart)
-      .filter(([id, qty]) => qty > 0 && !validIds.has(Number(id)))
-      .map(([id]) => Number(id));
+    const staleIds = staleCartIds(cart, menuQuery.data);
     if (staleIds.length === 0) return;
     setCart((prev) => {
       const next = { ...prev };
@@ -141,7 +131,11 @@ export function Menu() {
     },
   });
 
-  const items = menuQuery.data ?? [];
+  // useMemo, not `?? []` directly — a fresh [] literal on every render (when
+  // menuQuery.data is still undefined) would give the useMemo hooks below a
+  // new reference every time, defeating their memoization even though
+  // nothing logically changed.
+  const items = useMemo(() => menuQuery.data ?? [], [menuQuery.data]);
 
   const hasRealCounts = useMemo(() => {
     return items.some((item) => item.order_count_today > 0);
