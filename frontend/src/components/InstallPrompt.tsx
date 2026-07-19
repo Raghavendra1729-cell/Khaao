@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { Button } from './Button';
+import { setInstallPromptShowing } from './promptCoordination';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -51,6 +53,14 @@ export function InstallPrompt() {
     };
   }, []);
 
+  // Claim (or release) the shared bottom-sheet slot for PushNotificationSetup
+  // to check — see promptCoordination.ts. Release it on unmount too, even
+  // though this component stays mounted for the app's lifetime in practice.
+  useEffect(() => {
+    setInstallPromptShowing(showPrompt || showIosHint);
+  }, [showPrompt, showIosHint]);
+  useEffect(() => () => setInstallPromptShowing(false), []);
+
   if (!showPrompt && !showIosHint) {
     return null;
   }
@@ -91,7 +101,7 @@ export function InstallPrompt() {
         </div>
         <button
           onClick={handleDismiss}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink/50 hover:bg-ink/5 hover:text-ink transition"
+          className="-m-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink/50 hover:bg-ink/5 hover:text-ink transition"
           aria-label="Dismiss"
         >
           <svg
@@ -109,12 +119,9 @@ export function InstallPrompt() {
       </div>
 
       {!showIosHint && (
-        <button
-          onClick={handleInstallClick}
-          className="mt-3 w-full rounded-lg bg-brand py-2 text-sm font-bold text-white transition hover:bg-brand-dark active:scale-[0.98]"
-        >
+        <Button type="button" onClick={handleInstallClick} fullWidth className="mt-3">
           Install
-        </button>
+        </Button>
       )}
     </div>
   );
