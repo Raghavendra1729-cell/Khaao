@@ -168,12 +168,15 @@ function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => voi
         {rateableItems.map((item) => (
           <div key={item.id} className="flex flex-col gap-1">
             <span className="text-sm font-semibold text-ink">{item.name}</span>
-            <div className="flex gap-1 text-2xl">
+            <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map((star) => (
                 <button
                   key={star}
+                  type="button"
                   onClick={() => setRatings((prev) => ({ ...prev, [item.id]: star }))}
-                  className={`transition-colors ${(ratings[item.id] || 0) >= star ? 'text-turmeric-deep' : 'text-edge'}`}
+                  aria-label={`Rate ${item.name} ${star} out of 5 stars`}
+                  aria-pressed={(ratings[item.id] || 0) >= star}
+                  className={`flex min-h-[44px] min-w-[44px] items-center justify-center text-2xl transition-colors ${(ratings[item.id] || 0) >= star ? 'text-turmeric-deep' : 'text-edge'}`}
                 >
                   ★
                 </button>
