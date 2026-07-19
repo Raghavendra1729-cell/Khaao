@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { Button } from './Button';
 import { Modal } from './Modal';
 
@@ -26,14 +28,25 @@ export function ConfirmDialog({
   open,
   title,
   body,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   variant = 'danger',
   onCancel,
   onConfirm,
   checkboxLabel,
 }: ConfirmDialogProps) {
   const [checked, setChecked] = useState(false);
+  const { user } = useAuth();
+  const { language } = useLanguage();
+  // Gated by role, not just language — this dialog is shared by shop and
+  // student call sites, and several of the latter only override
+  // confirmLabel (not cancelLabel), so an ungated default would leak a
+  // shopkeeper's stored Hindi preference into a student-facing "Cancel"
+  // button on a shared device/browser (same guard as Layout.tsx's
+  // AvatarMenu / PushNotificationSetup's showHindi).
+  const showHindi = user?.role === 'shopkeeper' && language === 'hi';
+  const resolvedConfirmLabel = confirmLabel ?? (showHindi ? 'पुष्टि करें' : 'Confirm');
+  const resolvedCancelLabel = cancelLabel ?? (showHindi ? 'रद्द करें' : 'Cancel');
 
   // Reset so a stale check from a previous open doesn't carry over.
   useEffect(() => {
@@ -57,10 +70,10 @@ export function ConfirmDialog({
         )}
         <div className="flex gap-2">
           <Button variant="ghost" className="flex-1" onClick={onCancel}>
-            {cancelLabel}
+            {resolvedCancelLabel}
           </Button>
           <Button variant={variant} className="flex-1" onClick={() => onConfirm(checked)}>
-            {confirmLabel}
+            {resolvedConfirmLabel}
           </Button>
         </div>
       </div>

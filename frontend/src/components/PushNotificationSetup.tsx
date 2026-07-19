@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getVapidPublicKey, subscribeToPush } from '../api/shop';
 import { useLanguage } from '../context/LanguageContext';
+import { Button } from './Button';
+import { useInstallPromptShowing } from './promptCoordination';
+import { useToast } from './Toast';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -24,9 +27,21 @@ interface PushNotificationSetupProps {
 
 export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
   const { language } = useLanguage();
+  const { showToast } = useToast();
   const showHindi = isShop && language === 'hi';
   const [showPrompt, setShowPrompt] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // InstallPrompt and this component render at the identical fixed
+  // bottom-sheet slot — see promptCoordination.ts. This is read once, at
+  // decision time inside the mount effect below (via the ref), not
+  // reactively: if the install card is showing right now, this prompt just
+  // stays hidden for the session. It deliberately does not re-check later,
+  // so dismissing the install card mid-session won't pop this prompt open
+  // (no live re-trigger, per design).
+  const installPromptShowing = useInstallPromptShowing();
+  const installPromptShowingRef = useRef(installPromptShowing);
+  installPromptShowingRef.current = installPromptShowing;
 
   useEffect(() => {
     // Only run if service workers, push, and Notification itself are
@@ -42,6 +57,11 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
 
     // Check if dismissed in this session
     if (sessionStorage.getItem('khaao_push_dismissed')) {
+      return;
+    }
+
+    // The install-prompt card already claims this slot — don't contest it.
+    if (installPromptShowingRef.current) {
       return;
     }
 
@@ -83,6 +103,12 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
       setShowPrompt(false);
     } catch (err) {
       console.error('Failed to enable push notifications:', err);
+      showToast(
+        showHindi
+          ? 'सूचनाएं चालू नहीं हो सकीं। कृपया पुनः प्रयास करें।'
+          : "Couldn't enable notifications. Please try again.",
+        'error',
+      );
     } finally {
       setLoading(false);
     }
@@ -101,16 +127,20 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
     <div className="fixed inset-x-4 bottom-20 z-40 mx-auto max-w-sm rounded-xl border border-edge bg-paper p-4 shadow-ticket">
       <div className="flex items-start gap-3">
         <div className="flex-1">
-          <p className="text-sm font-bold text-ink">Enable Notifications</p>
+          <p className="text-sm font-bold text-ink">
+            {showHindi ? 'सूचनाएं चालू करें' : 'Enable Notifications'}
+          </p>
           <p className="mt-0.5 text-xs text-ink/70">
             {isShop
-              ? 'Get notified of new orders even when this tab is closed.'
+              ? showHindi
+                ? 'टैब बंद होने पर भी नए ऑर्डर की सूचना पाएं।'
+                : 'Get notified of new orders even when this tab is closed.'
               : 'Get notified the moment your order is ready — even with your screen locked.'}
           </p>
         </div>
         <button
           onClick={handleDismiss}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink/50 transition hover:bg-ink/5 hover:text-ink"
+          className="-m-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink/50 transition hover:bg-ink/5 hover:text-ink"
           aria-label="Dismiss"
         >
           <svg
@@ -127,15 +157,9 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
         </button>
       </div>
 
-      <button
-        onClick={handleEnable}
-        disabled={loading}
-        className="mt-3 w-full rounded-lg bg-brand py-2 text-sm font-bold text-white transition hover:bg-brand-dark active:scale-[0.98] disabled:opacity-50"
-      >
-        <span>
-          {showHindi ? (loading ? 'चालू हो रहा है...' : 'चालू करें') : loading ? 'Enabling...' : 'Enable'}
-        </span>
-      </button>
+      <Button type="button" onClick={handleEnable} loading={loading} fullWidth className="mt-3">
+        {showHindi ? 'चालू करें' : 'Enable'}
+      </Button>
     </div>
   );
 }

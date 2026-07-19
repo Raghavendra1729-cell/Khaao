@@ -16,7 +16,7 @@ export default defineConfig({
         name: 'Khaao — canteen pre-order',
         short_name: 'Khaao',
         description: 'Book your canteen food, watch it cook live, pick it up with a token.',
-        theme_color: '#2c4434',
+        theme_color: '#DCE4DE',
         background_color: '#dce4de',
         display: 'standalone',
         // No orientation lock — the shopkeeper's counter device is a

@@ -76,11 +76,19 @@ export function ShopStatusControl() {
       queryClient.setQueryData(['shop', 'status'], data);
       queryClient.invalidateQueries({ queryKey: ['shop', 'status'] });
       const label = STATE_META[data.state].label.toLowerCase();
-      showToast(`Canteen is now ${label}.`, 'success');
+      showToast(
+        language === 'hi' ? `कैंटीन अब ${STATE_META[data.state].labelHi} है।` : `Canteen is now ${label}.`,
+        'success',
+      );
       close();
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Could not change status.';
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'स्थिति नहीं बदली जा सकी।'
+            : 'Could not change status.';
       setError(msg);
       showToast(msg, 'error');
     },
@@ -110,7 +118,11 @@ export function ShopStatusControl() {
         type="button"
         onClick={openControl}
         className={`flex min-h-[36px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm font-semibold transition active:scale-[0.97] ${meta.chip} ${meta.text}`}
-        aria-label={`Canteen status: ${meta.label}. Tap to change.`}
+        aria-label={
+          language === 'hi'
+            ? `कैंटीन स्थिति: ${meta.labelHi}. बदलने के लिए टैप करें।`
+            : `Canteen status: ${meta.label}. Tap to change.`
+        }
       >
         <span
           className={`h-2 w-2 rounded-full ${meta.dot} ${current !== 'open' ? 'animate-soft-pulse' : ''}`}
@@ -121,11 +133,15 @@ export function ShopStatusControl() {
       <Modal
         open={open}
         onClose={close}
-        title="Canteen status"
+        title={language === 'hi' ? 'कैंटीन स्थिति' : 'Canteen status'}
         subtitle={
           current === 'paused' && status?.reopen_at
-            ? `Currently paused — reopens at ${formatTime(status.reopen_at)}`
-            : `Currently ${meta.label.toLowerCase()}`
+            ? language === 'hi'
+              ? `अभी रुका हुआ — फिर से खुलने का समय ${formatTime(status.reopen_at)}`
+              : `Currently paused — reopens at ${formatTime(status.reopen_at)}`
+            : language === 'hi'
+              ? `अभी ${meta.labelHi}`
+              : `Currently ${meta.label.toLowerCase()}`
         }
       >
         <div className="grid grid-cols-3 gap-2">
@@ -164,25 +180,36 @@ export function ShopStatusControl() {
                   className="min-h-[44px] w-full rounded-xl border border-edge bg-paper px-3 text-base focus:border-brand"
                 />
                 <span className="mt-1 block text-xs text-ink/50">
-                  Students see “On a break — reopens at {reopenTime}”.
+                  {language === 'hi' ? (
+                    <>छात्र देखेंगे: “On a break — reopens at {reopenTime}”।</>
+                  ) : (
+                    <>Students see “On a break — reopens at {reopenTime}”.</>
+                  )}
                 </span>
               </label>
             )}
             {target === 'closed' && (
               <p className="text-sm text-ink/70">
-                Students see “The canteen is closed.” No new orders until you reopen.
+                {language === 'hi' ? (
+                  <>छात्र देखेंगे: “The canteen is closed.” फिर से खोलने तक कोई नया ऑर्डर नहीं।</>
+                ) : (
+                  <>Students see “The canteen is closed.” No new orders until you reopen.</>
+                )}
               </p>
             )}
             {target === 'open' && (
               <p className="text-sm text-ink/70">
-                Students can order again. Take a moment to review your menu and stock first.
+                {language === 'hi'
+                  ? 'छात्र फिर से ऑर्डर कर सकते हैं। पहले अपने मेन्यू और स्टॉक की समीक्षा कर लें।'
+                  : 'Students can order again. Take a moment to review your menu and stock first.'}
               </p>
             )}
 
             {(target === 'paused' || target === 'closed') && (
               <p className="text-xs text-ink/50">
-                Pending orders will be automatically declined. Already-accepted orders must be finished or
-                cancelled first.
+                {language === 'hi'
+                  ? 'लंबित ऑर्डर स्वतः अस्वीकार हो जाएंगे। पहले से स्वीकृत ऑर्डर पूरे करने होंगे या रद्द करने होंगे।'
+                  : 'Pending orders will be automatically declined. Already-accepted orders must be finished or cancelled first.'}
               </p>
             )}
 
@@ -194,7 +221,7 @@ export function ShopStatusControl() {
 
             <div className="flex gap-2">
               <Button type="button" variant="ghost" className="flex-1" onClick={close}>
-                Cancel
+                {language === 'hi' ? 'रद्द करें' : 'Cancel'}
               </Button>
               <Button
                 type="button"
@@ -223,7 +250,9 @@ export function ShopStatusControl() {
 
         {target && target === current && (
           <div className="mt-4 rounded-xl border border-edge bg-steel/30 px-4 py-3 text-center text-sm text-ink/50">
-            Already {STATE_META[current].label.toLowerCase()}.
+            {language === 'hi'
+              ? `पहले से ही ${STATE_META[current].labelHi} है।`
+              : `Already ${STATE_META[current].label.toLowerCase()}.`}
           </div>
         )}
       </Modal>
