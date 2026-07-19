@@ -75,6 +75,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       method: options.method ?? 'GET',
       headers,
       body,
+      // A request that hangs (mobile radio drops mid-request, no RST ever
+      // arrives) would otherwise leave pending UI state until the browser's
+      // own default gives up, which can take minutes. TimeoutError and any
+      // other AbortError both land in this catch, alongside genuine network
+      // failures — all surfaced the same way, since from the caller's
+      // perspective both mean "the request didn't complete" (R31).
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     throw new ApiError(0, 'Network error — check your connection and try again.');
