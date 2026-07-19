@@ -55,6 +55,19 @@ const SSE_HOLD_SECONDS = intEnv('LOADTEST_SSE_HOLD_SECONDS', 10); // per-iterati
 const THINK_TIME = floatEnv('LOADTEST_THINK_TIME', 1); // seconds between a student's actions
 const SHOP_TICK_INTERVAL = floatEnv('LOADTEST_SHOP_TICK_INTERVAL', 1); // seconds between shopkeeper sweeps
 const MAX_ACTIONS_PER_TICK = intEnv('LOADTEST_MAX_ACTIONS_PER_TICK', 25); // cap per shopkeeper sweep
+// Small gap between individual shop mutation calls within a sweep. The
+// server's per-user rate limiter (middleware/ratelimit.go) gives a
+// shopkeeper a 40-token burst refilling at 4/s — firing an entire backlog's
+// worth of accept/prep-done/handover/paid calls back-to-back with zero
+// pacing (as a real UI never would) blew through that burst instantly and
+// turned "shop action errors" into a guaranteed-fail 429 storm rather than a
+// meaningful signal. A single sweep spans four separate mutation categories
+// (accept/prep-done/handover/paid), so even the 40-token burst alone isn't
+// enough headroom once a category-by-category backlog piles up — 0.25s
+// matches the limiter's actual 4/s sustained refill, the fastest a
+// shopkeeper can clear a backlog indefinitely without 429s, which is still
+// far faster than any human tapping through the same queue.
+const SHOP_MUTATION_PACE = floatEnv('LOADTEST_SHOP_MUTATION_PACE', 0.25);
 
 const STUDENT_DOMAIN = __ENV.LOADTEST_STUDENT_DOMAIN || 'sst.scaler.com';
 const SHOPKEEPER_EMAIL = __ENV.LOADTEST_SHOPKEEPER_EMAIL || 'loadtest-shopkeeper@example.com';
@@ -260,7 +273,12 @@ export function studentSSEHold() {
     sleep(1);
     return;
   }
-  const res = http.get(`${BASE_URL}/api/stream?token=${encodeURIComponent(token)}`, {
+  const ticket = mintSSETicket(token);
+  if (!ticket) {
+    sleep(1);
+    return;
+  }
+  const res = http.get(`${BASE_URL}/api/stream?ticket=${encodeURIComponent(ticket)}`, {
     timeout: `${SSE_HOLD_SECONDS}s`,
     tags: { name: 'sse_student_hold' },
   });
@@ -310,6 +328,7 @@ export function shopkeeperFlow() {
       { headers, tags: { name: 'shop_accept' } }
     );
     recordShopAction(res);
+    sleep(SHOP_MUTATION_PACE);
   }
 
   // 2. Cook: mark whatever's queued as done so it can be allocated.
@@ -330,6 +349,7 @@ export function shopkeeperFlow() {
           { headers, tags: { name: 'shop_prep_done' } }
         );
         recordShopAction(res);
+        sleep(SHOP_MUTATION_PACE);
       }
     }
   }
@@ -346,6 +366,7 @@ export function shopkeeperFlow() {
           { headers, tags: { name: 'shop_handover' } }
         );
         recordShopAction(res);
+        sleep(SHOP_MUTATION_PACE);
       }
     }
   }
@@ -358,6 +379,7 @@ export function shopkeeperFlow() {
       tags: { name: 'shop_paid' },
     });
     recordShopAction(res);
+    sleep(SHOP_MUTATION_PACE);
   }
 
   sleep(SHOP_TICK_INTERVAL);
@@ -369,7 +391,12 @@ export function shopkeeperSSEHold() {
     sleep(1);
     return;
   }
-  const res = http.get(`${BASE_URL}/api/shop/stream?token=${encodeURIComponent(token)}`, {
+  const ticket = mintSSETicket(token);
+  if (!ticket) {
+    sleep(1);
+    return;
+  }
+  const res = http.get(`${BASE_URL}/api/shop/stream?ticket=${encodeURIComponent(ticket)}`, {
     timeout: `${SSE_HOLD_SECONDS}s`,
     tags: { name: 'sse_shop_hold' },
   });
@@ -395,6 +422,23 @@ function authenticate(email, name) {
     return JSON.parse(res.body).token || null;
   } catch (e) {
     authFailures.add(1);
+    return null;
+  }
+}
+
+// SSE endpoints authenticate via a short-lived, single-use ticket
+// (POST /api/auth/sse-ticket), never the raw JWT in the query string — see
+// services/sse_ticket.go. A fresh ticket must be minted for every connection
+// attempt; a stale one is rejected (one-use, ~60s TTL).
+function mintSSETicket(token) {
+  const res = http.post(`${BASE_URL}/api/auth/sse-ticket`, null, {
+    headers: authHeaders(token),
+    tags: { name: 'sse_ticket_mint' },
+  });
+  if (res.status !== 200) return null;
+  try {
+    return JSON.parse(res.body).ticket || null;
+  } catch (e) {
     return null;
   }
 }
