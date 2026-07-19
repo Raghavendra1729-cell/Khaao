@@ -22,7 +22,7 @@ const BASE_BACKOFF_MS = 1_000;
  * for every connection attempt, including reconnects — tickets are one-use
  * and expire in ~60s, so a stale one is never retried.
  *
- * Reconnects with exponential backoff (capped at MAX_BACKOFF_MS) on
+ * Reconnects with jittered exponential backoff (capped at MAX_BACKOFF_MS) on
  * error/disconnect for as long as the hook stays mounted and `path` is
  * non-null — it retries forever on network/EventSource failures, since a
  * flaky connection (campus Wi-Fi dead zone, elevator, network switch) says
@@ -52,7 +52,11 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
 
     function scheduleReconnect(): void {
       if (stopped) return;
-      const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+      // Jittered (0.5x-1.5x) so a backend restart that drops every connected
+      // client at the same instant doesn't have all ~1-2k of them remint
+      // tickets and reconnect on the exact same synchronized schedule.
+      // Capped after jitter so MAX_BACKOFF_MS stays a true ceiling.
+      const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempt * (0.5 + Math.random()), MAX_BACKOFF_MS);
       attempt += 1;
       reconnectTimer = setTimeout(connect, delay);
     }

@@ -88,6 +88,38 @@ describe('useSSE', () => {
     expect(FakeEventSource.instances.length).toBeGreaterThan(beforeCount);
   });
 
+  it('jitters the reconnect delay so many clients dropped at once do not all retry on the same schedule (R28)', async () => {
+    vi.mocked(authApi.mintSSETicket).mockResolvedValue('tok');
+    const randomSpy = vi.spyOn(Math, 'random');
+
+    // random() = 0 -> multiplier 0.5 -> attempt-0 delay = 1000 * 0.5 = 500ms.
+    randomSpy.mockReturnValue(0);
+    renderHook(() => useSSE('/api/stream', vi.fn()));
+    await vi.advanceTimersByTimeAsync(0);
+    latestSource().onerror?.();
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(FakeEventSource.instances).toHaveLength(1); // not yet — below the jittered delay
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeEventSource.instances).toHaveLength(2); // fires right at 500ms
+
+    // random() = 1 -> multiplier 1.5 -> attempt-0 delay = 1000 * 1.5 = 1500ms,
+    // a different value for the same nominal attempt — proving the delay is
+    // actually a function of Math.random(), not a disguised constant.
+    randomSpy.mockReturnValue(1);
+    const { unmount } = renderHook(() => useSSE('/api/stream', vi.fn()));
+    await vi.advanceTimersByTimeAsync(0);
+    latestSource().onerror?.();
+
+    const beforeSecond = FakeEventSource.instances.length;
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(FakeEventSource.instances.length).toBe(beforeSecond);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeEventSource.instances.length).toBe(beforeSecond + 1);
+
+    unmount();
+  });
+
   it('stops reconnecting after a 401 from the ticket mint, without dispatching another unauthorized event itself', async () => {
     vi.mocked(authApi.mintSSETicket).mockRejectedValue(new ApiError(401, 'expired'));
     const unauthorizedHandler = vi.fn();
@@ -116,7 +148,9 @@ describe('useSSE', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(FakeEventSource.instances).toHaveLength(0);
 
-    await vi.advanceTimersByTimeAsync(1_000); // base backoff
+    // Backoff is jittered (0.5x-1.5x of the base 1s delay, see R28) — advance
+    // to the top of that range, not the old exact 1s, so this isn't flaky.
+    await vi.advanceTimersByTimeAsync(1_500);
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
@@ -133,7 +167,8 @@ describe('useSSE', () => {
     // happen after the base backoff again, not a further-escalated one,
     // proving onopen reset the attempt counter.
     latestSource().onerror?.();
-    await vi.advanceTimersByTimeAsync(1_000);
+    // Jittered range (0.5x-1.5x base) — advance to the top of it.
+    await vi.advanceTimersByTimeAsync(1_500);
     expect(FakeEventSource.instances).toHaveLength(2);
 
     latestSource().onopen?.();
