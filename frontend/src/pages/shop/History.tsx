@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getShopHistory } from '../../api/shop';
 import { ApiError } from '../../api/client';
-import { cloudinaryThumb, formatPrice } from '../../lib/format';
+import { cloudinaryThumb, formatPrice, formatShortDate } from '../../lib/format';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
-import { FullPageSpinner } from '../../components/Spinner';
 import { OrderStatusBadge } from '../../components/StatusBadge';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -30,6 +29,36 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
+/** Paper-toned skeleton shaped like the real page (F15) — header block, the
+ * three insight cards, and the order-log toggle bar — so the page doesn't
+ * reflow when data lands and reads as "loading", not "broken", on the
+ * hostile campus network (§ 9.1.7). */
+function HistorySkeleton() {
+  return (
+    <div className="flex flex-col gap-6" aria-hidden="true">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <div className="h-7 w-32 animate-soft-pulse rounded-md bg-edge" />
+          <div className="h-4 w-36 animate-soft-pulse rounded bg-edge/70" />
+        </div>
+        <div className="h-11 w-40 animate-soft-pulse rounded-xl border border-edge bg-paper" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <Card key={i} className="flex flex-col gap-3 p-4">
+            <div className="h-3 w-16 animate-soft-pulse rounded bg-edge" />
+            <div className="h-8 w-12 animate-soft-pulse rounded bg-edge/70" />
+            <div className="h-3 w-24 animate-soft-pulse rounded bg-edge/50" />
+          </Card>
+        ))}
+      </div>
+
+      <div className="h-12 w-full animate-soft-pulse rounded-xl border border-edge bg-paper" />
+    </div>
+  );
+}
+
 export function ShopHistoryPage() {
   const { language } = useLanguage();
   const [date, setDate] = useState(todayLocal);
@@ -40,7 +69,7 @@ export function ShopHistoryPage() {
     queryFn: () => getShopHistory(date),
   });
 
-  if (historyQuery.isLoading) return <FullPageSpinner />;
+  if (historyQuery.isLoading) return <HistorySkeleton />;
 
   // isError also fires after a failed *background* refetch, while data
   // still holds the last good response — only replace the screen with an
@@ -48,8 +77,14 @@ export function ShopHistoryPage() {
   if (historyQuery.isError && historyQuery.data === undefined) {
     return (
       <EmptyState
-        title="Couldn't load history"
-        hint={historyQuery.error instanceof ApiError ? historyQuery.error.message : 'Please try again.'}
+        title={language === 'hi' ? 'इतिहास लोड नहीं हो सका' : "Couldn't load history"}
+        hint={
+          historyQuery.error instanceof ApiError
+            ? historyQuery.error.message
+            : language === 'hi'
+              ? 'कृपया फिर से कोशिश करें।'
+              : 'Please try again.'
+        }
       />
     );
   }
@@ -60,6 +95,9 @@ export function ShopHistoryPage() {
     insights: { order_count: 0, item_counts: [], customers: [] },
   };
 
+  const isToday = date === todayLocal();
+  const humanDate = formatShortDate(date);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header row: total + date picker */}
@@ -68,13 +106,21 @@ export function ShopHistoryPage() {
           <h1 className="font-display text-2xl font-bold tracking-tight text-ink">
             {formatPrice(total_paid)}
           </h1>
-          <p className="text-sm text-ink/50">collected on {date}</p>
+          <p className="text-sm text-ink/50">
+            {language === 'hi'
+              ? isToday
+                ? 'आज एकत्र किया गया'
+                : `${humanDate} को एकत्र किया गया`
+              : isToday
+                ? 'collected today'
+                : `collected on ${humanDate}`}
+          </p>
         </div>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="rounded-xl border border-edge bg-paper px-3 py-2.5 text-sm text-ink shadow-sm focus:border-brand focus:outline-none"
+          className="min-h-[44px] rounded-xl border border-edge bg-paper px-3 py-2.5 text-base text-ink shadow-sm focus:border-brand focus:outline-none"
         />
       </div>
 
@@ -83,15 +129,27 @@ export function ShopHistoryPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {/* Total orders */}
           <Card className="flex flex-col gap-1 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Orders</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
+              {language === 'hi' ? 'ऑर्डर' : 'Orders'}
+            </p>
             <p className="font-display text-3xl font-bold text-ink">{insights.order_count}</p>
-            <p className="text-sm text-ink/50">completed today</p>
+            <p className="text-sm text-ink/50">
+              {language === 'hi'
+                ? isToday
+                  ? 'आज पूरे हुए'
+                  : `${humanDate} को पूरे हुए`
+                : isToday
+                  ? 'completed today'
+                  : `completed on ${humanDate}`}
+            </p>
           </Card>
 
           {/* Top items */}
           {insights.item_counts.length > 0 && (
             <Card className="flex flex-col gap-3 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Top items</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
+                {language === 'hi' ? 'टॉप आइटम' : 'Top items'}
+              </p>
               <div className="flex flex-col gap-2">
                 {insights.item_counts.slice(0, 5).map((ic) => (
                   <div key={ic.name} className="flex items-center justify-between gap-2">
@@ -106,13 +164,19 @@ export function ShopHistoryPage() {
           {/* Top customers */}
           {insights.customers.length > 0 && (
             <Card className="flex flex-col gap-3 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">Regulars</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
+                {language === 'hi' ? 'नियमित ग्राहक' : 'Regulars'}
+              </p>
               <div className="flex flex-col gap-2">
                 {insights.customers.slice(0, 5).map((c) => (
                   <div key={c.name} className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm text-ink">{c.name || 'Student'}</span>
+                    <span className="truncate text-sm text-ink">
+                      {c.name || (language === 'hi' ? 'छात्र' : 'Student')}
+                    </span>
                     <span className="tabular shrink-0 text-xs text-ink/50">
-                      {c.order_count} order{c.order_count !== 1 ? 's' : ''}
+                      {language === 'hi'
+                        ? `${c.order_count} ऑर्डर`
+                        : `${c.order_count} order${c.order_count !== 1 ? 's' : ''}`}
                     </span>
                   </div>
                 ))}
@@ -124,7 +188,14 @@ export function ShopHistoryPage() {
 
       {/* ── Order list ─────────────────────────────────────────────── */}
       {orders.length === 0 ? (
-        <EmptyState title="No orders found" hint={`No finished orders for ${date}.`} />
+        <EmptyState
+          title={language === 'hi' ? 'कोई ऑर्डर नहीं मिला' : 'No orders found'}
+          hint={
+            language === 'hi'
+              ? `${humanDate} के लिए कोई पूर्ण ऑर्डर नहीं।`
+              : `No finished orders for ${humanDate}.`
+          }
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {/* Toggle button — collapsed by default */}
