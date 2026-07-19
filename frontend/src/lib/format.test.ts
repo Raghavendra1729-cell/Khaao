@@ -3,6 +3,7 @@ import {
   cloudinaryThumb,
   formatCountdown,
   formatPrice,
+  formatShortDate,
   paiseToRupeesInput,
   rupeesToPaise,
   secondsUntil,
@@ -81,6 +82,27 @@ describe('formatCountdown', () => {
 
   it('clamps negative input to 0:00', () => {
     expect(formatCountdown(-30)).toBe('0:00');
+  });
+});
+
+describe('formatShortDate', () => {
+  it('formats a YYYY-MM-DD string as "Ddd D Mon"', () => {
+    // 2026-07-18 is a Saturday.
+    expect(formatShortDate('2026-07-18')).toBe('Sat 18 Jul');
+    // 2026-01-01 is a Thursday — also checks single-digit day + January.
+    expect(formatShortDate('2026-01-01')).toBe('Thu 1 Jan');
+  });
+
+  it('does not shift the date across the UTC boundary', () => {
+    // A naive `new Date('YYYY-MM-DD')` parses as UTC midnight, which in any
+    // timezone west of UTC (e.g. IST is east, but this guards the general
+    // case) can print the previous day. Parsing with an explicit local time
+    // must keep the date exactly as given regardless of host timezone.
+    expect(formatShortDate('2026-12-31')).toBe('Thu 31 Dec');
+  });
+
+  it('returns the input unchanged for an unparseable string', () => {
+    expect(formatShortDate('not-a-date')).toBe('not-a-date');
   });
 });
 

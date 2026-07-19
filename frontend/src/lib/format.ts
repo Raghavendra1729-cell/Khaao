@@ -40,6 +40,26 @@ export function formatCountdown(totalSeconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Humanize a "YYYY-MM-DD" date string (the shape shop/History.tsx's
+ * `todayLocal()` produces) into a short display form, e.g. "Fri 18 Jul".
+ * Parsed with an explicit local-midnight time (`T00:00:00`, no trailing
+ * `Z`) so the browser reads it in the local timezone instead of UTC — a
+ * bare `new Date('2026-07-18')` is parsed as UTC midnight, which prints as
+ * the 17th in any timezone west of UTC. Built from fixed English
+ * abbreviation tables rather than `toLocaleDateString` so the output is
+ * deterministic across environments/locales instead of depending on the
+ * host's ICU data (and doesn't grow a stray locale-default comma).
+ */
+export function formatShortDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return `${SHORT_WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
+}
+
 const CLOUDINARY_UPLOAD_MARKER = '/upload/';
 
 /**
