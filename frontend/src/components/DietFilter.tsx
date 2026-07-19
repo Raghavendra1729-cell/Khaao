@@ -33,7 +33,11 @@ export function DietFilter({ value, onChange }: DietFilterProps) {
             type="button"
             aria-pressed={active}
             onClick={() => onChange(opt.key)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-display text-xs font-semibold uppercase tracking-wide transition ${
+            // Visual pill stays compact; the invisible ::before expands the
+            // actual hit target to >=44px without growing the chip on screen
+            // (§ 9.1.2). before:content-[''] + a negative inset is the
+            // standard "expanded hit area" technique.
+            className={`relative inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-display text-xs font-semibold uppercase tracking-wide transition before:absolute before:-inset-2.5 before:content-[''] ${
               active ? 'bg-brand text-white shadow-sm' : 'text-ink/60 hover:text-ink'
             }`}
           >
