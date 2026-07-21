@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -14,6 +15,37 @@ import (
 	"khaao/internal/models"
 	"khaao/internal/repository"
 )
+
+// allowedPushHosts is the fixed set of hostnames a browser can ever generate
+// a real Web Push subscription endpoint for. `endpoint` is otherwise a fully
+// client-supplied URL that the server itself later dereferences — send()
+// below makes an outbound HTTPS POST to it via webpush-go — so without this
+// allowlist, Subscribe is a textbook SSRF: any authenticated user (this
+// route is requireAuth only, so any student) can call POST
+// /api/push/subscribe with an internal or attacker-controlled `endpoint`
+// paired with a self-generated P-256 keypair. That keypair doesn't need to
+// come from a real browser subscription — webpush-go's encryption step only
+// checks the key is a well-formed point on the curve, which a five-line
+// script can produce — so "the client must supply valid encryption keys" is
+// no barrier at all. The next time a push fires for that user (e.g. their
+// own order reaching "ready", which they can engineer almost at will), the
+// backend POSTs to whatever host they chose.
+var allowedPushHosts = map[string]bool{
+	"fcm.googleapis.com":                true, // Chrome, Edge, Android WebView
+	"updates.push.services.mozilla.com": true, // Firefox
+	"web.push.apple.com":                true, // Safari / iOS installed PWA
+}
+
+func validatePushEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return ErrBadRequest("invalid push endpoint")
+	}
+	if !allowedPushHosts[u.Hostname()] {
+		return ErrBadRequest("unrecognized push endpoint")
+	}
+	return nil
+}
 
 // pushHTTPClient replaces webpush-go's default *http.Client, which has no
 // timeout — a hung push endpoint would otherwise strand goroutines forever
@@ -34,6 +66,9 @@ func NewPushService(cfg *config.Config, repo repository.PushRepo) *PushService {
 // same browser endpoint (e.g. after a reload) updates the existing row
 // instead of violating the endpoint's unique index.
 func (s *PushService) Subscribe(ctx context.Context, userID uint, endpoint, p256dh, auth string) error {
+	if err := validatePushEndpoint(endpoint); err != nil {
+		return err
+	}
 	existing, err := s.repo.FindByEndpoint(ctx, endpoint)
 	if err != nil {
 		return err
