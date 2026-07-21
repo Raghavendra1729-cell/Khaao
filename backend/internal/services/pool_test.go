@@ -2,6 +2,7 @@ package services_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"khaao/internal/config"
@@ -29,6 +30,13 @@ type mockOrderRepo struct {
 	// every in-progress order (see TestReject/RemoveItem broadcast-scope
 	// tests).
 	findByIDCalls int
+	// findByIDIDs records every id passed to FindByID, in call order —
+	// lets a test assert a *specific* order was never reloaded (e.g. an
+	// unrelated order3 in the broadcast-scope tests) directly, rather than
+	// through a raw count that also includes unrelated FindByID calls (e.g.
+	// a mutation's own final re-fetch of the order it acted on, to build an
+	// accurate response).
+	findByIDIDs []uint
 }
 
 func (m *mockOrderRepo) Create(ctx context.Context, o *models.Order) error {
@@ -43,6 +51,7 @@ func (m *mockOrderRepo) Save(ctx context.Context, o *models.Order) error {
 func (m *mockOrderRepo) SaveItem(ctx context.Context, i *models.OrderItem) error { return nil }
 func (m *mockOrderRepo) FindByID(ctx context.Context, id uint) (*models.Order, error) {
 	m.findByIDCalls++
+	m.findByIDIDs = append(m.findByIDIDs, id)
 	return m.orders[id], nil
 }
 func (m *mockOrderRepo) FindByIDForUpdate(ctx context.Context, id uint) (*models.Order, error) {
@@ -126,9 +135,9 @@ func (m *mockOrderRepo) CountActive(_ context.Context) (int, error) {
 }
 func (m *mockOrderRepo) CountAccepted(_ context.Context) (int, error) {
 	acceptedStatuses := map[models.OrderStatus]bool{
-		models.OrderPreparing:      true,
-		models.OrderPartiallyReady: true,
-		models.OrderReady:          true,
+		models.OrderPreparing:       true,
+		models.OrderPartiallyReady:  true,
+		models.OrderReady:           true,
 		models.OrderAwaitingPayment: true,
 	}
 	n := 0
@@ -798,17 +807,29 @@ func TestRejectBroadcastsOnlyTouchedOrders(t *testing.T) {
 	}
 	_ = repo.Create(ctx, order3)
 
-	before := repo.findByIDCalls
+	before := len(repo.findByIDIDs)
 	if _, err := engine.Reject(ctx, 1); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
-	broadcastCalls := repo.findByIDCalls - before
+	reloaded := repo.findByIDIDs[before:]
 
-	// Exactly 2: the acted-on order (1) plus the one order FCFS actually
-	// reallocated to (2). The old FindInProgress-based fallback would have
-	// also reloaded/broadcast order3, making this 3.
-	if broadcastCalls != 2 {
-		t.Errorf("expected exactly 2 broadcast reloads (acted-on + touched), got %d", broadcastCalls)
+	// order3 must never be reloaded/broadcast — the old FindInProgress-based
+	// fallback would have reloaded every in-progress order, including it.
+	// Asserted directly on which ids were fetched, not a raw call count: a
+	// mutation is also allowed to re-fetch the order it acted on again to
+	// build an accurate response (see the includeStudent=true comment on
+	// Reject's own final FindByID call) without that looking like a
+	// regression here.
+	for _, id := range reloaded {
+		if id == order3.ID {
+			t.Errorf("expected order3 (id=%d) never reloaded, but FindByID was called with it: %v", order3.ID, reloaded)
+		}
+	}
+	if !slices.Contains(reloaded, order1.ID) {
+		t.Errorf("expected the acted-on order (id=%d) to be reloaded, got %v", order1.ID, reloaded)
+	}
+	if !slices.Contains(reloaded, order2.ID) {
+		t.Errorf("expected the FCFS-touched order (id=%d) to be reloaded, got %v", order2.ID, reloaded)
 	}
 }
 
@@ -877,4 +898,3 @@ func TestRejectAfterAcceptRefusedWhenHandedOver(t *testing.T) {
 		t.Fatal("expected Reject to be refused once pickup has started")
 	}
 }
-

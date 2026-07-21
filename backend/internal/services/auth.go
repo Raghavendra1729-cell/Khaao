@@ -77,6 +77,16 @@ func NewAuthService(uRepo repository.UserRepo, eRepo repository.ShopkeeperEmailR
 	}
 }
 
+// GetUser loads the authenticated user for every request (RequireAuth,
+// RequireSSEAuth). For a user whose stored role is shopkeeper, it also
+// re-verifies their email is still on the live shopkeeper allowlist —
+// without this, a removed shopkeeper's already-issued JWT would keep working
+// with full shopkeeper access for up to its full 7-day life, since the
+// allowlist is otherwise only ever consulted at FirebaseLogin time and the
+// `role` column it writes is never re-derived on ordinary requests. A
+// student's role has no equivalent revocation path (their email-domain check
+// is a static config value, not a per-user list), so this only applies to
+// shopkeeper.
 func (s *AuthService) GetUser(ctx context.Context, id uint) (models.User, error) {
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
@@ -84,6 +94,15 @@ func (s *AuthService) GetUser(ctx context.Context, id uint) (models.User, error)
 	}
 	if user == nil {
 		return models.User{}, ErrNotFound("user not found")
+	}
+	if user.Role == models.RoleShopkeeper {
+		stillAllowed, err := s.emailRepo.Exists(ctx, user.Email)
+		if err != nil {
+			return models.User{}, err
+		}
+		if !stillAllowed {
+			return models.User{}, ErrNotFound("user not found")
+		}
 	}
 	return *user, nil
 }

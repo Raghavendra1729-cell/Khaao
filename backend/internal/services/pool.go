@@ -503,7 +503,19 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 	e.hub.NotifyShopOrdersUpdate()
 	e.hub.NotifyShopPrepUpdate()
 
-	return ToOrderResponse(*order, true), nil
+	// Re-fetch rather than reusing the in-transaction `order` — that one came
+	// from FindByIDForUpdate, which deliberately skips Preload("User") since
+	// it's only ever used for mutation logic that never reads order.User.
+	// Building the includeStudent=true response from it directly (as this
+	// function used to) silently returned an empty student_name/email.
+	stored, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("rejected order could not be reloaded")
+	}
+	return ToOrderResponse(*stored, true), nil
 }
 
 // RejectAllSubmitted auto-declines every still-submitted (not yet accepted)
@@ -658,7 +670,16 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
-	return ToOrderResponse(*order, true), nil
+
+	// Re-fetch with Preload("User") — see the identical comment in Reject.
+	stored, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("order could not be reloaded after handover")
+	}
+	return ToOrderResponse(*stored, true), nil
 }
 
 // RemoveItem lets a shopkeeper drop a line from an already-accepted order.
@@ -811,7 +832,16 @@ func (e *PoolEngine) Paid(ctx context.Context, orderID uint) (OrderResponse, err
 
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
-	return ToOrderResponse(*order, true), nil
+
+	// Re-fetch with Preload("User") — see the identical comment in Reject.
+	stored, err := e.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return OrderResponse{}, err
+	}
+	if stored == nil {
+		return OrderResponse{}, ErrInternal("paid order could not be reloaded")
+	}
+	return ToOrderResponse(*stored, true), nil
 }
 
 // MarkDone records qty freshly-cooked units of a menu item and immediately

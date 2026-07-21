@@ -18,7 +18,14 @@ type mockUserRepo struct {
 	users []*models.User
 }
 
-func (m *mockUserRepo) FindByID(ctx context.Context, id uint) (*models.User, error) { return nil, nil }
+func (m *mockUserRepo) FindByID(ctx context.Context, id uint) (*models.User, error) {
+	for _, u := range m.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
 func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	for _, u := range m.users {
 		if u.Email == email {
@@ -109,6 +116,52 @@ func TestAuthRules(t *testing.T) {
 	_, _, err = svc.FirebaseLogin(context.Background(), "unverified")
 	if err == nil {
 		t.Fatalf("expected failure for unverified email")
+	}
+}
+
+// TestGetUserRevalidatesShopkeeperAllowlist: a de-provisioned shopkeeper
+// (removed from the email allowlist, e.g. staff turnover) must be locked out
+// on their very next request even though they already hold a valid,
+// unexpired JWT and their stored user.Role column still says "shopkeeper" —
+// the allowlist is otherwise only ever consulted at login. A student's
+// access must be unaffected by a change to this unrelated allowlist.
+func TestGetUserRevalidatesShopkeeperAllowlist(t *testing.T) {
+	uRepo := &mockUserRepo{users: []*models.User{}}
+	eRepo := &mockEmailRepo{emails: map[string]bool{"shop@shop.com": true}}
+	verifier := &mockVerifier{
+		identities: map[string]*authn.Identity{
+			"shop-token":    {UID: "1", Email: "shop@shop.com", EmailVerified: true},
+			"student-token": {UID: "2", Email: "student@college.edu", EmailVerified: true},
+		},
+	}
+	cfg := &config.Config{AllowedEmailDomain: "college.edu", JWTSecret: "secret"}
+	svc := services.NewAuthService(uRepo, eRepo, verifier, cfg)
+
+	shopUser, _, err := svc.FirebaseLogin(context.Background(), "shop-token")
+	if err != nil {
+		t.Fatalf("expected shopkeeper login to succeed, got %v", err)
+	}
+	studentUser, _, err := svc.FirebaseLogin(context.Background(), "student-token")
+	if err != nil {
+		t.Fatalf("expected student login to succeed, got %v", err)
+	}
+
+	if _, err := svc.GetUser(context.Background(), shopUser.ID); err != nil {
+		t.Fatalf("expected shopkeeper still on the allowlist to load, got %v", err)
+	}
+	if _, err := svc.GetUser(context.Background(), studentUser.ID); err != nil {
+		t.Fatalf("expected student to load, got %v", err)
+	}
+
+	// Simulate an admin de-provisioning the shopkeeper without them logging
+	// in again — their JWT/session is still otherwise perfectly valid.
+	delete(eRepo.emails, "shop@shop.com")
+
+	if _, err := svc.GetUser(context.Background(), shopUser.ID); err == nil {
+		t.Fatal("expected a removed shopkeeper's existing session to be locked out immediately")
+	}
+	if _, err := svc.GetUser(context.Background(), studentUser.ID); err != nil {
+		t.Fatalf("expected student access to be unaffected by the shopkeeper allowlist change, got %v", err)
 	}
 }
 
