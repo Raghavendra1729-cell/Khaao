@@ -87,6 +87,8 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
               src={cloudinaryThumb(item.photo_url, 88) ?? undefined}
               alt={item.name}
               className="h-full w-full object-cover"
+              loading="lazy"
+              decoding="async"
             />
           </div>
         )}
@@ -244,7 +246,11 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
     },
     onError: (err) =>
       showToast(
-        err instanceof ApiError ? err.message : language === 'hi' ? 'ऑर्डर रद्द नहीं हो सका।' : 'Could not cancel order.',
+        err instanceof ApiError
+          ? err.message
+          : language === 'hi'
+            ? 'ऑर्डर रद्द नहीं हो सका।'
+            : 'Could not cancel order.',
         'error',
       ),
   });
@@ -265,7 +271,9 @@ export function OrderModal({ order, onClose }: { order: Order; onClose: () => vo
         <div className="flex flex-col gap-1.5">
           {!canCollect && (
             <p className="text-center text-xs text-ink/50">
-              {language === 'hi' ? 'भुगतान लेने के लिए हर आइटम सौंपें।' : 'Hand over every item to collect payment.'}
+              {language === 'hi'
+                ? 'भुगतान लेने के लिए हर आइटम सौंपें।'
+                : 'Hand over every item to collect payment.'}
             </p>
           )}
           <Button

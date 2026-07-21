@@ -4,6 +4,8 @@ import { useSSE, type SSEMessage } from '../hooks/useSSE';
 import { getShopOrders } from '../api/shop';
 import { playIncomingAlert, playOrderComplete } from '../lib/sound';
 import { pingShopNotification } from './shopNotifications';
+import { announce } from '../lib/liveAnnouncer';
+import { useLanguage } from '../context/LanguageContext';
 
 /**
  * Mounted once for the whole shopkeeper session (in Layout). Owns the
@@ -17,6 +19,7 @@ import { pingShopNotification } from './shopNotifications';
  */
 export function ShopRealtime() {
   const queryClient = useQueryClient();
+  const { language } = useLanguage();
   const { data } = useQuery({ queryKey: ['shop', 'orders'], queryFn: getShopOrders });
 
   // Track previous incoming count to detect new-order arrivals.
@@ -34,6 +37,9 @@ export function ShopRealtime() {
     if (prevIncomingCountRef.current !== null && count > prevIncomingCountRef.current) {
       playIncomingAlert();
       pingShopNotification();
+      // G7: the one shop-side moment this live region covers — matches the
+      // chime it rides alongside, nothing more.
+      announce(language === 'hi' ? 'नया ऑर्डर आया है।' : 'New order received.');
     }
     prevIncomingCountRef.current = count;
 
@@ -51,7 +57,7 @@ export function ShopRealtime() {
       }
     }
     prevAwaitingIdsRef.current = currentAwaitingIds;
-  }, [data]);
+  }, [data, language]);
 
   const handleMessage = useCallback(
     (msg: SSEMessage) => {

@@ -7,10 +7,16 @@
  * static (not shimmering) for anyone who has that preference on.
  */
 
-/** A pulsing placeholder block. `rounded` is left to the caller so each bone
- * can match the corner radius of the real element it stands in for. */
+/** A pulsing placeholder block. `rounded` and the background tone are both
+ * left to the caller (every call site below supplies its own `bg-edge/<n>`)
+ * — a hardcoded default here would fight a caller's override half the time,
+ * since Tailwind resolves same-specificity utility collisions by source
+ * order in the generated stylesheet (ascending by opacity), not by position
+ * in the `className` string, so a default of e.g. `bg-edge/50` would beat a
+ * caller's `bg-edge/30` or `bg-edge/45` even though it comes first in the
+ * template literal. */
 function Bone({ className = '' }: { className?: string }) {
-  return <div className={`animate-soft-pulse bg-edge/50 ${className}`} />;
+  return <div className={`animate-soft-pulse ${className}`} />;
 }
 
 function SkeletonRow() {
@@ -35,6 +41,11 @@ export function MenuSkeleton() {
       <div aria-hidden="true">
         <Bone className="mb-1 h-7 w-40 rounded bg-edge/50" />
         <Bone className="mb-4 h-4 w-56 rounded bg-edge/30" />
+
+        {/* Search input (G2) — without this bone the real page grows a
+            full-width bar here the instant data lands, shifting everything
+            below it down by one row. */}
+        <Bone className="mb-5 h-11 w-full rounded-xl border border-edge bg-paper" />
 
         {/* Trending rail */}
         <div className="mb-6">

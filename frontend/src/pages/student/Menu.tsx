@@ -7,7 +7,7 @@ import { getShopStatus } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { MenuItem } from '../../api/types';
 import { formatPrice, formatTime } from '../../lib/format';
-import { deriveCartEntries, staleCartIds } from '../../lib/cart';
+import { deriveCartEntries, loadStoredCart, saveStoredCart, staleCartIds } from '../../lib/cart';
 import { Button } from '../../components/Button';
 import { QtyStepper } from '../../components/QtyStepper';
 import { EmptyState } from '../../components/EmptyState';
@@ -16,23 +16,41 @@ import { useToast } from '../../components/Toast';
 import { Modal } from '../../components/Modal';
 
 import { TrendingRail } from '../../components/TrendingRail';
+import { FavoritesRail } from '../../components/FavoritesRail';
 import { DietFilter, type DietFilterValue } from '../../components/DietFilter';
 import { MenuItemCard } from '../../components/MenuItemCard';
 import { MenuSkeleton } from '../../components/MenuSkeleton';
 
-const CART_STORAGE_KEY = 'khaao_cart_v2';
+const DIET_FILTER_STORAGE_KEY = 'khaao_diet_filter_v1';
+const DIET_FILTER_VALUES: DietFilterValue[] = ['all', 'veg', 'non_veg'];
 
-interface StoredCart {
-  date: string;
-  items: Record<number, number>;
+// G4: a veg/non-veg student re-picks the same filter every visit — persist
+// it, but validate the stored value against the real union first (a stale
+// value from a future/older app version must never crash the render).
+function loadStoredDietFilter(): DietFilterValue {
+  try {
+    const raw = localStorage.getItem(DIET_FILTER_STORAGE_KEY);
+    return (DIET_FILTER_VALUES as string[]).includes(raw ?? '') ? (raw as DietFilterValue) : 'all';
+  } catch {
+    return 'all';
+  }
 }
 
-/** Local calendar date as YYYY-MM-DD — just a "is this cart from today or a
- * stale earlier day" heuristic, not the authoritative BUSINESS_TIMEZONE
- * boundary the backend uses for order tokens. */
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const FAVORITES_STORAGE_KEY = 'khaao_favorites_v1';
+
+// G8: device-local "Your usuals" pins. Validates every id from storage is
+// actually a number before trusting it — a corrupted/hand-edited value must
+// never crash the render.
+function loadStoredFavorites(): Set<number> {
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is number => typeof id === 'number'));
+  } catch {
+    return new Set();
+  }
 }
 
 function prefersReducedMotion(): boolean {
@@ -42,18 +60,6 @@ function prefersReducedMotion(): boolean {
   return Boolean(
     typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
   );
-}
-
-function loadStoredCart(): Record<number, number> {
-  try {
-    const raw = localStorage.getItem(CART_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as StoredCart;
-    if (parsed.date !== todayKey()) return {};
-    return parsed.items ?? {};
-  } catch {
-    return {};
-  }
 }
 
 export function Menu() {
@@ -66,20 +72,41 @@ export function Menu() {
   // today's date so a cart from a previous day is never resurrected.
   const [cart, setCart] = useState<Record<number, number>>(loadStoredCart);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [dietFilter, setDietFilter] = useState<DietFilterValue>('all');
+  const [dietFilter, setDietFilterState] = useState<DietFilterValue>(loadStoredDietFilter);
+  const setDietFilter = (next: DietFilterValue) => {
+    setDietFilterState(next);
+    try {
+      localStorage.setItem(DIET_FILTER_STORAGE_KEY, next);
+    } catch {
+      // Private-browsing/quota edge cases — the filter still works for this
+      // session, it just won't persist across visits.
+    }
+  };
   const [activeCategory, setActiveCategory] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [favorites, setFavorites] = useState<Set<number>>(loadStoredFavorites);
 
   useEffect(() => {
-    const hasItems = Object.values(cart).some((qty) => qty > 0);
-    if (!hasItems) {
-      localStorage.removeItem(CART_STORAGE_KEY);
-    } else {
-      localStorage.setItem(
-        CART_STORAGE_KEY,
-        JSON.stringify({ date: todayKey(), items: cart } satisfies StoredCart),
-      );
-    }
+    saveStoredCart(cart);
   }, [cart]);
+
+  const toggleFavorite = (itemId: number) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      try {
+        localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // Private-browsing/quota edge cases — the pin still works for this
+        // session, it just won't persist across visits.
+      }
+      return next;
+    });
+  };
 
   const menuQuery = useQuery({ queryKey: ['menu'], queryFn: getMenu });
   const activeOrderQuery = useQuery({ queryKey: ['orders', 'active'], queryFn: getActiveOrder });
@@ -131,7 +158,7 @@ export function Menu() {
     },
     onSuccess: () => {
       setCart({});
-      localStorage.removeItem(CART_STORAGE_KEY);
+      saveStoredCart({});
       setShowCheckout(false);
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
       queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
@@ -176,12 +203,28 @@ export function Menu() {
     return sorted.slice(0, 5);
   }, [items, hasRealCounts]);
 
+  // G8: only pins that are actually on today's menu — a favorite for an
+  // item the shopkeeper later deleted just quietly stops showing up.
+  const favoriteItems = useMemo(() => items.filter((item) => favorites.has(item.id)), [items, favorites]);
+
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       if (dietFilter === 'all') return true;
       return item.diet === dietFilter;
     });
   }, [items, dietFilter]);
+
+  // G2: client-side only (menu is already fully loaded), matches name + tags.
+  // Composes with the diet filter (searches over filteredItems, not items).
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedQuery.length > 0;
+  const searchResults = useMemo(() => {
+    if (!isSearching) return [];
+    return filteredItems.filter((item) => {
+      if (item.name.toLowerCase().includes(normalizedQuery)) return true;
+      return (item.tags ?? []).some((tag) => tag.toLowerCase().includes(normalizedQuery));
+    });
+  }, [filteredItems, normalizedQuery, isSearching]);
 
   const categories = useMemo(() => {
     const tagsSet = new Set<string>();
@@ -338,85 +381,196 @@ export function Menu() {
         />
       ) : (
         <>
-          <TrendingRail
-            items={trendingItems}
-            hasRealCounts={hasRealCounts}
-            qtyFor={(id) => cart[id] ?? 0}
-            onQtyChange={setQty}
-            hasActiveOrder={hasActiveOrder}
-            canOrder={isShopOpen}
-          />
+          {/* G2: quiet client-side search — everything is already loaded, so
+              this is a pure filter, no debounce/network needed. */}
+          <div className="relative mb-5">
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/35"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="M20 20l-4.3-4.3" />
+            </svg>
+            <input
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search the menu…"
+              aria-label="Search the menu"
+              className="min-h-[44px] w-full rounded-xl border border-edge bg-paper py-2.5 pl-10 pr-11 text-base text-ink shadow-sm placeholder:text-ink/40 focus:border-brand focus:outline-none"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-ink/40 transition hover:text-ink"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {!isSearching && (
+            <TrendingRail
+              items={trendingItems}
+              hasRealCounts={hasRealCounts}
+              qtyFor={(id) => cart[id] ?? 0}
+              onQtyChange={setQty}
+              hasActiveOrder={hasActiveOrder}
+              canOrder={isShopOpen}
+            />
+          )}
+
+          {!isSearching && (
+            <FavoritesRail
+              items={favoriteItems}
+              qtyFor={(id) => cart[id] ?? 0}
+              onQtyChange={setQty}
+              hasActiveOrder={hasActiveOrder}
+              canOrder={isShopOpen}
+            />
+          )}
 
           <div className="mb-4 mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-edge pb-2">
-            <h2 className="font-display text-sm font-bold uppercase tracking-[0.18em] text-ink">Main Menu</h2>
+            <h2 className="font-display text-sm font-bold uppercase tracking-[0.18em] text-ink">
+              {isSearching ? `Results (${searchResults.length})` : 'Main Menu'}
+            </h2>
             <DietFilter value={dietFilter} onChange={setDietFilter} />
           </div>
 
-          {filteredItems.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-sm text-ink/60">No items match your filter.</p>
-            </div>
-          ) : (
-            <>
-              {allCategories.length > 0 && (
-                // F1: top-14 alone ignores the notch inset the header already
-                // respects via pt-safe — this bar would slide under it in
-                // installed-PWA standalone mode on a notched iPhone.
-                <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
-                  {allCategories.map((cat) => {
-                    const isActive = activeCategory === cat.name;
-                    return (
-                      <button
-                        key={cat.name}
-                        id={`chip-${cat.name}`}
-                        type="button"
-                        onClick={() => scrollToCategory(cat.name)}
-                        // F2: visual chip stays compact; the invisible
-                        // ::before expands the real hit target to >=44px.
-                        className={`relative shrink-0 rounded-full border px-3.5 py-1 text-xs font-semibold uppercase tracking-wider transition before:absolute before:-inset-3 before:content-[''] ${
-                          isActive
-                            ? 'bg-brand text-white border-brand shadow-sm'
-                            : 'bg-paper text-ink/75 border-edge hover:bg-edge/40'
-                        }`}
-                      >
-                        {cat.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+          {isSearching &&
+            (searchResults.length === 0 ? (
+              <EmptyState
+                icon={<EmptyPlateIcon />}
+                title={`No dishes match "${searchQuery.trim()}"`}
+                hint="Try a different search, or clear it to see the full menu."
+                action={
+                  <Button variant="secondary" onClick={() => setSearchQuery('')}>
+                    Clear search
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {searchResults.map((item) => {
+                  const qty = cart[item.id] ?? 0;
+                  const canAdd = item.orderable && !hasActiveOrder && isShopOpen;
+                  return (
+                    <MenuItemCard
+                      key={item.id}
+                      item={item}
+                      qty={qty}
+                      onQtyChange={(next) => setQty(item.id, next)}
+                      disableStepper={hasActiveOrder}
+                      disableIncrease={!canAdd}
+                      isFavorite={favorites.has(item.id)}
+                      onToggleFavorite={() => toggleFavorite(item.id)}
+                    />
+                  );
+                })}
+              </div>
+            ))}
 
-              {allCategories.map((cat) => (
-                <section
-                  key={cat.name}
-                  id={`category-${cat.name}`}
-                  className="mb-8 scroll-mt-28 animate-rail-in"
-                >
-                  <h3 className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-ink/50">
-                    {cat.name} ({cat.items.length})
-                  </h3>
-                  <div className="flex flex-col gap-3">
-                    {cat.items.map((item) => {
-                      const qty = cart[item.id] ?? 0;
-                      const canAdd = item.orderable && !hasActiveOrder && isShopOpen;
-                      const disableStepper = hasActiveOrder;
-                      const disableIncrease = !canAdd;
+          {/* Full category view stays mounted (merely hidden) while searching
+              — unmounting/remounting it would drop the scroll-spy
+              IntersectionObserver's element references, since that effect is
+              deliberately kept off the search-toggling dependency chain (F7:
+              rebuilding it must never be tied to something this frequent). */}
+          <div className={isSearching ? 'hidden' : undefined}>
+            {filteredItems.length === 0 ? (
+              <EmptyState
+                icon={<EmptyPlateIcon />}
+                title="No items match your filter"
+                hint="Try a different diet filter, or clear it to see the full menu."
+                action={
+                  <Button variant="secondary" onClick={() => setDietFilter('all')}>
+                    Clear filter
+                  </Button>
+                }
+              />
+            ) : (
+              <>
+                {allCategories.length > 0 && (
+                  // F1: top-14 alone ignores the notch inset the header already
+                  // respects via pt-safe — this bar would slide under it in
+                  // installed-PWA standalone mode on a notched iPhone.
+                  <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
+                    {allCategories.map((cat) => {
+                      const isActive = activeCategory === cat.name;
                       return (
-                        <MenuItemCard
-                          key={item.id}
-                          item={item}
-                          qty={qty}
-                          onQtyChange={(next) => setQty(item.id, next)}
-                          disableStepper={disableStepper}
-                          disableIncrease={disableIncrease}
-                        />
+                        <button
+                          key={cat.name}
+                          id={`chip-${cat.name}`}
+                          type="button"
+                          onClick={() => scrollToCategory(cat.name)}
+                          // F2: visual chip stays compact; the invisible
+                          // ::before expands the real hit target to >=44px.
+                          className={`relative shrink-0 rounded-full border px-3.5 py-1 text-xs font-semibold uppercase tracking-wider transition before:absolute before:-inset-3 before:content-[''] ${
+                            isActive
+                              ? 'bg-brand text-white border-brand shadow-sm'
+                              : 'bg-paper text-ink/75 border-edge hover:bg-edge/40'
+                          }`}
+                        >
+                          {cat.name}
+                        </button>
                       );
                     })}
                   </div>
-                </section>
-              ))}
-            </>
-          )}
+                )}
+
+                {allCategories.map((cat) => (
+                  <section
+                    key={cat.name}
+                    id={`category-${cat.name}`}
+                    className="mb-8 scroll-mt-28 animate-rail-in"
+                  >
+                    <h3 className="mb-3 font-display text-xs font-bold uppercase tracking-wider text-ink/50">
+                      {cat.name} ({cat.items.length})
+                    </h3>
+                    <div className="flex flex-col gap-3">
+                      {cat.items.map((item) => {
+                        const qty = cart[item.id] ?? 0;
+                        const canAdd = item.orderable && !hasActiveOrder && isShopOpen;
+                        const disableStepper = hasActiveOrder;
+                        const disableIncrease = !canAdd;
+                        return (
+                          <MenuItemCard
+                            key={item.id}
+                            item={item}
+                            qty={qty}
+                            onQtyChange={(next) => setQty(item.id, next)}
+                            disableStepper={disableStepper}
+                            disableIncrease={disableIncrease}
+                            isFavorite={favorites.has(item.id)}
+                            onToggleFavorite={() => toggleFavorite(item.id)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </>
+            )}
+          </div>
         </>
       )}
 

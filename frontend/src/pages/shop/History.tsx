@@ -20,6 +20,40 @@ function todayLocal(): string {
   return `${year}-${month}-${day}`;
 }
 
+/** Shifts a "YYYY-MM-DD" string by `deltaDays`, entirely in local time (G5:
+ * same reasoning as todayLocal() above — never parse/format through UTC, or
+ * the stepper drifts a day near local midnight). */
+function shiftDate(dateStr: string, deltaDays: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day);
+  d.setDate(d.getDate() + deltaDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+/** Chevron for the G5 date stepper — reuses the down-chevron path already in
+ * this file (the order-log toggle) rotated to point left/right, rather than
+ * inventing a second glyph style in the same component. */
+function DayStepChevron({ direction }: { direction: 'prev' | 'next' }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={`h-4 w-4 shrink-0 ${direction === 'prev' ? 'rotate-90' : '-rotate-90'}`}
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
 /** Display a number-of-items badge: "42" */
 function CountBadge({ n }: { n: number }) {
   return (
@@ -116,12 +150,52 @@ export function ShopHistoryPage() {
                 : `collected on ${humanDate}`}
           </p>
         </div>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="min-h-[44px] rounded-xl border border-edge bg-paper px-3 py-2.5 text-base text-ink shadow-sm focus:border-brand focus:outline-none"
-        />
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDate((d) => shiftDate(d, -1))}
+              aria-label={language === 'hi' ? 'पिछला दिन' : 'Previous day'}
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-edge bg-paper text-ink/60 shadow-sm transition hover:bg-brand-light/30 active:bg-brand-light/50"
+            >
+              <DayStepChevron direction="prev" />
+            </button>
+            <input
+              type="date"
+              value={date}
+              max={todayLocal()}
+              // Clearing the native picker (browsers allow this — an "x"
+              // affordance or Backspace) fires onChange with "" — falling
+              // back to today rather than storing it avoids two compounding
+              // breaks: shiftDate("", ±1) parses "" into "NaN-NaN-NaN" (no
+              // guard there either), and a "NaN-NaN-NaN" queryKey is a fetch
+              // this page has never cached, so the backend's 400 trips the
+              // isError-with-no-cached-data early return — which replaces
+              // this entire section (date input included) with an error
+              // screen with no in-page way back to a valid date.
+              onChange={(e) => setDate(e.target.value || todayLocal())}
+              className="min-h-[44px] rounded-xl border border-edge bg-paper px-3 py-2.5 text-base text-ink shadow-sm focus:border-brand focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setDate((d) => shiftDate(d, 1))}
+              disabled={isToday}
+              aria-label={language === 'hi' ? 'अगला दिन' : 'Next day'}
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-edge bg-paper text-ink/60 shadow-sm transition hover:bg-brand-light/30 active:bg-brand-light/50 disabled:opacity-40 disabled:hover:bg-paper"
+            >
+              <DayStepChevron direction="next" />
+            </button>
+          </div>
+          {!isToday && (
+            <button
+              type="button"
+              onClick={() => setDate(todayLocal())}
+              className="relative rounded-full border border-brand/30 bg-brand-light px-3 py-1 text-xs font-semibold text-brand-dark transition before:absolute before:-inset-2.5 before:content-[''] hover:bg-brand-light/70"
+            >
+              {language === 'hi' ? 'आज पर जाएं' : 'Jump to today'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Insights panel ─────────────────────────────────────────── */}
@@ -150,13 +224,30 @@ export function ShopHistoryPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
                 {language === 'hi' ? 'टॉप आइटम' : 'Top items'}
               </p>
-              <div className="flex flex-col gap-2">
-                {insights.item_counts.slice(0, 5).map((ic) => (
-                  <div key={ic.name} className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm text-ink">{ic.name}</span>
-                    <CountBadge n={ic.qty} />
-                  </div>
-                ))}
+              <div className="flex flex-col gap-2.5">
+                {(() => {
+                  const topItems = insights.item_counts.slice(0, 5);
+                  const maxQty = Math.max(...topItems.map((ic) => ic.qty));
+                  return topItems.map((ic) => (
+                    <div key={ic.name} className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm text-ink">{ic.name}</span>
+                        <CountBadge n={ic.qty} />
+                      </div>
+                      {/* G6: a quiet proportional ledger bar — numbers above
+                          stay the accessible content, this is decoration. */}
+                      <div
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-brand-light"
+                        aria-hidden="true"
+                      >
+                        <div
+                          className="h-full rounded-full bg-brand"
+                          style={{ width: `${Math.max((ic.qty / maxQty) * 100, 6)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
             </Card>
           )}
@@ -252,6 +343,8 @@ export function ShopHistoryPage() {
                               src={cloudinaryThumb(item.photo_url, 56) ?? undefined}
                               alt={item.name}
                               className="h-full w-full object-cover"
+                              loading="lazy"
+                              decoding="async"
                             />
                           </div>
                         )}
