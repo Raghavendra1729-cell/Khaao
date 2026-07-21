@@ -145,7 +145,7 @@ func (s *OrderService) ShopOrders(ctx context.Context) (incoming, active, awaiti
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	
+
 	incoming = make([]OrderResponse, 0, len(inc))
 	for _, o := range inc {
 		incoming = append(incoming, ToOrderResponse(o, true))

@@ -551,7 +551,7 @@ func (r *GormRatingRepo) GetMenuAggregates(ctx context.Context) (map[uint]MenuRa
 	if err != nil {
 		return nil, err
 	}
-	
+
 	m := make(map[uint]MenuRatingAggregate, len(rows))
 	for _, rw := range rows {
 		m[rw.MenuItemID] = MenuRatingAggregate{

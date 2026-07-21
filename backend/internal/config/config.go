@@ -19,18 +19,18 @@ const devDefaultDatabaseURL = "postgres://localhost:5432/khaao?sslmode=disable"
 
 // Config holds all environment-derived settings for the server.
 type Config struct {
-	Port               string
-	AppEnv             string
-	DatabaseURL        string
-	JWTSecret          string
-	FirebaseProjectID  string
-	AllowedEmailDomain string
-	ShopkeeperEmails   string
-	AuthFake           bool
-	HoldMinutes        int
-	FrontendOrigin     string
-	SeedSampleMenu     bool
-	BusinessTimezone   string
+	Port                string
+	AppEnv              string
+	DatabaseURL         string
+	JWTSecret           string
+	FirebaseProjectID   string
+	AllowedEmailDomain  string
+	ShopkeeperEmails    string
+	AuthFake            bool
+	HoldMinutes         int
+	FrontendOrigin      string
+	SeedSampleMenu      bool
+	BusinessTimezone    string
 	CloudinaryCloudName string
 	CloudinaryAPIKey    string
 	CloudinaryAPISecret string
@@ -50,18 +50,18 @@ func Load() *Config {
 	loadDotEnv()
 	var envErrors []string
 	return &Config{
-		Port:               envOr("PORT", "8080"),
-		AppEnv:             strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "dev"))),
-		DatabaseURL:        envOr("DATABASE_URL", devDefaultDatabaseURL),
-		JWTSecret:          envOr("JWT_SECRET", "dev-secret-change-me"),
-		FirebaseProjectID:  envOr("FIREBASE_PROJECT_ID", ""),
-		AllowedEmailDomain: envOr("ALLOWED_EMAIL_DOMAIN", "sst.scaler.com"),
-		ShopkeeperEmails:   envOr("SHOPKEEPER_EMAILS", ""),
-		AuthFake:           envOrBool(&envErrors, "AUTH_FAKE", false),
-		HoldMinutes:        envOrInt(&envErrors, "HOLD_MINUTES", 15),
-		FrontendOrigin:     envOr("FRONTEND_ORIGIN", "http://localhost:5173"),
-		SeedSampleMenu:     envOrBool(&envErrors, "SEED_SAMPLE_MENU", true),
-		BusinessTimezone:   envOr("BUSINESS_TIMEZONE", "Asia/Kolkata"),
+		Port:                envOr("PORT", "8080"),
+		AppEnv:              strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "dev"))),
+		DatabaseURL:         envOr("DATABASE_URL", devDefaultDatabaseURL),
+		JWTSecret:           envOr("JWT_SECRET", "dev-secret-change-me"),
+		FirebaseProjectID:   envOr("FIREBASE_PROJECT_ID", ""),
+		AllowedEmailDomain:  envOr("ALLOWED_EMAIL_DOMAIN", "sst.scaler.com"),
+		ShopkeeperEmails:    envOr("SHOPKEEPER_EMAILS", ""),
+		AuthFake:            envOrBool(&envErrors, "AUTH_FAKE", false),
+		HoldMinutes:         envOrInt(&envErrors, "HOLD_MINUTES", 15),
+		FrontendOrigin:      envOr("FRONTEND_ORIGIN", "http://localhost:5173"),
+		SeedSampleMenu:      envOrBool(&envErrors, "SEED_SAMPLE_MENU", true),
+		BusinessTimezone:    envOr("BUSINESS_TIMEZONE", "Asia/Kolkata"),
 		CloudinaryCloudName: envOr("CLOUDINARY_CLOUD_NAME", ""),
 		CloudinaryAPIKey:    envOr("CLOUDINARY_API_KEY", ""),
 		CloudinaryAPISecret: envOr("CLOUDINARY_API_SECRET", ""),

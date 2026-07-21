@@ -18,7 +18,7 @@ import (
 type FirebaseVerifier struct {
 	projectID string
 	client    *http.Client
-	
+
 	mu        sync.RWMutex
 	keys      map[string]*x509.Certificate
 	expiresAt time.Time
@@ -46,7 +46,7 @@ func (v *FirebaseVerifier) Verify(ctx context.Context, idToken string) (*Identit
 		}
 		return cert.PublicKey, nil
 	}, jwt.WithAudience(v.projectID), jwt.WithIssuer("https://securetoken.google.com/"+v.projectID), jwt.WithExpirationRequired())
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}

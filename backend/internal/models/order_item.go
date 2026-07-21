@@ -13,11 +13,11 @@ const (
 )
 
 type OrderItem struct {
-	ID           uint            `gorm:"primaryKey" json:"id"`
-	OrderID      uint            `gorm:"not null;index" json:"order_id"`
-	MenuItemID   uint            `gorm:"not null" json:"menu_item_id"`
-	MenuItem     MenuItem        `gorm:"foreignKey:MenuItemID" json:"-"`
-	Name         string          `gorm:"not null" json:"name"`
+	ID         uint     `gorm:"primaryKey" json:"id"`
+	OrderID    uint     `gorm:"not null;index" json:"order_id"`
+	MenuItemID uint     `gorm:"not null" json:"menu_item_id"`
+	MenuItem   MenuItem `gorm:"foreignKey:MenuItemID" json:"-"`
+	Name       string   `gorm:"not null" json:"name"`
 	// PhotoURL is copied from the menu item at order-creation time, same as
 	// Name and PriceEach — so a photo edit or deletion on the menu later
 	// never changes what a past order shows.

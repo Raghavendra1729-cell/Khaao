@@ -35,12 +35,12 @@ func (s *RatingsService) SubmitRatings(ctx context.Context, orderID uint, userID
 	if order.Status != models.OrderCompleted {
 		return ErrConflict("can only rate completed orders")
 	}
-	
+
 	itemMap := make(map[uint]*models.OrderItem)
 	for i := range order.Items {
 		itemMap[order.Items[i].ID] = &order.Items[i]
 	}
-	
+
 	var ratings []models.ItemRating
 	for _, in := range inputs {
 		item, ok := itemMap[in.OrderItemID]
@@ -58,6 +58,6 @@ func (s *RatingsService) SubmitRatings(ctx context.Context, orderID uint, userID
 			Stars:       in.Stars,
 		})
 	}
-	
+
 	return s.ratingRepo.SaveAll(ctx, ratings)
 }
