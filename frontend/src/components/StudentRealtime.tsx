@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { useSSE, type SSEMessage } from '../hooks/useSSE';
 import { useToast } from './Toast';
 import { playReadyChime, playStatusChange } from '../lib/sound';
+import { announce } from '../lib/liveAnnouncer';
 import { isActiveOrderStatus, type Order, type OrderStatus } from '../api/types';
 import { formatPrice } from '../lib/format';
 
@@ -74,6 +75,9 @@ export function StudentRealtime() {
           if (!didNotifyTrim) {
             if (order.status === 'ready') {
               playReadyChime();
+              // G7: the one student-side moment this live region covers —
+              // matches the chime it rides alongside, nothing more.
+              announce(`Order #${order.order_no} is ready — pick it up at the counter.`);
               if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
                 navigator.vibrate([200, 100, 200]); // buzz phones on silent
               }

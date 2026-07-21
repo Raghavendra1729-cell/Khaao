@@ -109,6 +109,8 @@ function RejectDialog({
                   src={cloudinaryThumb(item.photo_url, 64) ?? undefined}
                   alt={item.name}
                   className="h-full w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               </div>
             )}
@@ -247,6 +249,8 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
                     src={cloudinaryThumb(item.photo_url, 72) ?? undefined}
                     alt={item.name}
                     className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
               )}
@@ -405,8 +409,12 @@ function OrderCardSkeleton() {
 function OrdersSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="h-11 animate-soft-pulse rounded-xl border border-edge bg-paper" />
-      <div className="flex flex-col gap-3">
+      {/* Matches the real page's own breakpoint (line ~545 below): at lg+ the
+          segmented control is replaced by side-by-side columns, so a skeleton
+          that kept showing this bone at that width would have it vanish the
+          instant real data landed. */}
+      <div className="h-11 animate-soft-pulse rounded-xl border border-edge bg-paper lg:hidden" />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
         <OrderCardSkeleton />
         <OrderCardSkeleton />
         <OrderCardSkeleton />
@@ -419,7 +427,15 @@ function OrdersSkeleton() {
 // Extracted once so F20's side-by-side tablet layout doesn't duplicate card
 // render logic against the phone's segmented-tab layout.
 
-function NewOrdersList({ incoming, now, language }: { incoming: Order[]; now: number; language: 'en' | 'hi' }) {
+function NewOrdersList({
+  incoming,
+  now,
+  language,
+}: {
+  incoming: Order[];
+  now: number;
+  language: 'en' | 'hi';
+}) {
   if (incoming.length === 0) {
     return (
       <EmptyState
@@ -590,7 +606,9 @@ export function ShopOrdersPage() {
           <NewOrdersList incoming={incoming} now={now} language={language} />
         </div>
 
-        <div className={subpage === 'inprogress' ? 'flex flex-col gap-3' : 'hidden lg:flex lg:flex-col lg:gap-3'}>
+        <div
+          className={subpage === 'inprogress' ? 'flex flex-col gap-3' : 'hidden lg:flex lg:flex-col lg:gap-3'}
+        >
           <div className="hidden items-center gap-2 px-1 lg:flex">
             <h2 className="font-display text-sm font-bold uppercase tracking-wide text-ink/60">
               {language === 'hi' ? 'प्रगति में' : 'In progress'}

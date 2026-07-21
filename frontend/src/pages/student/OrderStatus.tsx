@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
+import { getMenu } from '../../api/menu';
 import { ApiError } from '../../api/client';
-import type { Order, OrderStatus as OrderStatusType } from '../../api/types';
+import type { MenuItem, Order, OrderStatus as OrderStatusType } from '../../api/types';
 import {
   cloudinaryThumb,
   formatCountdown,
@@ -11,6 +12,7 @@ import {
   formatPrice,
   secondsUntil,
 } from '../../lib/format';
+import { loadStoredCart, reorderIntoCart, saveStoredCart } from '../../lib/cart';
 import { Card } from '../../components/Card';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -123,6 +125,8 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
                   src={cloudinaryThumb(item.photo_url, 96) ?? undefined}
                   alt={item.name}
                   className="h-full w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
               </div>
             )}
@@ -194,7 +198,14 @@ function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => voi
   };
 
   return (
-    <Card className="mb-4 border-2 border-brand-dark bg-paper p-4">
+    // A ring rather than a border override — Card's own `border-edge` is a
+    // same-CSS-property class already baked into its base template, so a
+    // border-color override here would silently lose the cascade tie
+    // (Tailwind resolves same-specificity utility collisions by source order
+    // in the generated stylesheet, and `border-edge` is emitted after
+    // `border-brand-dark`). A ring uses box-shadow, a different property
+    // entirely, so it can't collide with Card's own border.
+    <Card className="mb-4 ring-2 ring-brand-dark bg-paper p-4">
       <h3 className="mb-3 font-display text-lg font-bold text-ink">Rate your recent order</h3>
       <div className="flex flex-col gap-4">
         {rateableItems.map((item) => (
@@ -218,7 +229,11 @@ function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => voi
         ))}
       </div>
       <div className="mt-5 flex items-center justify-between border-t border-edge pt-4">
-        <button onClick={onDismiss} className="text-sm font-medium text-ink/60 underline underline-offset-2">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="-my-2.5 flex min-h-[44px] items-center text-sm font-medium text-ink/60 underline underline-offset-2"
+        >
           Skip
         </button>
         <Button onClick={handleSubmit} disabled={isSubmitting || Object.keys(ratings).length === 0}>
@@ -295,7 +310,101 @@ function historyStatusHint(status: OrderStatusType): string | null {
   }
 }
 
-function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId: number | null }) {
+// G3: builds the reorder toast copy honestly — full / partial / none, never
+// a generic "done" that papers over items that didn't make it in.
+function reorderToastMessage(addedCount: number, skippedNames: string[]): string {
+  if (addedCount === 0) {
+    return "None of these items are on today's menu.";
+  }
+  if (skippedNames.length === 0) {
+    return `${addedCount} item${addedCount === 1 ? '' : 's'} added to your cart.`;
+  }
+  const total = addedCount + skippedNames.length;
+  const skippedText =
+    skippedNames.length === 1
+      ? `${skippedNames[0]} isn't on today's menu.`
+      : `${skippedNames.join(', ')} aren't on today's menu.`;
+  return `${addedCount} of ${total} added — ${skippedText}`;
+}
+
+function HistoryCard({
+  order,
+  menuItems,
+  hasActiveOrder,
+}: {
+  order: Order;
+  menuItems: MenuItem[] | undefined;
+  hasActiveOrder: boolean;
+}) {
+  const { showToast } = useToast();
+  const navigate = useNavigate();
+  const hint = historyStatusHint(order.status);
+  const canReorder = order.status === 'completed';
+
+  const handleReorder = () => {
+    const { cart, addedCount, skippedNames } = reorderIntoCart(loadStoredCart(), order.items, menuItems);
+    showToast(reorderToastMessage(addedCount, skippedNames), addedCount === 0 ? 'error' : 'success');
+    if (addedCount === 0) return;
+    saveStoredCart(cart);
+    navigate('/');
+  };
+
+  return (
+    <Card className="animate-status-in p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-bold text-ink">Token #{order.order_no}</p>
+          <p className="text-xs text-ink/50">{formatDateTime(order.created_at)}</p>
+        </div>
+        <OrderStatusBadge status={order.status} />
+      </div>
+      <div className="mt-2 flex flex-col gap-1.5 text-sm text-ink/70">
+        {order.items.map((item) => (
+          <div key={item.id} className="flex items-center gap-2">
+            {item.photo_url && (
+              <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md border border-edge">
+                <img
+                  src={cloudinaryThumb(item.photo_url, 56) ?? undefined}
+                  alt={item.name}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            )}
+            <span>
+              {item.name} ×{item.qty}
+            </span>
+          </div>
+        ))}
+      </div>
+      {hint && <p className="mt-1 text-xs text-ink/50">{hint}</p>}
+      <p className="tabular font-display mt-2 text-sm font-semibold text-brand-dark">
+        {formatPrice(order.total_price)}
+      </p>
+      {canReorder && (
+        <div className="mt-3 border-t border-edge pt-3">
+          <Button variant="secondary" disabled={hasActiveOrder} onClick={handleReorder}>
+            Order this again
+          </Button>
+          {hasActiveOrder && <p className="mt-1.5 text-xs text-ink/45">Finish your current order first.</p>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function HistoryList({
+  orders,
+  activeOrderId,
+  menuItems,
+  hasActiveOrder,
+}: {
+  orders: Order[];
+  activeOrderId: number | null;
+  menuItems: MenuItem[] | undefined;
+  hasActiveOrder: boolean;
+}) {
   const past = orders.filter((o) => o.id !== activeOrderId);
 
   if (past.length === 0) {
@@ -310,42 +419,9 @@ function HistoryList({ orders, activeOrderId }: { orders: Order[]; activeOrderId
 
   return (
     <div className="flex flex-col gap-3">
-      {past.map((order) => {
-        const hint = historyStatusHint(order.status);
-        return (
-          <Card key={order.id} className="animate-status-in p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-bold text-ink">Token #{order.order_no}</p>
-                <p className="text-xs text-ink/50">{formatDateTime(order.created_at)}</p>
-              </div>
-              <OrderStatusBadge status={order.status} />
-            </div>
-            <div className="mt-2 flex flex-col gap-1.5 text-sm text-ink/70">
-              {order.items.map((item) => (
-                <div key={item.id} className="flex items-center gap-2">
-                  {item.photo_url && (
-                    <div className="h-7 w-7 shrink-0 overflow-hidden rounded-md border border-edge">
-                      <img
-                        src={cloudinaryThumb(item.photo_url, 56) ?? undefined}
-                        alt={item.name}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  )}
-                  <span>
-                    {item.name} ×{item.qty}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {hint && <p className="mt-1 text-xs text-ink/50">{hint}</p>}
-            <p className="tabular font-display mt-2 text-sm font-semibold text-brand-dark">
-              {formatPrice(order.total_price)}
-            </p>
-          </Card>
-        );
-      })}
+      {past.map((order) => (
+        <HistoryCard key={order.id} order={order} menuItems={menuItems} hasActiveOrder={hasActiveOrder} />
+      ))}
     </div>
   );
 }
@@ -354,6 +430,10 @@ export function OrderStatusPage() {
   const { showToast } = useToast();
   const activeOrderQuery = useQuery({ queryKey: ['orders', 'active'], queryFn: getActiveOrder });
   const historyQuery = useQuery({ queryKey: ['orders', 'history'], queryFn: getOrderHistory });
+  // G3 "Order this again" needs today's live menu to know what's still
+  // orderable — same query key as the Menu page, so this shares its cache
+  // instead of firing a second independent fetch.
+  const menuQuery = useQuery({ queryKey: ['menu'], queryFn: getMenu });
 
   const handleCancel = async () => {
     const activeOrder = activeOrderQuery.data;
@@ -451,7 +531,12 @@ export function OrderStatusPage() {
         {showRatingPrompt && mostRecentCompleted && (
           <RatingPrompt order={mostRecentCompleted} onDismiss={() => markAsRated(mostRecentCompleted.id)} />
         )}
-        <HistoryList orders={history} activeOrderId={activeOrder?.id ?? null} />
+        <HistoryList
+          orders={history}
+          activeOrderId={activeOrder?.id ?? null}
+          menuItems={menuQuery.data}
+          hasActiveOrder={activeOrder !== null}
+        />
       </section>
     </div>
   );

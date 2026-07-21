@@ -14,6 +14,7 @@ import { InstallPrompt } from './InstallPrompt';
 import { PushNotificationSetup } from './PushNotificationSetup';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { FullPageSpinner } from './Spinner';
+import { useLiveAnnouncement } from '../lib/liveAnnouncer';
 
 function Icon({ d }: { d: string }) {
   return (
@@ -231,6 +232,24 @@ function AvatarMenu({ name, onLogout, isShop }: { name: string; onLogout: () => 
   );
 }
 
+/**
+ * Visually-hidden aria-live region (G7) — the screen-reader counterpart to
+ * the chime/vibration/stamp path. Fed by lib/liveAnnouncer.ts; a trailing
+ * zero-width space alternates by `key` so even an identical consecutive
+ * announcement still registers as a DOM mutation.
+ */
+const ZERO_WIDTH_SPACE = String.fromCharCode(8203);
+
+function LiveRegion() {
+  const { message, key } = useLiveAnnouncement();
+  return (
+    <div aria-live="polite" aria-atomic="true" className="sr-only">
+      {message}
+      {key % 2 === 1 ? ZERO_WIDTH_SPACE : ''}
+    </div>
+  );
+}
+
 export function Layout() {
   return (
     <LanguageProvider>
@@ -288,6 +307,7 @@ function LayoutInner() {
 
   return (
     <div className="flex min-h-screen flex-col bg-steel">
+      <LiveRegion />
       {!isShop && <StudentRealtime />}
       {isShop && <ShopRealtime />}
 

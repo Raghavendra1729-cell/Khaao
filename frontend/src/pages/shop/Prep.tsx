@@ -181,7 +181,9 @@ export function ShopPrepPage() {
         {language === 'hi' ? 'तैयारी सूची' : 'Prep list'}
       </h1>
       <p className="mb-5 text-sm text-ink/60">
-        {language === 'hi' ? 'सभी स्वीकृत ऑर्डर की कुल मांग।' : 'Aggregate demand across all accepted orders.'}
+        {language === 'hi'
+          ? 'सभी स्वीकृत ऑर्डर की कुल मांग।'
+          : 'Aggregate demand across all accepted orders.'}
       </p>
 
       {items.length === 0 ? (
