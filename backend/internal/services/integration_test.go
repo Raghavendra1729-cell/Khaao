@@ -592,3 +592,79 @@ func TestIntegration_ConcurrentAcceptAndSetPaused_CheckNeverMissesConcurrentAcce
 		}
 	}
 }
+
+// TestIntegration_MutationResponsesIncludeStudentName exercises Reject,
+// Handover, and Paid against a real DB and checks their *returned*
+// OrderResponse — not just the order's final state — carries the student's
+// name/email. mockOrderRepo in pool_test.go can't catch a regression here: its
+// FindByID and FindByIDForUpdate both just return the same in-memory pointer,
+// so it doesn't model GORM's real behavior of FindByIDForUpdate deliberately
+// skipping Preload("User") (only FindByID loads it) — a mutation that builds
+// its includeStudent=true response from the transaction-scoped order instead
+// of re-fetching via FindByID silently ships empty student_name/student_email
+// to the shopkeeper UI, and only a real Preload exercises that gap.
+func TestIntegration_MutationResponsesIncludeStudentName(t *testing.T) {
+	db := openIntegrationDB(t)
+	repos := newIntegrationRepos(db)
+	cfg := &config.Config{HoldMinutes: 15, BusinessTimezone: "Asia/Kolkata"}
+	engine := newIntegrationEngine(repos, cfg)
+	ctx := context.Background()
+
+	mi := seedIntegrationMenuItem(t, db, "Chai", 1000)
+
+	// Reject: accept then immediately reject (the shopkeeper "escape hatch"
+	// path — allowed since nothing's been handed over yet).
+	rejecter := seedIntegrationUser(t, db, "reject-me@sst.scaler.com")
+	toReject, err := engine.CreateOrder(ctx, rejecter.ID, []services.OrderItemInput{{MenuItemID: mi.ID, Qty: 1}})
+	if err != nil {
+		t.Fatalf("CreateOrder (reject case): %v", err)
+	}
+	if _, err := engine.Accept(ctx, toReject.ID, nil); err != nil {
+		t.Fatalf("Accept (reject case): %v", err)
+	}
+	rejectResp, err := engine.Reject(ctx, toReject.ID)
+	if err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	if rejectResp.StudentName != rejecter.Name || rejectResp.StudentEmail != rejecter.Email {
+		t.Errorf("Reject response missing student info: got name=%q email=%q, want name=%q email=%q",
+			rejectResp.StudentName, rejectResp.StudentEmail, rejecter.Name, rejecter.Email)
+	}
+
+	// Handover then Paid, on a second order, carried through the full
+	// accept -> cook -> handover -> paid lifecycle.
+	payer := seedIntegrationUser(t, db, "pay-me@sst.scaler.com")
+	toPay, err := engine.CreateOrder(ctx, payer.ID, []services.OrderItemInput{{MenuItemID: mi.ID, Qty: 1}})
+	if err != nil {
+		t.Fatalf("CreateOrder (handover/paid case): %v", err)
+	}
+	if _, err := engine.Accept(ctx, toPay.ID, nil); err != nil {
+		t.Fatalf("Accept (handover/paid case): %v", err)
+	}
+	if err := engine.MarkDone(ctx, mi.ID, 1); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+	loaded, err := repos.orderRepo.FindByID(ctx, toPay.ID)
+	if err != nil || loaded == nil {
+		t.Fatalf("reload before handover: %v", err)
+	}
+	itemID := loaded.Items[0].ID
+
+	handoverResp, err := engine.Handover(ctx, toPay.ID, itemID, 1)
+	if err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+	if handoverResp.StudentName != payer.Name || handoverResp.StudentEmail != payer.Email {
+		t.Errorf("Handover response missing student info: got name=%q email=%q, want name=%q email=%q",
+			handoverResp.StudentName, handoverResp.StudentEmail, payer.Name, payer.Email)
+	}
+
+	paidResp, err := engine.Paid(ctx, toPay.ID)
+	if err != nil {
+		t.Fatalf("Paid: %v", err)
+	}
+	if paidResp.StudentName != payer.Name || paidResp.StudentEmail != payer.Email {
+		t.Errorf("Paid response missing student info: got name=%q email=%q, want name=%q email=%q",
+			paidResp.StudentName, paidResp.StudentEmail, payer.Name, payer.Email)
+	}
+}
