@@ -176,7 +176,14 @@ export function ShopStatusControl() {
                 <input
                   type="time"
                   value={reopenTime}
-                  onChange={(e) => setReopenTime(e.target.value)}
+                  // A cleared native time input (the browser's own "x", or
+                  // Backspace) fires onChange with "" — reopenTimeToISO("")
+                  // would call Date#setHours(NaN, NaN, ...), producing an
+                  // Invalid Date whose toISOString() throws inside the
+                  // mutation. Falling back here, at the same boundary
+                  // History.tsx's date stepper guards, keeps reopenTime
+                  // always parseable.
+                  onChange={(e) => setReopenTime(e.target.value || defaultReopenTime())}
                   className="min-h-[44px] w-full rounded-xl border border-edge bg-paper px-3 text-base focus:border-brand"
                 />
                 <span className="mt-1 block text-xs text-ink/50">
