@@ -565,7 +565,20 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
         className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <Button variant="ghost" onClick={() => setEditing(true)} className="flex-1">
+        <Button
+          variant="ghost"
+          onClick={() => {
+            // The 3s auto-disarm timer keeps running while the edit form is
+            // open (this row isn't unmounted, only its children swap) — a
+            // quick open-then-cancel of Edit could otherwise return to a
+            // card that's still armed but no longer showing the "tap again"
+            // banner, so the next incidental tap anywhere on it would
+            // silently toggle stock instead of arming it first.
+            setArmed(false);
+            setEditing(true);
+          }}
+          className="flex-1"
+        >
           <span>{language === 'hi' ? 'संपादित करें' : 'Edit'}</span>
         </Button>
         <Button variant="danger" loading={deleteMutation.isPending} onClick={handleDelete} className="flex-1">
