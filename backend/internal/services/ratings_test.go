@@ -91,6 +91,35 @@ func TestRatingsService(t *testing.T) {
 		}
 	})
 
+	t.Run("rating_a_rejected_item", func(t *testing.T) {
+		// A line trimmed by the shopkeeper mid-order (RemoveItem) ends up
+		// `rejected` while the rest of the order still reaches `completed` —
+		// the student never received this item and must not be able to rate
+		// it (it would otherwise pollute that menu item's public average).
+		orderRepo := &mockOrderRepo{
+			orders: map[uint]*models.Order{
+				6: {
+					ID: 6, UserID: 10, Status: models.OrderCompleted,
+					Items: []models.OrderItem{
+						{ID: 101, MenuItemID: 5, Status: models.ItemHandedOver},
+						{ID: 102, MenuItemID: 6, Status: models.ItemRejected},
+					},
+				},
+			},
+		}
+		ratingRepo := &mockRatingRepo{}
+		svc := services.NewRatingsService(ratingRepo, orderRepo)
+
+		err := svc.SubmitRatings(ctx, 6, 10, []services.RatingInput{{OrderItemID: 102, Stars: 1}})
+		appErr := asAppError(t, err)
+		if appErr == nil || appErr.Status != 400 {
+			t.Errorf("expected 400 bad request, got %v", err)
+		}
+		if len(ratingRepo.ratings) != 0 {
+			t.Errorf("expected no ratings saved, got %d", len(ratingRepo.ratings))
+		}
+	})
+
 	t.Run("invalid_order_item", func(t *testing.T) {
 		orderRepo := &mockOrderRepo{
 			orders: map[uint]*models.Order{
