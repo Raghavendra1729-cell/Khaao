@@ -58,7 +58,13 @@ export function ShopStatusControl() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { language } = useLanguage();
-  const statusQuery = useQuery({ queryKey: ['shop', 'status'], queryFn: getShopStatus });
+  // Keyed ['shop-status'] to match the rest of the app (student Menu,
+  // Student/ShopRealtime invalidations). Previously ['shop','status'], which
+  // nothing else touched — so a `shop_status` SSE event (broadcast to every
+  // client, students AND shop, by hub.NotifyShopStatusUpdate) and the
+  // reconnect resync both invalidated a key this component never read, leaving
+  // the pill stale on any change made from another shopkeeper device/session.
+  const statusQuery = useQuery({ queryKey: ['shop-status'], queryFn: getShopStatus });
 
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<ShopState | null>(null);
@@ -73,8 +79,8 @@ export function ShopStatusControl() {
     mutationFn: (next: ShopState) =>
       setShopStatus(next, next === 'paused' ? reopenTimeToISO(reopenTime) : null),
     onSuccess: (data) => {
-      queryClient.setQueryData(['shop', 'status'], data);
-      queryClient.invalidateQueries({ queryKey: ['shop', 'status'] });
+      queryClient.setQueryData(['shop-status'], data);
+      queryClient.invalidateQueries({ queryKey: ['shop-status'] });
       const label = STATE_META[data.state].label.toLowerCase();
       showToast(
         language === 'hi' ? `कैंटीन अब ${STATE_META[data.state].labelHi} है।` : `Canteen is now ${label}.`,

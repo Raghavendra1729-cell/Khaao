@@ -68,6 +68,13 @@ export function ShopRealtime() {
         queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
       } else if (msg.type === 'menu_update') {
         queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
+      } else if (msg.type === 'shop_status') {
+        // hub.NotifyShopStatusUpdate broadcasts this to every client (students
+        // AND shop). It was being dropped here, so the header status pill
+        // (ShopStatusControl, keyed ['shop-status']) only ever updated from its
+        // own mutation — a change made on another shopkeeper device never
+        // reached this one until a full reload.
+        queryClient.invalidateQueries({ queryKey: ['shop-status'] });
       }
     },
     [queryClient],
