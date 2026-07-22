@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
-import { Button } from '../components/Button';
+import { Button } from '../components/ui/Button';
 import { fetchAuthConfig } from '../api/auth';
 
 export function Login() {

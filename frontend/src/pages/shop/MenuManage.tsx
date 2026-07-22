@@ -13,13 +13,13 @@ import { ApiError } from '../../api/client';
 import type { Diet, MenuItem } from '../../api/types';
 import { cloudinaryThumb, formatPrice, paiseToRupeesInput, rupeesToPaise } from '../../lib/format';
 import { downscaleImage } from '../../lib/image';
-import { Card } from '../../components/Card';
-import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
-import { MenuStatusBadge } from '../../components/StatusBadge';
-import { useToast } from '../../components/Toast';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
-import { VegMark } from '../../components/VegMark';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { MenuStatusBadge } from '../../components/ui/StatusBadge';
+import { useToast } from '../../components/ui/Toast';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { VegMark } from '../../components/ui/VegMark';
 import { useLanguage } from '../../context/LanguageContext';
 
 const MENU_STATUS_LABEL_HI: Record<MenuItem['status'], string> = {

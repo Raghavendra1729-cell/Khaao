@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { Diet } from '../api/types';
+import type { Diet } from '../../api/types';
 
 interface VegMarkProps {
   diet: Diet;

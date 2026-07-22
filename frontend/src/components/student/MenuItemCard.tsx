@@ -1,8 +1,8 @@
-import type { MenuItem } from '../api/types';
-import { cloudinaryThumb, formatPrice } from '../lib/format';
-import { QtyStepper } from './QtyStepper';
-import { MenuStatusBadge } from './StatusBadge';
-import { VegMark } from './VegMark';
+import type { MenuItem } from '../../api/types';
+import { cloudinaryThumb, formatPrice } from '../../lib/format';
+import { QtyStepper } from '../ui/QtyStepper';
+import { MenuStatusBadge } from '../ui/StatusBadge';
+import { VegMark } from '../ui/VegMark';
 
 function availabilityWindowText(item: MenuItem): string | null {
   if (!item.avail_from && !item.avail_to) return null;

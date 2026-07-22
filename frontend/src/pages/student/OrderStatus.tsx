@@ -13,15 +13,15 @@ import {
   secondsUntil,
 } from '../../lib/format';
 import { loadStoredCart, reorderIntoCart, saveStoredCart } from '../../lib/cart';
-import { Card } from '../../components/Card';
-import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
-import { LedgerLineIcon } from '../../components/EmptyStateIcons';
-import { OrderTicket } from '../../components/OrderTicket';
-import { StatusStamps } from '../../components/StatusStamps';
-import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/StatusBadge';
-import { useToast } from '../../components/Toast';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { LedgerLineIcon } from '../../components/ui/EmptyStateIcons';
+import { OrderTicket } from '../../components/student/OrderTicket';
+import { StatusStamps } from '../../components/student/StatusStamps';
+import { OrderItemStatusBadge, OrderStatusBadge } from '../../components/ui/StatusBadge';
+import { useToast } from '../../components/ui/Toast';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 
 function ReadyBanner({ order }: { order: Order }) {
   const [remaining, setRemaining] = useState(() => secondsUntil(order.expires_at));
@@ -60,7 +60,7 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
   // order happens to *arrive* already ready (e.g. a page refresh while
   // ready). `prevStatusRef` starts at `null` ("unknown prior state") and a
   // `null` prior status never counts as a transition, mirroring the
-  // prevStatusRef idiom in components/StudentRealtime.tsx (which likewise
+  // prevStatusRef idiom in components/student/StudentRealtime.tsx (which likewise
   // treats an unseeded prior status as "don't notify").
   const prevStatusRef = useRef<OrderStatusType | null>(null);
   const [ticketPopping, setTicketPopping] = useState(false);

@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { getShopHistory } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import { cloudinaryThumb, formatPrice, formatShortDate } from '../../lib/format';
-import { Card } from '../../components/Card';
-import { EmptyState } from '../../components/EmptyState';
-import { OrderStatusBadge } from '../../components/StatusBadge';
+import { Card } from '../../components/ui/Card';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { OrderStatusBadge } from '../../components/ui/StatusBadge';
 import { useLanguage } from '../../context/LanguageContext';
 
 /** Today's date as "YYYY-MM-DD" in the browser's local timezone (not UTC —

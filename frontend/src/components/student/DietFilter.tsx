@@ -1,5 +1,5 @@
-import type { Diet } from '../api/types';
-import { VegMark } from './VegMark';
+import type { Diet } from '../../api/types';
+import { VegMark } from '../ui/VegMark';
 
 export type DietFilterValue = 'all' | Diet;
 

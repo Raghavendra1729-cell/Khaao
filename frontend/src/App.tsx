@@ -1,8 +1,8 @@
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { ProtectedRoute } from './components/ProtectedRoute';
-import { Layout } from './components/Layout';
+import { ProtectedRoute } from './components/layout/ProtectedRoute';
+import { Layout } from './components/layout/Layout';
 import { Login } from './pages/Login';
 
 // Route-group chunks: a student's first load never needs to fetch the shop

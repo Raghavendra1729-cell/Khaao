@@ -1,5 +1,5 @@
 import { useId, type CSSProperties } from 'react';
-import type { OrderStatus } from '../api/types';
+import type { OrderStatus } from '../../api/types';
 
 /**
  * The canteen counter stamps a paper chit as it moves down the line — order
