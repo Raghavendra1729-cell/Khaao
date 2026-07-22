@@ -26,17 +26,18 @@ interface PushPayload {
 }
 
 self.addEventListener('push', (event) => {
-  if (!event.data) return;
-
-  // A malformed payload must still show *something* — a silent push burns
-  // the browser's goodwill (Chrome may show a generic "site updated", and
-  // repeated silent pushes can get the subscription throttled/revoked), so
-  // fall back to a generic notification rather than parsing-and-bailing.
+  // A push with no data, or one whose payload fails to parse, must still
+  // show *something* — a silent push burns the browser's goodwill (Chrome
+  // may show a generic "site updated", and repeated silent pushes can get
+  // the subscription throttled/revoked), so fall back to a generic
+  // notification in both cases rather than bailing out of the handler.
   let data: PushPayload = {};
-  try {
-    data = event.data.json();
-  } catch (err) {
-    console.error('push: failed to parse json', err);
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (err) {
+      console.error('push: failed to parse json', err);
+    }
   }
 
   event.waitUntil(
