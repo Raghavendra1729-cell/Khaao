@@ -7,18 +7,141 @@
 > session-by-session diary. The one exception: work that's still **uncommitted**
 > has no other record yet, so it's kept here (condensed) until it lands.
 
-## Current state (2026-07-21)
+## Current state (2026-07-22)
 
-**Everything is implemented and gate-clean. R1–R31 and F1–F24 are committed**
-(git log `ca78f23`..`1e397b1` and earlier — full detail there, not reproduced
-here). **Everything since — the G-series (§ 9.3), a backend find-fix pass, a
-frontend design-polish pass, and this session's full-stack find-fix pass — is
-implemented, gated, and still UNCOMMITTED**, sitting together in the working
-tree per the project owner's standing "don't commit" instruction. Nothing
-below has landed yet; review-then-commit is the next step whenever the owner
-is ready (see "Three things remain" below).
+**Everything is implemented and gate-clean, and the prior backlog has now
+landed.** R1–R31, F1–F24, the G-series (§ 9.3), the backend find-fix pass, the
+frontend design-polish pass, and the earlier full-stack find-fix pass are all
+**committed** (git log through `f8502de` — the "review and commit everything
+uncommitted" step that used to head this section is done, in one-commit-per-
+topic splits as recommended). The **uncommitted work** now is two 2026-07-22
+passes (below, newest first), left in the working tree per the owner's
+standing "don't commit" instruction.
 
 ### Uncommitted work, newest first
+
+**2026-07-22 (component restructure + fresh full-stack find-fix pass):** the
+`frontend/src/components/` folder had grown to 30 files in one flat directory
+mixing role-agnostic primitives, app-shell, and student-/shop-only code with
+no separation — split it into `components/ui/` (11 role-agnostic primitives:
+Button, Card, Modal, Toast, ConfirmDialog, EmptyState(+Icons), Spinner,
+StatusBadge, QtyStepper, VegMark), `components/layout/` (5: Layout,
+ProtectedRoute, ErrorBoundary, InstallPrompt, PushNotificationSetup),
+`components/student/` (10: MenuItemCard, OrderModal, OrderTicket,
+StudentRealtime(+test), StatusStamps, TrendingRail, FavoritesRail,
+DietFilter, MenuSkeleton), and `components/shop/` (2: ShopRealtime,
+ShopStatusControl). Two non-component pub-sub helper modules
+(`promptCoordination.ts`, `shopNotifications.ts`) moved to `lib/` instead,
+alongside `liveAnnouncer.ts` whose exact idiom they already mirrored — a
+plain `.ts` state-store module living in `components/` was the odd one out,
+not the convention. All moves via `git mv` (history preserved); every import
+across the tree (30+ files) updated by hand for the new depth, including
+`vi.mock()` string literals that a `from '...'` sed pass can't reach (caught
+by a full test run, not by `tsc` — mock specifiers aren't type-checked).
+
+Then a fresh, evidence-based bug hunt across both stacks — frontend read
+directly (hooks/useSSE.ts, api/client.ts, lib/cart.ts, lib/image.ts,
+AuthContext.tsx, Login.tsx, sw.ts, PushNotificationSetup.tsx, Orders.tsx,
+OrderModal.tsx, History.tsx, MenuManage.tsx), backend delegated to a
+background pass over files/areas the two 2026-07-21 backend passes hadn't
+already covered in depth (ratings.go, sse_ticket.go, gorm.go's query/preload
+shapes, ratelimit.go, hub.go, main.tsx's expiry ticker, models vs.
+migrations). Found and fixed 3 real bugs:
+
+1. **[Data integrity] `services/ratings.go` `SubmitRatings` let a student
+   rate an order item that was never delivered.** `itemMap` was built from
+   *all* of `order.Items` with no filter on `Status`, and validation only
+   checked the item belonged to the order and `stars` was 1–5 — never that
+   `Status != rejected`. A line goes `rejected` when the shopkeeper trims it
+   mid-order (`PoolEngine.RemoveItem`, e.g. running out of an ingredient)
+   while the rest of the order proceeds normally to `completed`; the student
+   never received that item but `POST /api/orders/:id/ratings` accepted a
+   rating for it anyway, and `GormRatingRepo.GetMenuAggregates` aggregates
+   purely by `menu_item_id`/`stars` with no join back to item status — so it
+   directly pollutes that menu item's public `avg_rating`/`rating_count`
+   shown to every student. The frontend already filters rejected items out
+   of the normal rating UI (`OrderStatus.tsx`), so this wasn't reachable
+   through the intended flow today, but it was a missing *server-side*
+   invariant, not a deliberate tradeoff — trivially reachable via a direct
+   API call, or by any future frontend regression that stops filtering.
+   Fixed: reject with 400 if the targeted item's status is `rejected`. New
+   regression test (`rating_a_rejected_item`), verified to fail without the
+   fix.
+2. **`sw.ts`'s push handler silently dropped a data-less push event** —
+   showing nothing at all, which is exactly the browser-goodwill/throttling
+   risk the handler's own adjacent comment already warns about for a
+   malformed payload, just left unhandled for the "no payload" case. Not
+   currently reachable (this backend's `push.go` always sends a marshaled
+   payload for every push it fires), but a real defensive-coding gap for any
+   push arriving without one. Fixed: fall back to the same generic
+   notification in both cases.
+3. **The backend's `avail_window_warning` (services/menu.go, set when
+   `avail_from >= avail_to` on a menu item create/update — ambiguous between
+   a genuine overnight window and a same-day typo) was a dead feature on the
+   frontend.** `MenuItem` never declared the field and neither mutation
+   handler in `MenuManage.tsx` read the response body, so a shopkeeper who
+   mistyped an availability window got zero feedback despite the backend
+   doing the work to compute it. Fixed: added the field to the `MenuItem`
+   type and surfaced it as an `info` toast on both create and update.
+
+Plus two doc corrections found along the way: § 4's codebase map claimed
+`useSSE.ts` has a "MAX_RETRIES cap" — the hook now retries indefinitely with
+only a *backoff-delay* cap (`MAX_BACKOFF_MS`); the attempt-count cap this
+line described no longer exists in the code (confirmed via
+`useSSE.test.ts`'s own comment referencing "the old MAX_RETRIES(8) cap").
+And a stale comment in `OrderStatus.tsx` still pointed at
+`components/StudentRealtime.tsx` post-reorg.
+
+Full GATE after everything above: frontend — `tsc -b --noEmit` clean, `lint`
+0 errors/23 warnings (unchanged baseline), `test` 61/61, `build` 250.01 KB
+raw initial student JS (unchanged — the reorg is pure file movement, and the
+`avail_window_warning` fix lands in a lazy-loaded route chunk), `format:check`
+clean. Backend — `go build`, `go vet`, `gofmt -l` clean, `golangci-lint run`
+0 issues, `go test ./... -race` clean (including the new ratings regression
+test).
+
+**2026-07-22 (frontend find-fix pass — realtime cache sync):** a fresh read of
+the frontend focused on React Query cache keys vs. the SSE events that are
+supposed to keep them live — the class of bug where a broadcast fires but the
+component listening for it reads a *different* key. Found and fixed one real
+one:
+
+1. **The shopkeeper's header status pill never refetched from SSE or on
+   reconnect — it only updated from its own mutation.**
+   `components/ShopStatusControl.tsx` read its status from query key
+   `['shop', 'status']`, but *nothing else in the app used that key*. The rest
+   of the app (student `Menu.tsx`, both `StudentRealtime`/`ShopRealtime`
+   invalidations) uses `['shop-status']`. Two consequences: (a)
+   `hub.NotifyShopStatusUpdate()` explicitly `broadcastAll`s a `shop_status`
+   event to **every** client "student AND shop" (its own doc comment), but
+   `ShopRealtime.handleMessage` had no `shop_status` branch at all, so the shop
+   silently dropped it; (b) `ShopRealtime`'s reconnect resync (`handleOpen`)
+   *did* invalidate `['shop-status']` — a key the shop side never read — so
+   even the "onOpen resyncs everything" self-heal missed the pill. Net: a
+   status change made on another shopkeeper device/session (counter tablet vs.
+   owner's phone) left this device's pill stale until a full reload. Since
+   `refetchOnWindowFocus` is off and there's no refetch interval (main.tsx),
+   nothing else masked it. **Fix:** unified `ShopStatusControl` onto the
+   app-wide `['shop-status']` key (its own mutation `setQueryData`/invalidate
+   included — a shorter string, so a net *reduction* on that path), and added
+   the missing `shop_status` branch to `ShopRealtime.handleMessage` so the
+   broadcast now lands instantly, matching the hub's documented intent. Only
+   affects multi-device shopkeeper sessions (the pill is the shopkeeper's own
+   info display; students were never affected — their `['shop-status']` path
+   was already correct), so it's low-severity, but it silently defeated a
+   broadcast the backend was already paying to send.
+
+   **Bundle note:** the new `else if` branch is ~65 bytes of runtime code in
+   the shared initial chunk, nudging the Vite-reported initial student JS from
+   249.95 KB to **250.01 KB** — 0.01 KB past the 250 KB line § 9.1.8 calls a
+   hard stop. Not byte-golfed back under: the honest lever is structural, not
+   a 65-byte contortion of working notification code — `ShopRealtime` /
+   `ShopStatusControl` are shopkeeper-only components that ride the *student's*
+   shared chunk because `Layout.tsx` statically imports them. Lazy-splitting
+   the shop shell out of the initial chunk (recorded as § 9.4-B13) reclaims far
+   more than needed whenever the budget wants real headroom. Gate after fix:
+   `tsc` clean, `lint` 0 errors/23 warnings (unchanged), `test` 61/61,
+   `build` 250.01 KB initial student JS.
 
 **2026-07-21 (full-stack find-fix pass):** a fresh, complete read of the
 codebase — backend order/menu/shop-status/push lifecycle, and the frontend
@@ -179,15 +302,22 @@ newest layer of the uncommitted diff.
 
 ### Three things remain
 
-1. **Review and commit everything uncommitted** — the G-series, the backend
-   find-fix pass, the design-polish micro-pass, and this session's full-stack
-   find-fix pass (including the push-subscribe SSRF fix — worth prioritizing
-   that one commit if the rest takes longer to review). All gated clean,
-   described above, ready for a normal review-then-commit pass whenever the
-   owner is ready. Recommended split: one commit per pass/topic (matches how
-   it's grouped above), not one giant commit.
-2. **Decide on § 9.4-B12** (the partial-handover/abandoned-order gap noted
-   above) — or leave it recorded and unstarted, same as the rest of § 9.4.
+1. **Review and commit both 2026-07-22 passes** — the component restructure
+   + find-fix pass (the `components/` split into `ui/`/`layout/`/`student/`/
+   `shop/`, `ratings.go`'s data-integrity fix, `sw.ts`'s push fix, the
+   `avail_window_warning` wiring, plus the doc corrections) and the earlier
+   realtime cache-sync fix (`ShopRealtime.tsx`/`ShopStatusControl.tsx`, now
+   living under `components/shop/`) are both still uncommitted; gated clean
+   throughout, ready for a normal review-then-commit whenever the owner is
+   ready. Given the restructure touches every file that moved, a commit split
+   by *kind* (the pure `git mv` restructure as one commit, each bug fix as
+   its own, doc updates as their own) will review far more cleanly than one
+   giant diff. (The earlier backlog it used to list here is now committed —
+   see "Current state".)
+2. **Decide on § 9.4-B12** (the partial-handover/abandoned-order gap) — or
+   leave it recorded and unstarted, same as the rest of § 9.4. § 9.4-B13
+   (lazy-split the shop shell for bundle headroom) is likewise recorded and
+   unstarted.
 3. **Deployment (D-1..D-7)** below — human-led, needs real infra access, not
    more code.
 
@@ -327,14 +457,26 @@ frontend/
     main.tsx, App.tsx              → root, route tree (role-split: student vs shopkeeper)
     lib/                           → firebase init, format helpers, sound (WebAudio, no assets),
                                      cart.ts (cart derivation/persistence + G3 reorder merge),
-                                     liveAnnouncer.ts (G7 aria-live pub-sub)
+                                     liveAnnouncer.ts (G7 aria-live pub-sub), promptCoordination.ts
+                                     (InstallPrompt/PushNotificationSetup bottom-sheet-slot pub-sub),
+                                     shopNotifications.ts (shopkeeper header-bell pub-sub)
     context/AuthContext.tsx        → auth state
     context/LanguageContext.tsx    → shopkeeper-only Hindi/English toggle (localStorage-persisted)
-    hooks/useSSE.ts                → SSE hook, exponential backoff, MAX_RETRIES cap
+    hooks/useSSE.ts                → SSE hook, jittered exponential backoff (capped at
+                                     MAX_BACKOFF_MS; retries indefinitely, no attempt-count cap —
+                                     the "MAX_RETRIES cap" this line described until 2026-07-22 no
+                                     longer exists in the code, see this session's find-fix pass)
     api/                           → typed API clients per domain
-    components/                    → Layout (header+nav+realtime handlers), shared UI, StatusStamps,
-                                     InstallPrompt, PushNotificationSetup, OrderModal, Modal (portal-based),
-                                     TrendingRail / FavoritesRail (G8)
+    components/ui/                 → role-agnostic primitives: Button, Card, Modal (portal-based),
+                                     Toast, ConfirmDialog, EmptyState(+Icons), Spinner, StatusBadge,
+                                     QtyStepper, VegMark
+    components/layout/              → app shell: Layout (header+nav+realtime handlers),
+                                     ProtectedRoute, ErrorBoundary, InstallPrompt,
+                                     PushNotificationSetup
+    components/student/            → MenuItemCard, OrderModal, OrderTicket, StudentRealtime,
+                                     StatusStamps, TrendingRail / FavoritesRail (G8), DietFilter,
+                                     MenuSkeleton
+    components/shop/               → ShopRealtime, ShopStatusControl
     pages/student/                 → Menu (browse/cart/checkout/search/favorites), OrderStatus
                                      (tracking/history/rating/reorder)
     pages/shop/                    → Orders, Prep, History (day stepper + ledger bars), MenuManage
@@ -483,8 +625,11 @@ Deployment (D-1..D-7, human-led).
   the commit-to-sweep gap, leaving the shop paused with one accepted order.
   Narrow; closing it fully means restructuring `RejectAllSubmitted` to join
   the caller's transaction. Not worth it unless observed live.
-- **Bundle budget:** raw initial student JS is at 249.95 KB — treat 250 KB as
-  a hard stop. The next addition of real size needs to trim something first.
+- **Bundle budget:** raw initial student JS is at 250.01 KB (Vite-reported) —
+  0.01 KB past what was a 250 KB hard stop, from the 2026-07-22 realtime fix
+  (see its bundle note). Treat this as over-budget: the next addition of real
+  size **must** trim something first, and § 9.4-B13 (lazy-split the shop shell
+  out of the shared initial chunk) is the identified lever to get back under.
 - Student history is `LIMIT 20` (no pagination yet — see § 9.4-B5); shop
   history caps the *response list* at 200 rows but computes insights/totals
   over the full day.
@@ -526,7 +671,8 @@ a phone or counter tablet. These are standing rules, not suggestions:
    Never treat a network failure as an auth failure (R3). Every mutation
    shows a pending state and toasts on error.
 8. **Performance budget:** initial student JS ≤ ~250 KB raw (currently
-   249.95 KB — snug). New heavy dependencies must be lazy chunks (follow
+   250.01 KB — just over, see § 9 bundle-budget caveat and § 9.4-B13). New
+   heavy dependencies must be lazy chunks (follow
    `App.tsx`'s route-group `lazy()` pattern; `lib/firebase` is dynamically
    imported at the moment of login). Menu photos always render through
    `cloudinaryThumb(url, 2×display-px)` — never a raw `secure_url`.
@@ -643,6 +789,8 @@ Nothing here may be started without the owner picking it deliberately.
 | B10 | iOS splash screens (`apple-touch-startup-image`) | Pure asset generation; wait for D-6 real-device pass to prove it's worth the asset set. |
 | B11 | SW update-prompt UX | `registerType` is `autoUpdate` today; switching to a "refresh for update" prompt is a product decision. |
 | B12 | Abandoned-order recovery | Found 2026-07-21: an order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0` on any item, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck until the shopkeeper notices and manually hands over the remainder to force `awaiting_payment`. A real fix needs an explicit shopkeeper "write off / abandon" action: new endpoint + service method + UI + copy + Hindi pairing — a product decision on what that action should mean (unpaid-completed? a new terminal status?), not a bug fix. |
+| B13 | Lazy-split the shop shell out of the shared initial chunk | Found 2026-07-22: `ShopRealtime`, `ShopStatusControl` (and the shop bits of `Layout`) are shopkeeper-only but ride the *student's* initial JS chunk because `Layout.tsx` statically imports them — so the ~250 KB "initial student JS" budget is partly spent on code students never run. The 2026-07-22 realtime fix pushed that number to 250.01 KB, 0.01 KB over the § 9.1.8 hard stop; this is the identified lever to get well back under. Frontend-only, but touches the always-mounted shell (needs a `lazy()`/`Suspense` boundary around the shop-only realtime/status components, following App.tsx's route-group pattern) — real enough to want a deliberate pass and a live re-verify, not a reactive tweak. Reclaims far more than the 65 bytes that tipped it over. |
+| B14 | "Accept" with every item unchecked silently rejects the order | Found 2026-07-22 (low priority, arguably-correct behavior): on the shop New-orders card, unchecking *all* pending items and pressing the green **Accept** marks them all out of stock and sends `rejectedItemIds = all`, which the backend's `Accept` turns into a full `OrderRejected` (allRejected branch). Outcome is defensible (you're out of everything → nothing to fulfil), but a green "Accept" producing a rejection is a mild UX trap. A fix would disable/relabel Accept when nothing is checked (point the shopkeeper at Reject instead) — cosmetic, and a product-copy decision + Hindi pairing, so recorded rather than changed. |
 
 ### Deployment (the remaining human-led milestone — needs real infra, not just code)
 
