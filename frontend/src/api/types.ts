@@ -30,6 +30,10 @@ export interface MenuItem {
   is_available: boolean;
   avail_from: string | null; // "HH:MM" 24h, or null
   avail_to: string | null;
+  /** Non-blocking: set when avail_from >= avail_to, since that's ambiguous
+   * between a genuine overnight window and a same-day typo. Only ever
+   * present on the create/update response, never on GET. */
+  avail_window_warning?: string;
   out_of_stock: boolean;
   status: MenuItemStatus;
   orderable: boolean;
