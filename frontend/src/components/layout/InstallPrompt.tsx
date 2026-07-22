@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Button } from './Button';
-import { setInstallPromptShowing } from './promptCoordination';
+import { Button } from '../ui/Button';
+import { setInstallPromptShowing } from '../../lib/promptCoordination';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];

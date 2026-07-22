@@ -1,12 +1,12 @@
 import { useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
-import { useSSE, type SSEMessage } from '../hooks/useSSE';
-import { useToast } from './Toast';
-import { playReadyChime, playStatusChange } from '../lib/sound';
-import { announce } from '../lib/liveAnnouncer';
-import { isActiveOrderStatus, type Order, type OrderStatus } from '../api/types';
-import { formatPrice } from '../lib/format';
+import { useSSE, type SSEMessage } from '../../hooks/useSSE';
+import { useToast } from '../ui/Toast';
+import { playReadyChime, playStatusChange } from '../../lib/sound';
+import { announce } from '../../lib/liveAnnouncer';
+import { isActiveOrderStatus, type Order, type OrderStatus } from '../../api/types';
+import { formatPrice } from '../../lib/format';
 
 /**
  * Mounted once for the whole student session (in Layout) so that order

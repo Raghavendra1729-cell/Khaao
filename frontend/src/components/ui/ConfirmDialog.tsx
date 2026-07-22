@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { Button } from './Button';
 import { Modal } from './Modal';
 

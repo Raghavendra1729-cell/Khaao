@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { getVapidPublicKey, subscribeToPush } from '../api/shop';
-import { useLanguage } from '../context/LanguageContext';
-import { Button } from './Button';
-import { useInstallPromptShowing } from './promptCoordination';
-import { useToast } from './Toast';
+import { getVapidPublicKey, subscribeToPush } from '../../api/shop';
+import { useLanguage } from '../../context/LanguageContext';
+import { Button } from '../ui/Button';
+import { useInstallPromptShowing } from '../../lib/promptCoordination';
+import { useToast } from '../ui/Toast';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);

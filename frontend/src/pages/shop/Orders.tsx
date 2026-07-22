@@ -4,14 +4,14 @@ import { acceptOrder, getShopOrders, rejectOrder, setMenuItemStock } from '../..
 import { ApiError } from '../../api/client';
 import type { Order } from '../../api/types';
 import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
-import { Card } from '../../components/Card';
-import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
-import { EmptyTicketIcon } from '../../components/EmptyStateIcons';
-import { useToast } from '../../components/Toast';
-import { OrderModal } from '../../components/OrderModal';
-import { Modal } from '../../components/Modal';
-import { clearShopNotification } from '../../components/shopNotifications';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { EmptyTicketIcon } from '../../components/ui/EmptyStateIcons';
+import { useToast } from '../../components/ui/Toast';
+import { OrderModal } from '../../components/student/OrderModal';
+import { Modal } from '../../components/ui/Modal';
+import { clearShopNotification } from '../../lib/shopNotifications';
 import { useLanguage } from '../../context/LanguageContext';
 
 // ─── Order-age display (F18) ──────────────────────────────────────────────────

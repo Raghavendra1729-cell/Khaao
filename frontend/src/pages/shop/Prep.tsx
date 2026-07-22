@@ -3,12 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getPrep, markPrepDone } from '../../api/shop';
 import { ApiError } from '../../api/client';
 import type { PrepItem } from '../../api/types';
-import { Card } from '../../components/Card';
-import { Button } from '../../components/Button';
-import { QtyStepper } from '../../components/QtyStepper';
-import { EmptyState } from '../../components/EmptyState';
-import { ColdFlameIcon } from '../../components/EmptyStateIcons';
-import { useToast } from '../../components/Toast';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { QtyStepper } from '../../components/ui/QtyStepper';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ColdFlameIcon } from '../../components/ui/EmptyStateIcons';
+import { useToast } from '../../components/ui/Toast';
 import { useLanguage } from '../../context/LanguageContext';
 
 // PrepRow is only ever rendered for items where remaining_qty > 0 (filtered at

@@ -13,8 +13,8 @@ import '@fontsource/ibm-plex-sans/700.css';
 import './index.css';
 import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
-import { ToastProvider } from './components/Toast.tsx';
-import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { ToastProvider } from './components/ui/Toast.tsx';
+import { ErrorBoundary } from './components/layout/ErrorBoundary.tsx';
 import { unlockAudioOnFirstTouch } from './lib/sound.ts';
 
 unlockAudioOnFirstTouch();

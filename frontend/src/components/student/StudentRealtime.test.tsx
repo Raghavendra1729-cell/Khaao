@@ -3,23 +3,23 @@ import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { StudentRealtime } from './StudentRealtime';
-import * as soundLib from '../lib/sound';
-import type { SSEMessage } from '../hooks/useSSE';
-import type { Order, OrderItem } from '../api/types';
+import * as soundLib from '../../lib/sound';
+import type { SSEMessage } from '../../hooks/useSSE';
+import type { Order, OrderItem } from '../../api/types';
 
 const showToast = vi.fn();
-vi.mock('./Toast', () => ({
+vi.mock('../ui/Toast', () => ({
   useToast: () => ({ showToast }),
 }));
 
-vi.mock('../lib/sound', () => ({
+vi.mock('../../lib/sound', () => ({
   playReadyChime: vi.fn(),
   playStatusChange: vi.fn(),
 }));
 
 let capturedOnMessage: ((msg: SSEMessage) => void) | null = null;
 let capturedOnOpen: (() => void) | null = null;
-vi.mock('../hooks/useSSE', () => ({
+vi.mock('../../hooks/useSSE', () => ({
   useSSE: (_path: string | null, onMessage: (msg: SSEMessage) => void, onOpen?: () => void) => {
     capturedOnMessage = onMessage;
     capturedOnOpen = onOpen ?? null;

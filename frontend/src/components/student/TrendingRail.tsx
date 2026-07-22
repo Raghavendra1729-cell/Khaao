@@ -1,7 +1,7 @@
-import type { MenuItem } from '../api/types';
-import { cloudinaryThumb, formatPrice } from '../lib/format';
-import { QtyStepper } from './QtyStepper';
-import { VegMark } from './VegMark';
+import type { MenuItem } from '../../api/types';
+import { cloudinaryThumb, formatPrice } from '../../lib/format';
+import { QtyStepper } from '../ui/QtyStepper';
+import { VegMark } from '../ui/VegMark';
 
 interface TrendingRailProps {
   items: MenuItem[];

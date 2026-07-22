@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { MenuItemStatus, OrderItemStatus, OrderStatus } from '../api/types';
+import type { MenuItemStatus, OrderItemStatus, OrderStatus } from '../../api/types';
 
 type Tone = 'moss' | 'turmeric' | 'stamp' | 'neutral' | 'steel';
 

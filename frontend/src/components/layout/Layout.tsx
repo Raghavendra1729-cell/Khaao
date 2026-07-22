@@ -2,19 +2,19 @@ import type { ReactNode } from 'react';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '../context/AuthContext';
-import { LanguageProvider, useLanguage } from '../context/LanguageContext';
-import { getActiveOrder } from '../api/orders';
-import { getPrep, getShopOrders } from '../api/shop';
-import { StudentRealtime } from './StudentRealtime';
-import { ShopRealtime } from './ShopRealtime';
-import { ShopStatusControl } from './ShopStatusControl';
-import { useShopNotification, clearShopNotification } from './shopNotifications';
+import { useAuth } from '../../context/AuthContext';
+import { LanguageProvider, useLanguage } from '../../context/LanguageContext';
+import { getActiveOrder } from '../../api/orders';
+import { getPrep, getShopOrders } from '../../api/shop';
+import { StudentRealtime } from '../student/StudentRealtime';
+import { ShopRealtime } from '../shop/ShopRealtime';
+import { ShopStatusControl } from '../shop/ShopStatusControl';
+import { useShopNotification, clearShopNotification } from '../../lib/shopNotifications';
 import { InstallPrompt } from './InstallPrompt';
 import { PushNotificationSetup } from './PushNotificationSetup';
-import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { FullPageSpinner } from './Spinner';
-import { useLiveAnnouncement } from '../lib/liveAnnouncer';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { FullPageSpinner } from '../ui/Spinner';
+import { useLiveAnnouncement } from '../../lib/liveAnnouncer';
 
 function Icon({ d }: { d: string }) {
   return (

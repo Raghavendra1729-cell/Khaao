@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSSE, type SSEMessage } from '../hooks/useSSE';
-import { getShopOrders } from '../api/shop';
-import { playIncomingAlert, playOrderComplete } from '../lib/sound';
-import { pingShopNotification } from './shopNotifications';
-import { announce } from '../lib/liveAnnouncer';
-import { useLanguage } from '../context/LanguageContext';
+import { useSSE, type SSEMessage } from '../../hooks/useSSE';
+import { getShopOrders } from '../../api/shop';
+import { playIncomingAlert, playOrderComplete } from '../../lib/sound';
+import { pingShopNotification } from '../../lib/shopNotifications';
+import { announce } from '../../lib/liveAnnouncer';
+import { useLanguage } from '../../context/LanguageContext';
 
 /**
  * Mounted once for the whole shopkeeper session (in Layout). Owns the

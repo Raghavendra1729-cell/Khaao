@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Menu } from './Menu';
-import { ToastProvider } from '../../components/Toast';
+import { ToastProvider } from '../../components/ui/Toast';
 import type { MenuItem } from '../../api/types';
 
 // jsdom has no IntersectionObserver; Menu.tsx uses one for category scroll-spy.
