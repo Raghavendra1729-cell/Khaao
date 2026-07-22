@@ -47,6 +47,9 @@ func (s *RatingsService) SubmitRatings(ctx context.Context, orderID uint, userID
 		if !ok {
 			return ErrBadRequest(fmt.Sprintf("order_item_id %d does not belong to this order", in.OrderItemID))
 		}
+		if item.Status == models.ItemRejected {
+			return ErrBadRequest(fmt.Sprintf("order_item_id %d was never delivered and cannot be rated", in.OrderItemID))
+		}
 		if in.Stars < 1 || in.Stars > 5 {
 			return ErrBadRequest("stars must be between 1 and 5")
 		}
