@@ -9,16 +9,14 @@
 
 ## Current state (2026-07-22)
 
-**Everything is implemented and gate-clean, and the prior backlog has now
-landed.** R1–R31, F1–F24, the G-series (§ 9.3), the backend find-fix pass, the
-frontend design-polish pass, and the earlier full-stack find-fix pass are all
-**committed** (git log through `f8502de` — the "review and commit everything
-uncommitted" step that used to head this section is done, in one-commit-per-
-topic splits as recommended). The **uncommitted work** now is two 2026-07-22
-passes (below, newest first), left in the working tree per the owner's
-standing "don't commit" instruction.
+**Everything is implemented and gate-clean, and the entire backlog has now
+landed.** R1–R31, F1–F24, the G-series (§ 9.3), every backend/frontend
+find-fix pass, the design-polish pass, the component restructure, and the
+2026-07-22 bug fixes below are all **committed** (git log through `b0ccf47`,
+in one-commit-per-topic splits). The working tree is clean — nothing
+uncommitted remains.
 
-### Uncommitted work, newest first
+### Recent work, newest first
 
 **2026-07-22 (component restructure + fresh full-stack find-fix pass):** the
 `frontend/src/components/` folder had grown to 30 files in one flat directory
@@ -300,25 +298,13 @@ scroll/reduced-motion), and (G-series) live-verified via Playwright against
 an isolated scratch stack. F-series is committed (git log); G-series is the
 newest layer of the uncommitted diff.
 
-### Three things remain
+### Two things remain
 
-1. **Review and commit both 2026-07-22 passes** — the component restructure
-   + find-fix pass (the `components/` split into `ui/`/`layout/`/`student/`/
-   `shop/`, `ratings.go`'s data-integrity fix, `sw.ts`'s push fix, the
-   `avail_window_warning` wiring, plus the doc corrections) and the earlier
-   realtime cache-sync fix (`ShopRealtime.tsx`/`ShopStatusControl.tsx`, now
-   living under `components/shop/`) are both still uncommitted; gated clean
-   throughout, ready for a normal review-then-commit whenever the owner is
-   ready. Given the restructure touches every file that moved, a commit split
-   by *kind* (the pure `git mv` restructure as one commit, each bug fix as
-   its own, doc updates as their own) will review far more cleanly than one
-   giant diff. (The earlier backlog it used to list here is now committed —
-   see "Current state".)
-2. **Decide on § 9.4-B12** (the partial-handover/abandoned-order gap) — or
+1. **Decide on § 9.4-B12** (the partial-handover/abandoned-order gap) — or
    leave it recorded and unstarted, same as the rest of § 9.4. § 9.4-B13
    (lazy-split the shop shell for bundle headroom) is likewise recorded and
    unstarted.
-3. **Deployment (D-1..D-7)** below — human-led, needs real infra access, not
+2. **Deployment (D-1..D-7)** below — human-led, needs real infra access, not
    more code.
 
 ---
