@@ -448,10 +448,13 @@ function MenuItemRow({ item, allTags }: { item: MenuItem; allTags: string[] }) {
 
   const updateMutation = useMutation({
     mutationFn: (input: MenuItemInput) => updateMenuItem(item.id, input),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       invalidate();
       setEditing(false);
       showToast(language === 'hi' ? 'आइटम अपडेट हो गया।' : 'Item updated.', 'success');
+      if (updated.avail_window_warning) {
+        showToast(updated.avail_window_warning, 'info');
+      }
     },
     onError: (err) =>
       showToast(
@@ -621,10 +624,13 @@ export function ShopMenuManagePage() {
 
   const createMutation = useMutation({
     mutationFn: (input: MenuItemInput) => createMenuItem(input),
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
       setShowAddForm(false);
       showToast(language === 'hi' ? 'आइटम जोड़ा गया।' : 'Item added.', 'success');
+      if (created.avail_window_warning) {
+        showToast(created.avail_window_warning, 'info');
+      }
     },
     onError: (err) =>
       showToast(
