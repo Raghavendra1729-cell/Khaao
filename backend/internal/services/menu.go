@@ -154,6 +154,8 @@ type MenuService struct {
 	repo       repository.MenuRepo
 	orderRepo  repository.OrderRepo
 	ratingRepo repository.RatingRepo
+	poolRepo   repository.PoolRepo
+	uow        repository.UnitOfWork
 	hub        *realtime.Hub
 	cfg        *config.Config
 
@@ -169,8 +171,8 @@ type MenuService struct {
 	cacheGen uint64
 }
 
-func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, hub *realtime.Hub, cfg *config.Config) *MenuService {
-	return &MenuService{repo: repo, orderRepo: orderRepo, ratingRepo: ratingRepo, hub: hub, cfg: cfg}
+func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, poolRepo repository.PoolRepo, uow repository.UnitOfWork, hub *realtime.Hub, cfg *config.Config) *MenuService {
+	return &MenuService{repo: repo, orderRepo: orderRepo, ratingRepo: ratingRepo, poolRepo: poolRepo, uow: uow, hub: hub, cfg: cfg}
 }
 
 func (s *MenuService) invalidateCache() {
@@ -398,16 +400,27 @@ func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) 
 }
 
 func (s *MenuService) Delete(ctx context.Context, id uint) error {
-	// Block the delete if any in-flight order still references this item.
-	// This prevents orphaned order_items with a dangling menu_item_id.
-	active, err := s.orderRepo.HasActiveItemsForMenuItem(ctx, id)
+	// The active-items check, the menu delete, and clearing the item's
+	// item_pool row all happen in one transaction: a soft delete is an
+	// UPDATE (item_pool's ON DELETE CASCADE never fires), so without this a
+	// stranded pool row makes PrepList resolve it to a nameless ghost item
+	// forever (STATUS.md § 9.5 T4). Sharing the transaction also closes the
+	// gap where a CreateOrder could land between the check and the delete,
+	// producing the orphaned order_items row the check exists to prevent.
+	err := s.uow.WithTx(ctx, func(txCtx context.Context) error {
+		active, err := s.orderRepo.HasActiveItemsForMenuItem(txCtx, id)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrConflict("cannot delete a menu item that is part of an active order")
+		}
+		if err := s.repo.Delete(txCtx, id); err != nil {
+			return err
+		}
+		return s.poolRepo.Delete(txCtx, id)
+	})
 	if err != nil {
-		return err
-	}
-	if active {
-		return ErrConflict("cannot delete a menu item that is part of an active order")
-	}
-	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
 	s.invalidateCache()

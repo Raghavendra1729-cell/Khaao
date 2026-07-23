@@ -1050,13 +1050,17 @@ func (e *PoolEngine) PrepList(ctx context.Context) ([]PrepItemResponse, error) {
 
 	out := make([]PrepItemResponse, 0, len(ids))
 	for _, id := range ids {
-		name := ""
-		if mi, ok := menuMap[id]; ok {
-			name = mi.Name
+		mi, ok := menuMap[id]
+		if !ok {
+			// Belt-and-braces: MenuService.Delete now clears item_pool in
+			// the same transaction, so this shouldn't be reachable, but an
+			// id with no resolvable menu item is never worth showing as a
+			// nameless ghost row.
+			continue
 		}
 		out = append(out, PrepItemResponse{
 			MenuItemID:   id,
-			Name:         name,
+			Name:         mi.Name,
 			RemainingQty: remainingByItem[id],
 			PoolQty:      poolByItem[id],
 		})

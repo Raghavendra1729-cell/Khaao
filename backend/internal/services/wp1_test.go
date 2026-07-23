@@ -156,9 +156,10 @@ func newMenuService() (*services.MenuService, *mockOrderRepo, *mockMenuRepo) {
 	menuRepo := &mockMenuRepo{}
 	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
 	ratingRepo := &mockRatingRepo{}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
 	hub := realtime.NewHub()
 	cfg := &config.Config{}
-	return services.NewMenuService(menuRepo, orderRepo, ratingRepo, hub, cfg), orderRepo, menuRepo
+	return services.NewMenuService(menuRepo, orderRepo, ratingRepo, poolRepo, &mockUoW{}, hub, cfg), orderRepo, menuRepo
 }
 
 func TestMenuCreateRequiresDiet(t *testing.T) {

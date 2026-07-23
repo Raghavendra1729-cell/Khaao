@@ -173,6 +173,10 @@ type mockMenuRepo struct {
 	// findAllCalls counts FindAll invocations so a test can tell whether a
 	// later ListAvailable call hit the cache or triggered a fresh repo read.
 	findAllCalls int
+	// deletedIDs mirrors a real soft delete: Delete marks the id rather than
+	// removing it from items, and FindMapByIDs (like GORM's default scope)
+	// excludes deleted ids from its result.
+	deletedIDs map[uint]bool
 }
 
 func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuItem, error) {
@@ -195,10 +199,28 @@ func (m *mockMenuRepo) FindByID(ctx context.Context, id uint) (*models.MenuItem,
 	return &models.MenuItem{ID: id, Name: "Test Item", Price: 1000, IsAvailable: true}, nil
 }
 func (m *mockMenuRepo) FindMapByIDs(ctx context.Context, ids []uint) (map[uint]models.MenuItem, error) {
-	return nil, nil
+	out := make(map[uint]models.MenuItem)
+	for _, it := range m.items {
+		if m.deletedIDs[it.ID] {
+			continue
+		}
+		for _, id := range ids {
+			if id == it.ID {
+				out[it.ID] = it
+				break
+			}
+		}
+	}
+	return out, nil
 }
-func (m *mockMenuRepo) Save(ctx context.Context, mi *models.MenuItem) error      { return nil }
-func (m *mockMenuRepo) Delete(ctx context.Context, id uint) error                { return nil }
+func (m *mockMenuRepo) Save(ctx context.Context, mi *models.MenuItem) error { return nil }
+func (m *mockMenuRepo) Delete(ctx context.Context, id uint) error {
+	if m.deletedIDs == nil {
+		m.deletedIDs = make(map[uint]bool)
+	}
+	m.deletedIDs[id] = true
+	return nil
+}
 func (m *mockMenuRepo) UpdateStock(ctx context.Context, id uint, oos bool) error { return nil }
 func (m *mockMenuRepo) ResetStock(ctx context.Context) error                     { return nil }
 
@@ -212,6 +234,10 @@ func (m *mockPoolRepo) Lock(ctx context.Context, itemID uint) (int, error) {
 }
 func (m *mockPoolRepo) Add(ctx context.Context, itemID uint, qty int) error {
 	m.pool[itemID] += qty
+	return nil
+}
+func (m *mockPoolRepo) Delete(ctx context.Context, itemID uint) error {
+	delete(m.pool, itemID)
 	return nil
 }
 func (m *mockPoolRepo) ZeroAll(ctx context.Context) error { return nil }
@@ -896,5 +922,51 @@ func TestRejectAfterAcceptRefusedWhenHandedOver(t *testing.T) {
 	_, err := engine.Reject(ctx, 1)
 	if err == nil {
 		t.Fatal("expected Reject to be refused once pickup has started")
+	}
+}
+
+// TestMenuDeleteRemovesStrandedPoolRow guards the T4 fix: deleting a menu
+// item is a soft delete (an UPDATE), so item_pool's ON DELETE CASCADE never
+// fires. Cooked units can be sitting in the pool with no active order
+// waiting on them (units returned by Reject/RemoveItem/ExpiryTick with
+// nothing else queued) — reachable, not theoretical. Without the fix,
+// PrepList unions that stranded pool row into its id set, resolves the name
+// via FindMapByIDs (which respects the soft delete), and returns a
+// permanent nameless ghost item on every GET /api/shop/prep.
+func TestMenuDeleteRemovesStrandedPoolRow(t *testing.T) {
+	ctx := context.Background()
+	uow := &mockUoW{}
+	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	menuRepo := &mockMenuRepo{items: []models.MenuItem{{ID: 1, Name: "Samosa", Price: 1000, IsAvailable: true}}}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
+	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	ratingRepo := &mockRatingRepo{}
+	hub := realtime.NewHub()
+	cfg := &config.Config{}
+	alloc := &services.FCFSAllocation{}
+
+	menuSvc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, poolRepo, uow, hub, cfg)
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
+
+	// Cooked units already sitting in the pool, with no active order waiting.
+	poolRepo.pool[1] = 3
+
+	if err := menuSvc.Delete(ctx, 1); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, stillPresent := poolRepo.pool[1]; stillPresent {
+		t.Fatalf("item_pool row for the deleted item is still present, want gone")
+	}
+
+	prep, err := engine.PrepList(ctx)
+	if err != nil {
+		t.Fatalf("PrepList: %v", err)
+	}
+	for _, item := range prep {
+		if item.MenuItemID == 1 {
+			t.Fatalf("PrepList still returned a row for the deleted item: %+v", item)
+		}
 	}
 }

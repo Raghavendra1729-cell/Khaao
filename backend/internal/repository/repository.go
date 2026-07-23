@@ -80,6 +80,11 @@ type PoolRepo interface {
 	FindAll(ctx context.Context) (map[uint]int, error)
 	Lock(ctx context.Context, menuItemID uint) (int, error)
 	Add(ctx context.Context, menuItemID uint, qty int) error
+	// Delete removes a menu item's item_pool row entirely. Used when the
+	// menu item itself is deleted: a soft delete is an UPDATE, so
+	// item_pool's ON DELETE CASCADE never fires, and a stranded row makes
+	// PrepList resolve it to a nameless ghost item forever.
+	Delete(ctx context.Context, menuItemID uint) error
 	ZeroAll(ctx context.Context) error
 }
 

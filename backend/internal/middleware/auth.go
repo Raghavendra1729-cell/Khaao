@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -60,8 +61,7 @@ func RequireAuth(cfg *config.Config, authSvc *services.AuthService) gin.HandlerF
 		}
 		user, err := authSvc.GetUser(c.Request.Context(), uint(userID))
 		if err != nil {
-			slog.Warn("khaao: auth failed", "reason", "unknown_user", "user_id", userID, "path", c.FullPath())
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
+			respondAuthError(c, err, uint(userID))
 			return
 		}
 		c.Set(ContextUserID, uint(userID))
@@ -93,14 +93,35 @@ func RequireSSEAuth(authSvc *services.AuthService, tickets *services.SSETicketSe
 		}
 		user, err := authSvc.GetUser(c.Request.Context(), userID)
 		if err != nil {
-			slog.Warn("khaao: sse auth failed", "reason", "unknown_user", "user_id", userID, "path", c.FullPath())
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
+			respondAuthError(c, err, userID)
 			return
 		}
 		c.Set(ContextUserID, userID)
 		c.Set(ContextRole, string(user.Role))
 		c.Next()
 	}
+}
+
+// respondAuthError classifies an AuthService.GetUser failure. A genuine
+// auth failure (ErrNotFound: the user row is gone, or a shopkeeper's email
+// dropped off the live allowlist) is a real 401 — that's the 2026-07-21
+// instant-revocation behavior and must keep destroying the session.
+// Anything else — a bare driver error propagated from FindByID/Exists
+// (connection-pool exhaustion, failover, a deadline) — is an infrastructure
+// failure, not an auth failure, and must not be served as 401: the frontend
+// treats 401 as terminal and destroys the 7-day JWT, so a DB blip would
+// force-log-out every affected user instead of letting them retry. This is
+// the server-side twin of the client-side rule that a network failure must
+// never be treated as an auth failure (§ 9.1.7 / R3). See STATUS.md § 9.5 T1.
+func respondAuthError(c *gin.Context, err error, userID uint) {
+	var appErr *services.AppError
+	if errors.As(err, &appErr) && (appErr.Status == http.StatusUnauthorized || appErr.Status == http.StatusNotFound) {
+		slog.Warn("khaao: auth failed", "reason", "unknown_user", "user_id", userID, "path", c.FullPath())
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unknown user"})
+		return
+	}
+	slog.Error("khaao: auth failed", "reason", "infra_error", "user_id", userID, "path", c.FullPath(), "error", err)
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "temporarily unavailable — please try again"})
 }
 
 // RequireRole aborts with 403 unless the authenticated user has the given
