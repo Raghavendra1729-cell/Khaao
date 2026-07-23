@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/auth';
 import { getStoredUser, getToken, onUnauthorized } from '../api/client';
 import type { User } from '../api/types';
@@ -21,13 +22,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => getStoredUser<User>());
   const [authLoading, setAuthLoading] = useState(false);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     return onUnauthorized(() => {
+      // A 401 means the session is gone — clear cached queries too, or a
+      // shared device's next sign-in would render the previous student's
+      // order history/cart-derived data before any fresh fetch replaces it
+      // (STATUS.md § 9.5 T2).
+      queryClient.clear();
       setUser(null);
       navigate('/login', { replace: true });
     });
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   async function loginWithGoogleAction(): Promise<User | null> {
     setAuthLoading(true);
@@ -65,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout(): void {
     authApi.logout();
+    queryClient.clear();
     setUser(null);
     navigate('/login', { replace: true });
   }
