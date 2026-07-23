@@ -71,7 +71,7 @@ func main() {
 	}
 
 	authSvc := services.NewAuthService(userRepo, emailRepo, tokenVerifier, cfg)
-	menuSvc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, hub, cfg)
+	menuSvc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, poolRepo, uow, hub, cfg)
 	orderSvc := services.NewOrderService(orderRepo)
 	shopStatusSvc := services.NewShopStatusService(shopStatusRepo, orderRepo, uow, hub)
 	ratingsSvc := services.NewRatingsService(ratingRepo, orderRepo)

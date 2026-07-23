@@ -480,6 +480,10 @@ func (r *GormPoolRepo) Add(ctx context.Context, menuItemID uint, qty int) error 
 	return nil
 }
 
+func (r *GormPoolRepo) Delete(ctx context.Context, menuItemID uint) error {
+	return getDB(ctx, r.db).Exec(`DELETE FROM item_pool WHERE menu_item_id = ?`, menuItemID).Error
+}
+
 func (r *GormPoolRepo) ZeroAll(ctx context.Context) error {
 	return getDB(ctx, r.db).Model(&models.ItemPool{}).Where("1 = 1").Update("qty", 0).Error
 }

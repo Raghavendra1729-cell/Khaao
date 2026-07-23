@@ -161,7 +161,7 @@ func TestMenuAggregatesQuery(t *testing.T) {
 	}
 
 	// This is a bit hacky to use newMenuService since it expects mockRatingRepo inside it.
-	svc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, nil, &config.Config{})
+	svc := services.NewMenuService(menuRepo, orderRepo, ratingRepo, nil, nil, nil, &config.Config{})
 
 	items, err := svc.ListAll(ctx)
 	if err != nil {
