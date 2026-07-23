@@ -7,14 +7,14 @@
 > session-by-session diary. The one exception: work that's still **uncommitted**
 > has no other record yet, so it's kept here (condensed) until it lands.
 
-## Current state (2026-07-22)
+## Current state (2026-07-23)
 
-**Everything is implemented and gate-clean, and the entire backlog has now
-landed.** R1–R31, F1–F24, the G-series (§ 9.3), every backend/frontend
-find-fix pass, the design-polish pass, the component restructure, and the
-2026-07-22 bug fixes below are all **committed** (git log through `b0ccf47`,
-in one-commit-per-topic splits). The working tree is clean — nothing
-uncommitted remains.
+**Everything planned is implemented, gate-clean and committed.** R1–R31,
+F1–F24, the G-series (§ 9.3), every backend/frontend find-fix pass, the
+design-polish pass, the component restructure, the 2026-07-22 bug fixes, and
+the § 9.5 (T1–T5) 2026-07-22-audit fixes are all **committed** (git log
+through `33c562b`, backend and frontend split into one commit each). The
+working tree is clean — nothing uncommitted remains.
 
 ### Recent work, newest first
 
@@ -596,11 +596,11 @@ endpoints, state machines). Added since that doc was written:
 
 ## 9. What's LEFT
 
-**All code-side work is implemented and gate-clean** — see "Current state"
-above for exactly what's committed vs. still sitting in the working tree.
-The only real remaining items are: review-and-commit the uncommitted work,
-decide on § 9.4 (nothing in it is authorized to start on its own), and
-Deployment (D-1..D-7, human-led).
+**All planned code-side work, including § 9.5 (T1–T5), is implemented,
+gate-clean and committed.** The remaining items are, in priority order:
+
+1. Decide on § 9.4 (B1–B14) — nothing in it is authorized to start on its own.
+2. Deployment (D-1..D-7, human-led).
 
 **Caveats worth knowing (recorded, not tasks):**
 
@@ -777,6 +777,238 @@ Nothing here may be started without the owner picking it deliberately.
 | B12 | Abandoned-order recovery | Found 2026-07-21: an order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0` on any item, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck until the shopkeeper notices and manually hands over the remainder to force `awaiting_payment`. A real fix needs an explicit shopkeeper "write off / abandon" action: new endpoint + service method + UI + copy + Hindi pairing — a product decision on what that action should mean (unpaid-completed? a new terminal status?), not a bug fix. |
 | B13 | Lazy-split the shop shell out of the shared initial chunk | Found 2026-07-22: `ShopRealtime`, `ShopStatusControl` (and the shop bits of `Layout`) are shopkeeper-only but ride the *student's* initial JS chunk because `Layout.tsx` statically imports them — so the ~250 KB "initial student JS" budget is partly spent on code students never run. The 2026-07-22 realtime fix pushed that number to 250.01 KB, 0.01 KB over the § 9.1.8 hard stop; this is the identified lever to get well back under. Frontend-only, but touches the always-mounted shell (needs a `lazy()`/`Suspense` boundary around the shop-only realtime/status components, following App.tsx's route-group pattern) — real enough to want a deliberate pass and a live re-verify, not a reactive tweak. Reclaims far more than the 65 bytes that tipped it over. |
 | B14 | "Accept" with every item unchecked silently rejects the order | Found 2026-07-22 (low priority, arguably-correct behavior): on the shop New-orders card, unchecking *all* pending items and pressing the green **Accept** marks them all out of stock and sends `rejectedItemIds = all`, which the backend's `Accept` turns into a full `OrderRejected` (allRejected branch). Outcome is defensible (you're out of everything → nothing to fulfil), but a green "Accept" producing a rejection is a mild UX trap. A fix would disable/relabel Accept when nothing is checked (point the shopkeeper at Reject instead) — cosmetic, and a product-copy decision + Hindi pairing, so recorded rather than changed. |
+
+### 9.5 Find-fix tasks (T-series) — 2026-07-22 audit, DONE, committed
+
+**Status: complete and committed** (2026-07-23). A fresh full-stack read on
+2026-07-22 (after everything above had landed and committed) found six real
+defects that no prior pass covered, grouped into five file-disjoint tasks
+(T1–T5). All five landed: each got its own regression test, verified to fail
+without the fix before the fix was written. Gate after all five: backend
+`go build` / `go vet` / `gofmt -l` clean, `go test ./...` all green; frontend
+`tsc -b --noEmit` clean, `lint` 0 errors / 24 warnings, `test` 66/66 (was
+61/61 — 5 new tests, one per task). Kept below as the spec of what shipped —
+nothing here is an open task.
+
+| Task | Files owned (nothing else) | Stack |
+|---|---|---|
+| **T1** | `backend/internal/middleware/auth.go` (+ new middleware test) | Go |
+| **T2** | `frontend/src/context/AuthContext.tsx`, `src/api/client.ts`, `src/api/auth.ts` (+ test) | TS |
+| **T3** | `frontend/src/pages/shop/Orders.tsx` | TS |
+| **T4** | `backend/internal/services/menu.go`, `backend/internal/services/pool.go` (+ tests) | Go |
+| **T5** | `frontend/src/components/shop/ShopRealtime.tsx` | TS |
+
+---
+
+#### T1 — [HIGH] A transient DB error is served to the client as `401`, which force-logs-out every user and destroys their token
+
+`middleware/auth.go` collapses *every* error from `authSvc.GetUser` into
+`401 {"error":"unknown user"}` — in `RequireAuth` (the `if err != nil` after
+the `GetUser` call) and identically in `RequireSSEAuth`. But
+`AuthService.GetUser` (`services/auth.go`) returns two very different classes
+of error:
+
+- **Genuine auth failures** — `ErrNotFound("user not found")` when the user
+  row is gone, or when a shopkeeper's email is no longer on the live
+  allowlist. 401 is correct here; this is the 2026-07-21 instant-revocation
+  behavior and must keep working.
+- **Infrastructure failures** — a raw driver error propagated straight out of
+  `userRepo.FindByID` or `emailRepo.Exists`: connection-pool exhaustion,
+  managed-Postgres failover, a statement timeout, a context deadline. 401 is
+  flatly wrong here; the session is fine, the database blinked.
+
+The frontend takes 401 at face value and treats it as terminal:
+`api/client.ts` clears `khaao_token`/`khaao_user` and dispatches
+`khaao:unauthorized`, which `AuthContext` turns into a forced redirect to
+`/login`. The 7-day JWT is *destroyed* — recovery is a full Google sign-in,
+not a retry.
+
+**Failure scenario:** lunch rush. `database.go` caps the pool at
+`SetMaxOpenConns(25)`, and every `PoolEngine` mutation serializes on the
+`pg_advisory_xact_lock` in `GormUnitOfWork.WithTx`, so connections are held
+while queued. Auth adds 1–2 more queries on *every single request* (2 for a
+shopkeeper — user lookup plus the allowlist check) with no caching, on top of
+the SSE-driven refetch fan-out. One `too many connections` or
+`context deadline exceeded` out of the pool and every student mid-order is
+logged out and bounced to the sign-in screen at once. A brief managed-Postgres
+failover — exactly what D-1 provisions — does the same thing.
+
+This is also the server-side twin of the rule the project already enforces on
+the client: § 9.1.7 / R3, "never treat a network failure as an auth failure."
+It was only ever enforced in one direction.
+
+**Fix:** `services.AppError` already carries the right `Status`, and
+`controllers`' `respondError` already does exactly this destructuring — the
+middleware just doesn't. In both `RequireAuth` and `RequireSSEAuth`,
+`errors.As` the error to `*services.AppError` and return 401 only for a
+genuine 401/404; anything else (including a bare non-`AppError` driver error)
+must be a **503** with a retryable message, so the client surfaces "try again"
+instead of wiping the session. Keep the `slog.Warn` for real auth failures and
+use `slog.Error` for the infrastructure branch — they are different incidents
+and should not share a log line.
+
+**Fold in while you're here (same file, same fix):** `RequireSSEAuth` calls
+`tickets.Consume(ticket)` — which deletes the ticket unconditionally —
+*before* `GetUser` can fail. With the bug above, a DB blip therefore burns the
+ticket *and* 401s, and `useSSE`'s reconnect loop spins minting fresh tickets
+against a database that is already struggling. Consuming before validating is
+the right order (one-use must mean one-use), so don't reorder it; just make
+sure the 503 path doesn't feed a tight remint loop.
+
+**Test:** a middleware-level test with a fake `UserRepo` that returns a
+plain `errors.New("connection refused")` — assert 503, not 401 — plus the
+existing-behavior case (repo returns nil user → still 401). Verify both fail
+before the fix.
+
+---
+
+#### T2 — [HIGH] Logout leaves the previous student's order history, cart and favorites on a shared device
+
+`AuthContext.logout()` and the `onUnauthorized` handler both do only
+`setUser(null)` + `navigate('/login')`. Two stores survive that:
+
+1. **The React Query cache.** The `QueryClient` is constructed at module scope
+   in `main.tsx` and is never cleared. `['orders','history']` (every past
+   order: item names, quantities, prices, order numbers), `['orders','active']`
+   and `['menu']` all stay resident.
+2. **`localStorage`.** `api/auth.ts`'s `logout()` calls `clearAuthStorage()`,
+   which removes *only* `khaao_token` and `khaao_user`. Left behind:
+   `khaao_cart_v2` (the previous student's cart — ids and quantities),
+   `khaao_favorites_v1` ("Your usuals", explicitly personal), and
+   `khaao_rated_orders`.
+
+**Failure scenario:** shared hostel phone, or the canteen's own demo handset.
+Student A logs out. Student B signs in — no page reload, it's a SPA — and
+lands on `/`. `Menu.tsx` hydrates its cart from `khaao_cart_v2` and its pins
+from `khaao_favorites_v1`, so B starts with A's cart. B taps "Order status"
+and `OrderStatus.tsx` mounts against the same `QueryClient`: `['orders',
+'history']` is already populated with A's orders and renders **immediately**.
+`staleTime` is 10s, and by deliberate design (R25, § 9.1.7) a failed refetch
+must *not* blank rendered data — so on the flaky campus Wi-Fi this app is
+built for, A's history can stay on B's screen indefinitely. This is a
+cross-account data leak, and the codebase already treats shared devices as a
+real threat model (the `isShop`-gated Hindi guard in `Layout.tsx` exists for
+exactly this reason).
+
+**Fix:** make session teardown clear everything session-scoped, from **both**
+exits — the explicit `logout()` and the `khaao:unauthorized` handler, which
+today are separate code paths that must not drift. Call `queryClient.clear()`
+(`AuthContext` needs `useQueryClient()`), and extend `clearAuthStorage()` to
+remove the student-local `khaao_*` keys. Judgment call worth stating in the
+commit message: `khaao_install_dismissed` is device-scoped, not
+user-scoped — leave it. `khaao_lang` is already render-time-guarded by
+`isShop`; clearing it is optional but harmless.
+
+**Also note (record it, don't necessarily fix it here):** the device's Web
+Push subscription row stays bound to student A server-side. `services/push.go`
+`Subscribe` re-binds the row to B only if B actually opts into notifications;
+until then, an "order ready" push for A (ordering from another device) lands
+on the phone B is holding. Fixing properly means an unsubscribe call on
+logout — flag it and let the owner decide rather than expanding this task's
+file ownership.
+
+**Test:** a test that seeds `['orders','history']` and the `khaao_*` keys,
+calls logout, and asserts both are empty. Verify it fails without the fix.
+
+---
+
+#### T3 — [MEDIUM] Shop Accept/Reject silently swallow every "mark out of stock" failure
+
+In `pages/shop/Orders.tsx`, `IncomingOrderCard`'s `acceptMutation` and
+`rejectMutation` both do
+`await Promise.allSettled(...map((i) => setMenuItemStock(i.menu_item_id, true)))`
+and then **never inspect the results**. `allSettled` by construction never
+rejects, so every one of those calls can fail and the mutation still reports
+success.
+
+**Failure scenario:** rush hour. The shopkeeper unchecks the three items
+they've just run out of and hits the green Accept. The three
+`POST /api/shop/menu/:id/stock` calls 429 against their own bucket
+(`middleware/ratelimit.go`: burst 40, refill 4/s — reachable when
+accept/handover/done traffic is already flowing), or simply fail on a counter
+tablet that dropped Wi-Fi for two seconds. The order is accepted, those lines
+are correctly rejected on that one order, and the shopkeeper sees no error at
+all — **but the items stay in stock on the student menu.** Students keep
+ordering food that does not exist, and the shop has to reject each new order
+by hand. The failure is invisible precisely when it's most likely.
+
+**Fix:** inspect the settled results, collect the names of the items whose
+stock update rejected, and show an error toast naming them ("Couldn't mark
+Samosa, Chai out of stock — set them manually on the Menu tab"), with the
+Hindi pairing. Then still invalidate `['shop','menu']` so the true state
+lands. The order accept/reject itself must **not** be blocked by a stock-flag
+failure — accepting the order is the more important half and already
+succeeded; this is about telling the truth, not about rolling back.
+
+**Do not** also change the all-unchecked Accept behavior — that is § 9.4-B14,
+deliberately deferred as a product-copy decision.
+
+---
+
+#### T4 — [MEDIUM] Deleting a menu item strands its prep-pool row, and the prep API then returns a nameless ghost item forever
+
+`MenuService.Delete` blocks the delete while an active order references the
+item (`HasActiveItemsForMenuItem`), then calls `repo.Delete` — which is a
+**soft** delete (`models.MenuItem.DeletedAt` is a `gorm.DeletedAt`). It never
+touches `item_pool`. The schema's
+`item_pool.menu_item_id → menu_items(id) ON DELETE CASCADE` looks like it
+covers this, but a soft delete is an `UPDATE`; the cascade never fires.
+
+`PoolEngine.PrepList` then unions the pool's menu-item ids with the ids that
+have outstanding demand, and resolves names via `menuRepo.FindMapByIDs` —
+which *does* respect the soft delete. So the deleted item comes back as
+`{menu_item_id: N, name: "", remaining_qty: 0, pool_qty: K}` on every
+`GET /api/shop/prep` from then on, permanently.
+
+**Reachable, not theoretical:** cooked units return to the pool on `Reject`,
+`RemoveItem` and `ExpiryTick`, and stay there when no other order is waiting
+on that item. With the last order now terminal, `HasActiveItemsForMenuItem` is
+false and the delete is allowed. The stranded units are real cooked food that
+the system has silently stopped counting.
+
+Blast radius is contained on the UI today only by accident —
+`Prep.tsx` filters `remaining_qty > 0` before rendering, which its own comment
+frames as defensive, not as the thing holding this together. The API response
+is still wrong, and any future consumer of `/api/shop/prep` inherits the bug.
+
+**Fix:** zero (or delete) the item's `item_pool` row inside a
+`uow.WithTx` alongside the delete, so both land or neither does — `MenuService`
+does not currently hold a `UnitOfWork`, so wiring one in is part of this task.
+Belt-and-braces, also skip ids that resolve to no menu item in `PrepList`
+rather than emitting `name: ""`.
+
+**Fold in while you're in `menu.go` (same file):** `Delete`'s
+`HasActiveItemsForMenuItem` check and the delete itself are two separate
+statements with no transaction around them — a `CreateOrder` landing in the
+gap produces exactly the orphaned `order_items` row the check exists to
+prevent. Putting the whole thing in the `WithTx` above closes it for free,
+since that transaction takes the same advisory lock every `PoolEngine`
+mutation takes.
+
+**Test:** an integration test that puts units in the pool for an item with no
+active orders, deletes the item, and asserts `PrepList` returns no row for it
+and the pool row is gone/zero.
+
+---
+
+#### T5 — [LOW] The shop's reconnect resync misses `['shop','history']`
+
+`ShopRealtime.handleOpen` invalidates `['shop','orders']`, `['shop','prep']`,
+`['shop','menu']` and `['shop-status']` on every (re)connect. But
+`handleMessage`'s `orders_update` branch invalidates `['shop','history']`
+*as well* — so the one query kept fresh **only** by an event is the one the
+"onOpen resyncs everything" self-heal doesn't cover.
+
+**Failure scenario:** the counter tablet's SSE stream drops mid-rush (§ 10's
+slow-consumer drop, a backend restart, an elevator). Orders complete while
+it's disconnected. On reconnect everything else refreshes and the History tab
+— including the day's `total_paid` — keeps showing pre-drop numbers until some
+*later* order happens to complete and fire a fresh `orders_update`.
+
+This is the same class of bug as the 2026-07-22 shop-status-pill fix: a key
+that one code path refreshes and its sibling path doesn't. One line.
+
+---
 
 ### Deployment (the remaining human-led milestone — needs real infra, not just code)
 
