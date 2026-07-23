@@ -43,6 +43,14 @@ export function setAuthStorage(token: string, user: unknown): void {
 export function clearAuthStorage(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  // Student-local, session-scoped data that must not survive a logout on a
+  // shared device (STATUS.md § 9.5 T2) — a new sign-in on the same phone
+  // would otherwise start with the previous student's cart, favorites and
+  // rating state. khaao_install_dismissed and khaao_shop_lang are
+  // device-scoped, not account-scoped, and are deliberately left alone.
+  localStorage.removeItem('khaao_cart_v2');
+  localStorage.removeItem('khaao_favorites_v1');
+  localStorage.removeItem('khaao_rated_orders');
 }
 
 /** Subscribe to "session expired" notifications raised by apiFetch on 401. */

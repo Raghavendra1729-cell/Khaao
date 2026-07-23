@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { acceptOrder, getShopOrders, rejectOrder, setMenuItemStock } from '../../api/shop';
 import { ApiError } from '../../api/client';
-import type { Order } from '../../api/types';
+import type { Order, OrderItem } from '../../api/types';
 import { cloudinaryThumb, formatPrice, formatTime } from '../../lib/format';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -52,7 +52,7 @@ function RejectDialog({
 }: {
   order: Order;
   onCancel: () => void;
-  onConfirm: (unavailableItemIds: number[]) => void;
+  onConfirm: (unavailableItems: OrderItem[]) => void;
   busy: boolean;
 }) {
   const { language } = useLanguage();
@@ -61,7 +61,7 @@ function RejectDialog({
     Object.fromEntries(items.map((i) => [i.menu_item_id, false])),
   );
 
-  const unavailableMenuItemIds = items.filter((i) => checked[i.menu_item_id]).map((i) => i.menu_item_id);
+  const unavailableItems = items.filter((i) => checked[i.menu_item_id]);
 
   return (
     <Modal
@@ -79,7 +79,7 @@ function RejectDialog({
             className="flex-1"
             disabled={busy}
             loading={busy}
-            onClick={() => onConfirm(unavailableMenuItemIds)}
+            onClick={() => onConfirm(unavailableItems)}
           >
             <span>{language === 'hi' ? 'अस्वीकार करें' : 'Reject order'}</span>
           </Button>
@@ -124,6 +124,23 @@ function RejectDialog({
   );
 }
 
+// Promise.allSettled never rejects, so a caller that ignores its results
+// treats every stock-update failure (rate limit, dropped Wi-Fi) as success —
+// the item stays orderable on the student menu with no visible error
+// anywhere (STATUS.md § 9.5 T3). These two helpers turn the settled results
+// back into a human-readable failure, without blocking the accept/reject
+// itself on a stock-flag failure.
+function stockUpdateFailureNames(items: OrderItem[], results: PromiseSettledResult<unknown>[]): string[] {
+  return items.filter((_, i) => results[i]?.status === 'rejected').map((i) => i.name);
+}
+
+function stockUpdateFailureMessage(names: string[], language: 'en' | 'hi'): string {
+  const list = names.join(', ');
+  return language === 'hi'
+    ? `${list} को स्टॉक से बाहर नहीं किया जा सका — मेन्यू टैब पर मैन्युअल रूप से सेट करें`
+    : `Couldn't mark ${list} out of stock — set them manually on the Menu tab`;
+}
+
 function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -141,12 +158,20 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
     mutationFn: async () => {
       const rejectedItems = pendingItems.filter((i) => !checked[i.id]);
       const rejectedItemIds = rejectedItems.map((i) => i.id);
-      await Promise.allSettled(rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)));
-      return acceptOrder(order.id, rejectedItemIds);
+      const stockResults = await Promise.allSettled(
+        rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
+      );
+      // Stock-flag failures must not block the accept — accepting the order
+      // is the more important half, and already succeeded by this point.
+      await acceptOrder(order.id, rejectedItemIds);
+      return stockUpdateFailureNames(rejectedItems, stockResults);
     },
-    onSuccess: () => {
+    onSuccess: (failedStockNames) => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
+      if (failedStockNames.length > 0) {
+        showToast(stockUpdateFailureMessage(failedStockNames, language), 'error');
+      }
     },
     onError: (err) =>
       showToast(
@@ -160,17 +185,21 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async (unavailableMenuItemIds: number[]) => {
+    mutationFn: async (unavailableItems: OrderItem[]) => {
       // Mark each flagged item out of stock before rejecting.
-      await Promise.allSettled(
-        unavailableMenuItemIds.map((menuItemId) => setMenuItemStock(menuItemId, true)),
+      const stockResults = await Promise.allSettled(
+        unavailableItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
       );
-      return rejectOrder(order.id);
+      await rejectOrder(order.id);
+      return stockUpdateFailureNames(unavailableItems, stockResults);
     },
-    onSuccess: () => {
+    onSuccess: (failedStockNames) => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
       setShowRejectDialog(false);
+      if (failedStockNames.length > 0) {
+        showToast(stockUpdateFailureMessage(failedStockNames, language), 'error');
+      }
     },
     onError: (err) =>
       showToast(
@@ -286,7 +315,7 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
         <RejectDialog
           order={order}
           onCancel={() => setShowRejectDialog(false)}
-          onConfirm={(ids) => rejectMutation.mutate(ids)}
+          onConfirm={(items) => rejectMutation.mutate(items)}
           busy={rejectMutation.isPending}
         />
       )}

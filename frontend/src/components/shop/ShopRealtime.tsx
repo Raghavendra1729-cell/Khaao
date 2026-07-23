@@ -85,6 +85,11 @@ export function ShopRealtime() {
     queryClient.invalidateQueries({ queryKey: ['shop', 'prep'] });
     queryClient.invalidateQueries({ queryKey: ['shop', 'menu'] });
     queryClient.invalidateQueries({ queryKey: ['shop-status'] });
+    // Otherwise the only thing that ever refreshes shop history is
+    // handleMessage's orders_update branch — so a dropped SSE stream mid-
+    // rush leaves the History tab's totals stale until some later,
+    // unrelated order happens to complete (STATUS.md § 9.5 T5).
+    queryClient.invalidateQueries({ queryKey: ['shop', 'history'] });
   }, [queryClient]);
 
   useSSE('/api/shop/stream', handleMessage, handleOpen);
