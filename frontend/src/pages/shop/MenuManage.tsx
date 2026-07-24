@@ -186,7 +186,13 @@ function MenuItemForm({
       setForm((f) => ({ ...f, photo_url: url }));
     } catch {
       showToast(language === 'hi' ? 'फ़ोटो अपलोड नहीं हो सकी।' : 'Photo upload failed.', 'error');
-      setForm((f) => ({ ...f, photo_url: '' }));
+      // Leave form.photo_url untouched — it may already hold a perfectly
+      // good, previously-saved photo (editing an existing item). Wiping it
+      // here meant a failed re-upload attempt silently deleted a working
+      // photo from the item the moment Save was pressed, even though
+      // nothing new was ever successfully uploaded. The local preview below
+      // clears either way, so the form reverts to showing whatever
+      // photo_url already held.
     } finally {
       if (localPreviewRef.current === previewUrl) {
         URL.revokeObjectURL(previewUrl);
