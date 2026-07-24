@@ -12,12 +12,88 @@
 **Everything planned is implemented, gate-clean and committed.** R1–R31,
 F1–F24, the G-series (§ 9.3), every backend/frontend find-fix pass, the
 design-polish pass, the component restructure, the 2026-07-22 bug fixes, the
-§ 9.5 (T1–T5) 2026-07-22-audit fixes, and a fresh 2026-07-24 find-fix pass
-are all **committed** (git log through `f652957`, backend and frontend split
-into one commit each — `6e7972f`/`f652957`). The working tree is clean —
-nothing uncommitted remains.
+§ 9.5 (T1–T5) 2026-07-22-audit fixes, and two rounds of a fresh 2026-07-24
+find-fix pass are all **committed** (git log through `730318a`, backend and
+frontend split into one commit each per round — `6e7972f`/`f652957` then
+`2ffc90c`/`730318a`). The working tree is clean — nothing uncommitted
+remains.
 
 ### Recent work, newest first
+
+**2026-07-24 (second find-fix pass, same day, two more parallel agents by
+stack — deeper pass, less-scrutinized areas):** owner asked for another
+round on top of the pass below. Same split (one agent per stack, run in
+background, briefed to treat everything already in this file — including
+the pass below — as known and not to re-flag it), pointed at areas that had
+gotten comparatively less attention in prior passes (rate limiting,
+allocation, controllers, hub lifecycle, migrations on the backend;
+`useSSE.ts`, `sw.ts`, prompt-coordination timing, `api/client.ts` on the
+frontend). The backend agent's process stalled after finding and fully
+implementing its fix (a harness watchdog issue, not a defect in the work
+itself) — verified independently before trusting it: read every diff line
+by line, then re-ran the full gate (build/vet/gofmt/test -race, plus the
+integration suite against real Postgres) myself before committing. Found
+and fixed 4 real bugs:
+
+1. **[Concurrency] `services/menu.go` `MenuService.Update` could silently
+   revert a concurrent `SetStock` call (a lost-update race).** `Update` did
+   an unlocked `FindByID`, mutated only the `MenuItemInput`-owned fields in
+   memory, then `Save()`d the whole row — GORM's `Save` writes every column
+   verbatim, including `out_of_stock`, which `Update` itself never touches
+   but `SetStock` owns via its own targeted single-column `UPDATE`. A
+   `SetStock` call landing between `Update`'s read and its `Save` was
+   silently reverted by `Update`'s stale in-memory snapshot: exactly the
+   multi-device shopkeeper scenario already established as real in this
+   codebase (the 2026-07-22 `ShopStatusControl` fix, counter tablet vs.
+   owner's phone) — one device edits an item's price/name while another
+   marks it out of stock at nearly the same moment; both actions report
+   success, but the item silently stays orderable on the student menu.
+   Fixed: `Update` now reads via a new `FindByIDForUpdate`
+   (`SELECT … FOR UPDATE`) inside a `uow` transaction, so a concurrent
+   `SetStock` either commits first (seen correctly) or blocks until
+   `Update`'s transaction commits. New regression test
+   (`TestMenuUpdateDoesNotClobberConcurrentStockChange`) with a fake repo
+   modeling real Postgres row-locking semantics, verified to fail without
+   the fix; also added `TestMenuUpdateAppliesInputFields` since `Update` had
+   zero prior test coverage on its ordinary path.
+2. **`internal/config/config.go` `Config.Location()` cached its result with
+   a bare nil-check, a real data race for any concurrent caller that
+   bypasses `Validate()`'s eager warm-up** (production is safe today only
+   because every real boot calls `Validate()` first, which eagerly sets the
+   cache — but correctness relying purely on caller discipline was the bug,
+   and the new concurrency test above is exactly such a caller: two
+   goroutines racing `Update`/`SetStock` against a bare `&config.Config{}`).
+   Fixed with `sync.Once` so it's correct unconditionally.
+3. **`api/client.ts` `apiFetch` treated every `401` as "the session died,"
+   even for requests that never carried a token.** `POST /api/auth/firebase`
+   (the login exchange itself) legitimately 401s for a bad/expired Firebase
+   ID token or an unverified email, and `Login.tsx` renders that `ApiError`'s
+   `.message` directly in its error banner — so a student whose sign-in was
+   rejected for a real reason saw the hardcoded "Your session expired.
+   Please log in again." instead of the backend's actual reason, and the
+   (harmless but pointless) `khaao:unauthorized` event fired with nothing
+   to clear. Fixed: the session-teardown branch now only fires when a token
+   was actually sent (`res.status === 401 && token`); a token-less 401 falls
+   through to the existing generic error-body path. Two new tests, verified
+   the token-less case fails without the fix.
+4. **`components/layout/PushNotificationSetup.tsx` could show its prompt on
+   top of `InstallPrompt`'s.** The mount effect checked the shared
+   install-prompt slot only once, synchronously, before an async
+   `serviceWorker.ready` → `getSubscription()` chain — but
+   `beforeinstallprompt` is a browser-timed event that can fire mid-chain
+   (unlike the iOS hint, computed synchronously for exactly this reason),
+   so both bottom-sheet prompts (same fixed slot) could end up visible at
+   once. Fixed: re-check the slot again right before the actual
+   `setShowPrompt(true)` call. New test file, verified to fail without the
+   fix.
+
+Full GATE after all four: backend — `go build`, `go vet`, `gofmt -l` clean,
+`go test ./... -race` clean (unit and integration, real Postgres). Frontend
+— `tsc -b --noEmit` clean, `lint` 0 errors/24 warnings (unchanged), `test`
+71/71 (was 67/67 — 4 new tests), `build` 250.24 KB raw initial student JS
+(a ~0.02 KB nudge from the two frontend fixes, both landing in the shared
+initial chunk), `format:check` clean. Committed as `2ffc90c` (backend),
+`730318a` (frontend).
 
 **2026-07-24 (fresh full-stack find-fix pass, two parallel agents by
 stack):** another evidence-based read of both stacks, disjoint from every
@@ -672,7 +748,7 @@ gate-clean and committed.** The remaining items are, in priority order:
   the commit-to-sweep gap, leaving the shop paused with one accepted order.
   Narrow; closing it fully means restructuring `RejectAllSubmitted` to join
   the caller's transaction. Not worth it unless observed live.
-- **Bundle budget:** raw initial student JS is at 250.22 KB (Vite-reported,
+- **Bundle budget:** raw initial student JS is at 250.24 KB (Vite-reported,
   2026-07-24) — over the 250 KB hard stop (§ 9.1.8). Treat this as
   over-budget: the next addition of real size **must** trim something first,
   and § 9.4-B13 (lazy-split the shop shell out of the shared initial chunk)
@@ -718,7 +794,7 @@ a phone or counter tablet. These are standing rules, not suggestions:
    Never treat a network failure as an auth failure (R3). Every mutation
    shows a pending state and toasts on error.
 8. **Performance budget:** initial student JS ≤ ~250 KB raw (currently
-   250.22 KB — over, see § 9 bundle-budget caveat and § 9.4-B13). New
+   250.24 KB — over, see § 9 bundle-budget caveat and § 9.4-B13). New
    heavy dependencies must be lazy chunks (follow
    `App.tsx`'s route-group `lazy()` pattern; `lib/firebase` is dynamically
    imported at the moment of login). Menu photos always render through
