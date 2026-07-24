@@ -165,6 +165,46 @@ func TestGetUserRevalidatesShopkeeperAllowlist(t *testing.T) {
 	}
 }
 
+// TestFirebaseLoginRefreshesStoredEmailOnRepeatLogin: FirebaseLogin recomputes
+// `role` from the freshly-verified identity.Email on every login (shopkeeper
+// allowlist / student domain check), but on the repeat-login path (an
+// existing user found by FirebaseUID) it only ever refreshed Name/PhotoURL —
+// never Email. A Google account's primary email can change (Workspace admin
+// rename, alias switch); FirebaseUID is the stable identity across that
+// change, so this path is exactly how a real email change would be noticed.
+// Leaving the old email frozen in `users.email` means every later
+// allowlist re-check (AuthService.GetUser, see the 2026-07-21 instant-
+// revocation fix) keys off a value that no longer matches this person's
+// real identity — an admin removing their *current* email from
+// SHOPKEEPER_EMAILS does not revoke them if their stale stored email is
+// still (or again) on the list, and conversely a legitimate email change
+// can spuriously lock them out. Name/PhotoURL already prove the intent to
+// keep the profile fresh on every login; Email was the one field left
+// behind.
+func TestFirebaseLoginRefreshesStoredEmailOnRepeatLogin(t *testing.T) {
+	uRepo := &mockUserRepo{users: []*models.User{
+		{ID: 1, FirebaseUID: "1", Email: "old@shop.com", Name: "Old Name", Role: models.RoleShopkeeper},
+	}}
+	eRepo := &mockEmailRepo{emails: map[string]bool{"new@shop.com": true}}
+	verifier := &mockVerifier{
+		identities: map[string]*authn.Identity{
+			// Same Firebase UID as the existing user, but the account's email
+			// has since changed — this is the repeat-login path.
+			"shop-token": {UID: "1", Email: "new@shop.com", Name: "New Name", EmailVerified: true},
+		},
+	}
+	cfg := &config.Config{AllowedEmailDomain: "college.edu", JWTSecret: "secret"}
+	svc := services.NewAuthService(uRepo, eRepo, verifier, cfg)
+
+	user, _, err := svc.FirebaseLogin(context.Background(), "shop-token")
+	if err != nil {
+		t.Fatalf("expected login to succeed, got %v", err)
+	}
+	if user.Email != "new@shop.com" {
+		t.Fatalf("expected stored email to refresh to new@shop.com, got %q", user.Email)
+	}
+}
+
 // TestParseTokenRejectsWrongAlgorithm pins ParseToken to HS256 — without
 // jwt.WithValidMethods, the library happily verifies whatever alg the token
 // header claims, including "none" (no signature at all) or an attacker-

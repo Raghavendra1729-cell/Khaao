@@ -166,6 +166,7 @@ func (s *AuthService) FirebaseLogin(ctx context.Context, idToken string) (models
 			user.Role = role
 		}
 	} else {
+		user.Email = email
 		user.Name = identity.Name
 		user.PhotoURL = identity.PhotoURL
 		user.Role = role
