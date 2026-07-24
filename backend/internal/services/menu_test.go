@@ -140,6 +140,40 @@ func TestMenuCreateRuneSafeTagTruncation(t *testing.T) {
 	}
 }
 
+// TestMenuUpdateAppliesInputFields is a plain happy-path check on
+// MenuService.Update — it had zero prior test coverage, and the fix for the
+// lost-update race (TestMenuUpdateDoesNotClobberConcurrentStockChange)
+// wrapped its read-modify-write in a transaction using a new
+// FindByIDForUpdate read, so this guards that the ordinary, uncontended path
+// still applies every input field and returns them in the response.
+func TestMenuUpdateAppliesInputFields(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _ := newMenuService()
+
+	to := "18:00"
+	from := "09:00"
+	resp, err := svc.Update(ctx, 1, services.MenuItemInput{
+		Name:      "Filter Coffee",
+		Price:     2500,
+		Diet:      "veg",
+		Tags:      []string{"hot"},
+		AvailFrom: &from,
+		AvailTo:   &to,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if resp.Name != "Filter Coffee" || resp.Price != 2500 {
+		t.Errorf("Update did not apply Name/Price: %+v", resp)
+	}
+	if len(resp.Tags) != 1 || resp.Tags[0] != "hot" {
+		t.Errorf("Update did not apply Tags: %+v", resp.Tags)
+	}
+	if resp.AvailFrom == nil || *resp.AvailFrom != "09:00" || resp.AvailTo == nil || *resp.AvailTo != "18:00" {
+		t.Errorf("Update did not apply AvailFrom/AvailTo: %+v", resp)
+	}
+}
+
 func TestMenuAvailWindowWarning(t *testing.T) {
 	ctx := context.Background()
 

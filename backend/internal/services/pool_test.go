@@ -198,6 +198,9 @@ func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuIt
 func (m *mockMenuRepo) FindByID(ctx context.Context, id uint) (*models.MenuItem, error) {
 	return &models.MenuItem{ID: id, Name: "Test Item", Price: 1000, IsAvailable: true}, nil
 }
+func (m *mockMenuRepo) FindByIDForUpdate(ctx context.Context, id uint) (*models.MenuItem, error) {
+	return m.FindByID(ctx, id)
+}
 func (m *mockMenuRepo) FindMapByIDs(ctx context.Context, ids []uint) (map[uint]models.MenuItem, error) {
 	out := make(map[uint]models.MenuItem)
 	for _, it := range m.items {

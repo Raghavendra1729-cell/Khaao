@@ -122,6 +122,20 @@ func (r *GormMenuRepo) FindByID(ctx context.Context, id uint) (*models.MenuItem,
 	return &item, err
 }
 
+// FindByIDForUpdate locks the menu item row until the enclosing transaction
+// commits. Used by MenuService.Update so a concurrent SetStock/Delete on the
+// same row can't land between this read and the later Save and get silently
+// reverted by it (Save writes every column, including ones Update doesn't
+// own — see repository.MenuRepo's doc comment).
+func (r *GormMenuRepo) FindByIDForUpdate(ctx context.Context, id uint) (*models.MenuItem, error) {
+	var item models.MenuItem
+	err := getDB(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&item, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &item, err
+}
+
 func (r *GormMenuRepo) FindMapByIDs(ctx context.Context, ids []uint) (map[uint]models.MenuItem, error) {
 	if len(ids) == 0 {
 		return nil, nil

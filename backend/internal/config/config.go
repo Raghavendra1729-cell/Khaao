@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,7 +39,13 @@ type Config struct {
 	VapidPrivateKey     string
 	VapidSubject        string
 
-	loc *time.Location
+	// loc/locOnce cache the loaded *time.Location. sync.Once (not a bare
+	// nil-check) because Location() is called from ordinary request
+	// handlers (services/menu.go's now(), services/pool.go's CreateOrder,
+	// ...) which run on concurrent goroutines — see Location()'s doc
+	// comment for why a bare nil-check here would be a real data race.
+	locOnce sync.Once
+	loc     *time.Location
 	// envErrors collects env vars that were set but failed to parse (e.g.
 	// HOLD_MINUTES=1O) — Validate() fails closed on these instead of
 	// silently keeping the default, so a typo doesn't go unnoticed.
@@ -72,19 +79,30 @@ func Load() *Config {
 	}
 }
 
-// Location returns the configured business timezone, loading and caching it on
-// first use. Falls back to UTC if the zone is invalid — Validate() rejects an
-// invalid zone at boot, so this fallback only matters in tests.
+// Location returns the configured business timezone, loading and caching it
+// on first use. Falls back to UTC if the zone is invalid — Validate()
+// rejects an invalid zone at boot, so this fallback only matters in tests.
+// Guarded by sync.Once rather than a bare "if c.loc != nil" nil-check: this
+// is called from concurrent request-handling goroutines (every menu/order
+// read that touches "now" in the business timezone), so two goroutines
+// racing to populate c.loc for the first time is a genuine data race, not a
+// theoretical one — confirmed by `go test -race` the moment two callers ever
+// overlap on an unwarmed Config (e.g. two concurrent service calls in a test
+// that builds a bare &config.Config{} without calling Validate() first).
+// Validate() already eagerly warms this at boot in every real server
+// startup (see its own call to Location() below), so production traffic
+// never actually contends on the sync.Once after boot — but relying purely
+// on caller discipline for that was the bug; sync.Once makes it correct
+// unconditionally.
 func (c *Config) Location() *time.Location {
-	if c.loc != nil {
-		return c.loc
-	}
-	loc, err := time.LoadLocation(c.BusinessTimezone)
-	if err != nil {
-		loc = time.UTC
-	}
-	c.loc = loc
-	return loc
+	c.locOnce.Do(func() {
+		loc, err := time.LoadLocation(c.BusinessTimezone)
+		if err != nil {
+			loc = time.UTC
+		}
+		c.loc = loc
+	})
+	return c.loc
 }
 
 // Validate fails closed: in production it refuses to boot with development
@@ -99,11 +117,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("HOLD_MINUTES must be greater than 0 (got %d)", c.HoldMinutes)
 	}
 
-	loc, err := time.LoadLocation(c.BusinessTimezone)
-	if err != nil {
+	if _, err := time.LoadLocation(c.BusinessTimezone); err != nil {
 		return fmt.Errorf("invalid BUSINESS_TIMEZONE %q: %w", c.BusinessTimezone, err)
 	}
-	c.loc = loc // eager-init so Location() is read-only afterwards (no data race)
+	c.Location() // eager-warm the sync.Once cache so boot pays the LoadLocation cost, not the first request
 
 	if c.AuthFake && c.AppEnv != "dev" && c.AppEnv != "test" {
 		return fmt.Errorf("AUTH_FAKE=true is only allowed when APP_ENV is dev or test (got %q)", c.AppEnv)
