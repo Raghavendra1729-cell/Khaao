@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch, clearAuthStorage } from './client';
+import { apiFetch, clearAuthStorage, onUnauthorized, setAuthStorage } from './client';
 
 // Guards the R31 fix: a hung request (mobile radio drops mid-request, no
 // RST ever arrives) must not leave callers waiting forever — apiFetch must
@@ -39,6 +39,68 @@ describe('apiFetch timeout (R31)', () => {
       name: 'ApiError',
       status: 0,
     });
+  });
+});
+
+// A 401 from a request that never carried a token (the login endpoint
+// rejecting a bad/expired Firebase ID token, or any other unauthenticated
+// call) is not a session timing out — there was no session. Firing the same
+// "Your session expired. Please log in again." ceremony there is actively
+// misleading, most visibly on the Login page itself, which renders this
+// exact ApiError's .message in its error banner for a user who was never
+// signed in.
+describe('apiFetch 401 handling depends on whether a session existed', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('surfaces the real backend error, without the session-expired ceremony, when no token was sent', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid token: token expired' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    const unauthorizedHandler = vi.fn();
+    const unsubscribe = onUnauthorized(unauthorizedHandler);
+
+    await expect(
+      apiFetch('/auth/firebase', { method: 'POST', body: { id_token: 'bad' } }),
+    ).rejects.toMatchObject({ name: 'ApiError', status: 401, message: 'invalid token: token expired' });
+
+    expect(unauthorizedHandler).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('still runs the full session-expired ceremony when a token was sent', async () => {
+    setAuthStorage('tok', { id: 1 });
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+
+    const unauthorizedHandler = vi.fn();
+    const unsubscribe = onUnauthorized(unauthorizedHandler);
+
+    await expect(apiFetch('/orders/active')).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 401,
+      message: 'Your session expired. Please log in again.',
+    });
+
+    expect(unauthorizedHandler).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('khaao_token')).toBeNull();
+    unsubscribe();
   });
 });
 

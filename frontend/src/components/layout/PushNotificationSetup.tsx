@@ -61,15 +61,21 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
     }
 
     // The install-prompt card already claims this slot — don't contest it.
+    // This is deliberately *not* the only check: `beforeinstallprompt` is a
+    // browser-timed event InstallPrompt can't announce synchronously (unlike
+    // the iOS hint, which is computed as initial state for exactly this
+    // reason — see InstallPrompt.tsx). It can fire at any point, including
+    // while the async subscription lookup below is in flight, so the slot is
+    // re-checked again right at the actual decision moment, not just here at
+    // the start.
     if (installPromptShowingRef.current) {
       return;
     }
 
     navigator.serviceWorker.ready.then((registration) => {
       registration.pushManager.getSubscription().then((subscription) => {
-        if (!subscription) {
-          setShowPrompt(true);
-        }
+        if (subscription || installPromptShowingRef.current) return;
+        setShowPrompt(true);
       });
     });
   }, []);
