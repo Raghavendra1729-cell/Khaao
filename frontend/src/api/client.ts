@@ -95,7 +95,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     throw new ApiError(0, 'Network error — check your connection and try again.');
   }
 
-  if (res.status === 401) {
+  // A 401 only means "the session died" if this request actually carried a
+  // session (a stored token) in the first place — the login endpoint itself
+  // (bad/expired Firebase ID token, unverified email) and any other
+  // unauthenticated call also 401 on rejection, and neither is a session
+  // that "expired". Firing khaao:unauthorized there is a no-op in practice
+  // (nothing was logged in to clear), but the hardcoded "Your session
+  // expired. Please log in again." message actively misleads someone who
+  // was never signed in — most visibly on the Login page itself, which
+  // surfaces this exact ApiError's .message in its error banner.
+  if (res.status === 401 && token) {
     clearAuthStorage();
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     throw new ApiError(401, 'Your session expired. Please log in again.');
