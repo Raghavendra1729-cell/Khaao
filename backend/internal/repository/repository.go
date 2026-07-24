@@ -23,6 +23,12 @@ type ShopkeeperEmailRepo interface {
 type MenuRepo interface {
 	FindAll(ctx context.Context, onlyAvailable bool) ([]models.MenuItem, error)
 	FindByID(ctx context.Context, id uint) (*models.MenuItem, error)
+	// FindByIDForUpdate is FindByID with a SELECT ... FOR UPDATE row lock.
+	// MenuService.Update uses this (not FindByID) for the read it actually
+	// mutates and saves: Save persists every column verbatim, so an
+	// unlocked read-then-save can silently revert a concurrent SetStock or
+	// Delete that lands in the gap (see MenuService.Update's doc comment).
+	FindByIDForUpdate(ctx context.Context, id uint) (*models.MenuItem, error)
 	FindMapByIDs(ctx context.Context, ids []uint) (map[uint]models.MenuItem, error)
 	Save(ctx context.Context, item *models.MenuItem) error
 	Delete(ctx context.Context, id uint) error

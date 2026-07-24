@@ -360,28 +360,59 @@ func (s *MenuService) Create(ctx context.Context, input MenuItemInput) (MenuItem
 	return resp, nil
 }
 
+// Update edits a menu item's shopkeeper-editable fields. It runs the
+// authoritative read + mutate + save inside a locked transaction
+// (FindByIDForUpdate, not the plain FindByID) rather than the simpler
+// read-then-save this used to do: GormMenuRepo.Save writes every column of
+// the struct verbatim, including out_of_stock and deleted_at — columns
+// Update itself never touches but which SetStock and Delete own and mutate
+// through their own, separate code paths. An unlocked read here left a real
+// gap: SetStock's out_of_stock write, or Delete's soft-delete, landing
+// between Update's read and its Save would be silently reverted by Update's
+// own stale snapshot — reachable in exactly the multi-device shopkeeper
+// scenario this codebase has already hit once (STATUS.md's 2026-07-22
+// ShopStatusControl fix: counter tablet vs. owner's phone). The row lock
+// (mirrored by every concurrent writer's own row-level lock in Postgres,
+// with no code change needed on their side — see TestMenuUpdateDoesNotClobberConcurrentStockChange)
+// closes both: a concurrent SetStock/Delete either commits before this read
+// (seen correctly) or blocks until this transaction commits (applies
+// cleanly afterward, since neither of those writers does a stale
+// read-modify-write of its own).
 func (s *MenuService) Update(ctx context.Context, id uint, input MenuItemInput) (MenuItemResponse, error) {
-	item, err := s.repo.FindByID(ctx, id)
+	existing, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return MenuItemResponse{}, err
 	}
-	if item == nil {
+	if existing == nil {
 		return MenuItemResponse{}, ErrNotFound("menu item not found")
 	}
 	if err := s.validateAndNormalize(&input); err != nil {
 		return MenuItemResponse{}, err
 	}
-	item.Name = input.Name
-	item.Price = input.Price
-	item.PhotoURL = input.PhotoURL
-	item.Diet = input.Diet
-	item.Tags = datatypes.NewJSONSlice(input.Tags)
-	item.AvailFrom = input.AvailFrom
-	item.AvailTo = input.AvailTo
-	if input.IsAvailable != nil {
-		item.IsAvailable = *input.IsAvailable
-	}
-	if err := s.repo.Save(ctx, item); err != nil {
+
+	var item *models.MenuItem
+	err = s.uow.WithTx(ctx, func(txCtx context.Context) error {
+		var err error
+		item, err = s.repo.FindByIDForUpdate(txCtx, id)
+		if err != nil {
+			return err
+		}
+		if item == nil {
+			return ErrNotFound("menu item not found")
+		}
+		item.Name = input.Name
+		item.Price = input.Price
+		item.PhotoURL = input.PhotoURL
+		item.Diet = input.Diet
+		item.Tags = datatypes.NewJSONSlice(input.Tags)
+		item.AvailFrom = input.AvailFrom
+		item.AvailTo = input.AvailTo
+		if input.IsAvailable != nil {
+			item.IsAvailable = *input.IsAvailable
+		}
+		return s.repo.Save(txCtx, item)
+	})
+	if err != nil {
 		return MenuItemResponse{}, err
 	}
 	s.invalidateCache()
