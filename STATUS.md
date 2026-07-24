@@ -7,16 +7,77 @@
 > session-by-session diary. The one exception: work that's still **uncommitted**
 > has no other record yet, so it's kept here (condensed) until it lands.
 
-## Current state (2026-07-23)
+## Current state (2026-07-24)
 
 **Everything planned is implemented, gate-clean and committed.** R1–R31,
 F1–F24, the G-series (§ 9.3), every backend/frontend find-fix pass, the
-design-polish pass, the component restructure, the 2026-07-22 bug fixes, and
-the § 9.5 (T1–T5) 2026-07-22-audit fixes are all **committed** (git log
-through `33c562b`, backend and frontend split into one commit each). The
-working tree is clean — nothing uncommitted remains.
+design-polish pass, the component restructure, the 2026-07-22 bug fixes, the
+§ 9.5 (T1–T5) 2026-07-22-audit fixes, and a fresh 2026-07-24 find-fix pass
+are all **committed** (git log through `f652957`, backend and frontend split
+into one commit each — `6e7972f`/`f652957`). The working tree is clean —
+nothing uncommitted remains.
 
 ### Recent work, newest first
+
+**2026-07-24 (fresh full-stack find-fix pass, two parallel agents by
+stack):** another evidence-based read of both stacks, disjoint from every
+prior pass — backend and frontend each independently cross-checked against
+this file's own §9.4/§9.5/§11 tables first, so nothing already-known or
+deliberately-deferred got re-flagged. Found and fixed 2 real bugs, plus one
+gap recorded (not fixed) as a new deferred item:
+
+1. **[Security] `services/auth.go` `FirebaseLogin` never refreshed a
+   returning user's stored email, silently undermining the shopkeeper-
+   revocation guarantee.** The repeat-login branch (existing user found by
+   `FirebaseUID`) refreshed `Name`/`PhotoURL` from the freshly verified
+   Firebase identity but left `Email` frozen at whatever was stored on first
+   login — even though `role` on that same login is recomputed from the
+   *new* `identity.Email`. `AuthService.GetUser`'s per-request allowlist
+   re-check (the 2026-07-21 instant-revocation fix) keys off that stale
+   stored value, not the person's live identity: an admin removing a
+   shopkeeper's *current* email from `SHOPKEEPER_EMAILS` would not actually
+   revoke them if their old, forgotten email was still (or again)
+   allow-listed, and conversely a legitimate Workspace email change could
+   spuriously lock someone out. `FirebaseUID` is the stable identity
+   Firebase guarantees across an email change, so the repeat-login path is
+   exactly where the change would have surfaced. Fixed: refresh `Email`
+   alongside `Name`/`PhotoURL` on every login. New regression test
+   (`TestFirebaseLoginRefreshesStoredEmailOnRepeatLogin`), verified to fail
+   without the fix.
+2. **`pages/shop/MenuManage.tsx`'s photo picker erased a working photo on a
+   failed re-upload.** The `catch` block unconditionally reset
+   `form.photo_url` to `''` on any upload failure, including while editing
+   an item that already had a working, previously-saved photo. A shopkeeper
+   swapping a photo on flaky counter Wi-Fi who then pressed Save — a
+   reasonable next action, since Save wasn't disabled and nothing indicated
+   the existing photo had been touched — silently removed the item's live
+   photo even though nothing new was ever successfully uploaded. Fixed: the
+   `catch` block only shows the error toast now; `form.photo_url` is left
+   exactly as it was. New regression test, verified to fail without the fix.
+
+One gap found and deliberately **not** fixed — recorded as § 9.4-B15 instead
+of a targeted code change: `item_pool.qty`/`menu_items.out_of_stock` have no
+reset at a business-day boundary in the current codebase, even though
+`docs/SPEC.md`'s frozen v3 baseline documents a `day/close` endpoint for
+exactly this and the repo methods to do it (`ResetStock`/`ZeroAll`) still
+exist unused. See § 9.4-B15 for the full write-up.
+
+Full GATE after both fixes: backend — `go build`, `go vet`, `gofmt -l`
+clean, `go test ./... -race` clean (unit and, where a local Postgres was
+reachable, integration). Frontend — `tsc -b --noEmit` clean, `lint` 0
+errors/24 warnings (unchanged baseline), `test` 67/67 (was 66/66 — 1 new
+test), `build` succeeds, `format:check` clean.
+
+**Bundle note:** rebuilding the previously-committed tree alone (no code
+change) now also produces **250.22 KB** raw initial student JS, not the
+250.01 KB this file previously recorded — confirmed via `git stash` before
+either fix landed, so the drift is environmental (toolchain/dependency
+version movement since that number was last measured), not caused by either
+of today's fixes; both land in already-lazy chunks (the backend fix isn't
+frontend code at all, and the frontend fix lives entirely in the lazy
+`MenuManage` chunk). Recorded value below updated to the now-verified
+250.22 KB; still over the § 9.1.8 250 KB line, same lever identified
+(§ 9.4-B13).
 
 **2026-07-22 (component restructure + fresh full-stack find-fix pass):** the
 `frontend/src/components/` folder had grown to 30 files in one flat directory
@@ -599,7 +660,7 @@ endpoints, state machines). Added since that doc was written:
 **All planned code-side work, including § 9.5 (T1–T5), is implemented,
 gate-clean and committed.** The remaining items are, in priority order:
 
-1. Decide on § 9.4 (B1–B14) — nothing in it is authorized to start on its own.
+1. Decide on § 9.4 (B1–B15) — nothing in it is authorized to start on its own.
 2. Deployment (D-1..D-7, human-led).
 
 **Caveats worth knowing (recorded, not tasks):**
@@ -611,11 +672,11 @@ gate-clean and committed.** The remaining items are, in priority order:
   the commit-to-sweep gap, leaving the shop paused with one accepted order.
   Narrow; closing it fully means restructuring `RejectAllSubmitted` to join
   the caller's transaction. Not worth it unless observed live.
-- **Bundle budget:** raw initial student JS is at 250.01 KB (Vite-reported) —
-  0.01 KB past what was a 250 KB hard stop, from the 2026-07-22 realtime fix
-  (see its bundle note). Treat this as over-budget: the next addition of real
-  size **must** trim something first, and § 9.4-B13 (lazy-split the shop shell
-  out of the shared initial chunk) is the identified lever to get back under.
+- **Bundle budget:** raw initial student JS is at 250.22 KB (Vite-reported,
+  2026-07-24) — over the 250 KB hard stop (§ 9.1.8). Treat this as
+  over-budget: the next addition of real size **must** trim something first,
+  and § 9.4-B13 (lazy-split the shop shell out of the shared initial chunk)
+  is the identified lever to get back under.
 - Student history is `LIMIT 20` (no pagination yet — see § 9.4-B5); shop
   history caps the *response list* at 200 rows but computes insights/totals
   over the full day.
@@ -657,7 +718,7 @@ a phone or counter tablet. These are standing rules, not suggestions:
    Never treat a network failure as an auth failure (R3). Every mutation
    shows a pending state and toasts on error.
 8. **Performance budget:** initial student JS ≤ ~250 KB raw (currently
-   250.01 KB — just over, see § 9 bundle-budget caveat and § 9.4-B13). New
+   250.22 KB — over, see § 9 bundle-budget caveat and § 9.4-B13). New
    heavy dependencies must be lazy chunks (follow
    `App.tsx`'s route-group `lazy()` pattern; `lib/firebase` is dynamically
    imported at the moment of login). Menu photos always render through
@@ -777,6 +838,7 @@ Nothing here may be started without the owner picking it deliberately.
 | B12 | Abandoned-order recovery | Found 2026-07-21: an order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0` on any item, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck until the shopkeeper notices and manually hands over the remainder to force `awaiting_payment`. A real fix needs an explicit shopkeeper "write off / abandon" action: new endpoint + service method + UI + copy + Hindi pairing — a product decision on what that action should mean (unpaid-completed? a new terminal status?), not a bug fix. |
 | B13 | Lazy-split the shop shell out of the shared initial chunk | Found 2026-07-22: `ShopRealtime`, `ShopStatusControl` (and the shop bits of `Layout`) are shopkeeper-only but ride the *student's* initial JS chunk because `Layout.tsx` statically imports them — so the ~250 KB "initial student JS" budget is partly spent on code students never run. The 2026-07-22 realtime fix pushed that number to 250.01 KB, 0.01 KB over the § 9.1.8 hard stop; this is the identified lever to get well back under. Frontend-only, but touches the always-mounted shell (needs a `lazy()`/`Suspense` boundary around the shop-only realtime/status components, following App.tsx's route-group pattern) — real enough to want a deliberate pass and a live re-verify, not a reactive tweak. Reclaims far more than the 65 bytes that tipped it over. |
 | B14 | "Accept" with every item unchecked silently rejects the order | Found 2026-07-22 (low priority, arguably-correct behavior): on the shop New-orders card, unchecking *all* pending items and pressing the green **Accept** marks them all out of stock and sends `rejectedItemIds = all`, which the backend's `Accept` turns into a full `OrderRejected` (allRejected branch). Outcome is defensible (you're out of everything → nothing to fulfil), but a green "Accept" producing a rejection is a mild UX trap. A fix would disable/relabel Accept when nothing is checked (point the shopkeeper at Reject instead) — cosmetic, and a product-copy decision + Hindi pairing, so recorded rather than changed. |
+| B15 | No business-day reset for `item_pool.qty` / `menu_items.out_of_stock` | Found 2026-07-24: `docs/SPEC.md`'s frozen v3 baseline documents a `POST /api/shop/day/close` endpoint zeroing the pool and resetting `out_of_stock`, and `MenuRepo.ResetStock`/`PoolRepo.ZeroAll` still exist in `repository.go`/`gorm.go` for exactly that — but nothing in the current codebase calls either one (no route, no service method, no scheduler; confirmed by full-repo grep). Leftover pool units (e.g. `ExpiryTick` returning allocated-but-unclaimed units to the pool at day's end with no other order waiting) silently carry into the next business day and get instantly FCFS-allocated to the first new order for that item — food from a previous day served without the shopkeeper cooking or acknowledging anything. Real and reachable, but the correct fix needs a product decision (automatic at local midnight vs. tied to the open/paused/closed shop-status transition vs. an explicit new shopkeeper action), not a targeted code change, so recorded rather than implemented. |
 
 ### 9.5 Find-fix tasks (T-series) — 2026-07-22 audit, DONE, committed
 
