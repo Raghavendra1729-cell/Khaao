@@ -2,9 +2,8 @@ package services
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
-
-	"khaao/internal/models"
 )
 
 // TestNewOrderPayloadIncludesShopURL and TestOrderReadyPayloadIncludesOrderURL
@@ -13,12 +12,7 @@ import (
 // app-relative target so a shopkeeper's new-order alert opens /shop and a
 // student's ready-alert opens /order.
 func TestNewOrderPayloadIncludesShopURL(t *testing.T) {
-	order := &models.Order{
-		OrderNo: 42,
-		Items:   []models.OrderItem{{}, {}},
-	}
-
-	raw, err := newOrderPayload(order)
+	raw, err := newOrderPayload(42, 3)
 	if err != nil {
 		t.Fatalf("newOrderPayload: %v", err)
 	}
@@ -33,6 +27,13 @@ func TestNewOrderPayloadIncludesShopURL(t *testing.T) {
 	}
 	if got.Title == "" || got.Body == "" {
 		t.Errorf("expected non-empty title/body, got %+v", got)
+	}
+	// STATUS.md § 9.6-U1: the caller used to always pass an order whose
+	// .Items was nil, so this count was silently always 0 — assert the
+	// count the function was actually given shows up verbatim, not just
+	// that the body is non-empty.
+	if !strings.Contains(got.Body, "3 item(s)") {
+		t.Errorf("body = %q, want it to contain the item count %q", got.Body, "3 item(s)")
 	}
 }
 

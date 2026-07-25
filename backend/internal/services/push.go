@@ -96,12 +96,16 @@ type pushPayload struct {
 }
 
 // newOrderPayload and orderReadyPayload are pure so the exact bytes sent to
-// webpush-go are directly unit-testable without a fake push endpoint.
-
-func newOrderPayload(order *models.Order) ([]byte, error) {
+// webpush-go are directly unit-testable without a fake push endpoint. Scalar
+// params (not *models.Order) so a caller can never hand over a
+// half-populated model and have it silently degrade — see STATUS.md
+// § 9.6-U1, where the previous *models.Order signature always received an
+// order whose .Items was nil (persisted via a separate slice, never
+// assigned back), so every push read "0 item(s)".
+func newOrderPayload(orderNo, itemCount int) ([]byte, error) {
 	return json.Marshal(pushPayload{
 		Title: "New order",
-		Body:  fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items)),
+		Body:  fmt.Sprintf("Order #%d — %d item(s)", orderNo, itemCount),
 		URL:   "/shop",
 	})
 }
@@ -118,7 +122,7 @@ func orderReadyPayload(orderNo int) ([]byte, error) {
 // a new order is noticed even with the app/tab closed, not just the in-tab
 // SSE sound. Each subscription is sent on its own goroutine so one
 // slow/unreachable endpoint can't delay order creation or block the others.
-func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
+func (s *PushService) NotifyNewOrder(ctx context.Context, orderNo, itemCount int) {
 	if s.cfg.VapidPublicKey == "" || s.cfg.VapidPrivateKey == "" {
 		return
 	}
@@ -130,7 +134,7 @@ func (s *PushService) NotifyNewOrder(ctx context.Context, order *models.Order) {
 	if len(subs) == 0 {
 		return
 	}
-	payload, err := newOrderPayload(order)
+	payload, err := newOrderPayload(orderNo, itemCount)
 	if err != nil {
 		slog.Error("khaao: push: could not marshal payload", "error", err)
 		return

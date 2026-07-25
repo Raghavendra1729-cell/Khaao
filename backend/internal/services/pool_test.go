@@ -973,3 +973,51 @@ func TestMenuDeleteRemovesStrandedPoolRow(t *testing.T) {
 		}
 	}
 }
+
+// fakeOrderNotifier stands in for *services.PushService in tests — the real
+// service only ever fires an outbound HTTP push when VAPID keys are
+// configured, so it can't otherwise be used to observe exactly what
+// CreateOrder passes it. Implements the same interface PoolEngine.SetPushService
+// accepts.
+type fakeOrderNotifier struct {
+	newOrderCalls []struct{ orderNo, itemCount int }
+}
+
+func (f *fakeOrderNotifier) NotifyNewOrder(ctx context.Context, orderNo, itemCount int) {
+	f.newOrderCalls = append(f.newOrderCalls, struct{ orderNo, itemCount int }{orderNo, itemCount})
+}
+
+func (f *fakeOrderNotifier) NotifyOrderReady(ctx context.Context, userID uint, orderNo int) {}
+
+// TestCreateOrderNotifiesPushWithCorrectItemCount guards STATUS.md § 9.6-U1:
+// candidate.Items is never populated inside CreateOrder's transaction (items
+// are persisted via a separate slice), so a caller reading order.Items after
+// the transaction always saw nil/0 — every shopkeeper "New order" push read
+// "0 item(s)" regardless of the real order. push_internal_test.go alone
+// can't catch this: it exercises newOrderPayload directly with hand-built
+// arguments, never CreateOrder's real call. This test goes through the real
+// caller and asserts the actual item count reaches the push layer.
+func TestCreateOrderNotifiesPushWithCorrectItemCount(t *testing.T) {
+	engine, _, _ := setupEngine()
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	resp, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{
+		{MenuItemID: 10, Qty: 2},
+		{MenuItemID: 11, Qty: 1},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	if len(fake.newOrderCalls) != 1 {
+		t.Fatalf("expected exactly one NotifyNewOrder call, got %d", len(fake.newOrderCalls))
+	}
+	call := fake.newOrderCalls[0]
+	if call.orderNo != resp.OrderNo {
+		t.Errorf("orderNo = %d, want %d", call.orderNo, resp.OrderNo)
+	}
+	if call.itemCount != 2 {
+		t.Errorf("itemCount = %d, want 2 (two distinct menu item lines)", call.itemCount)
+	}
+}

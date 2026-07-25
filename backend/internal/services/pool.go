@@ -18,6 +18,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// orderNotifier is the subset of *PushService that PoolEngine depends on,
+// kept as an interface rather than the concrete type so a test can
+// substitute a fake and assert exactly what CreateOrder/recomputeStatus
+// send it, without exercising the real VAPID/HTTP push path.
+type orderNotifier interface {
+	NotifyNewOrder(ctx context.Context, orderNo, itemCount int)
+	NotifyOrderReady(ctx context.Context, userID uint, orderNo int)
+}
+
 type PoolEngine struct {
 	uow            repository.UnitOfWork
 	orderRepo      repository.OrderRepo
@@ -29,7 +38,7 @@ type PoolEngine struct {
 	cfg            *config.Config
 	alloc          AllocationStrategy
 	mu             sync.Mutex
-	pushSvc        *PushService
+	pushSvc        orderNotifier
 }
 
 func NewPoolEngine(
@@ -56,7 +65,7 @@ func NewPoolEngine(
 	}
 }
 
-func (e *PoolEngine) SetPushService(svc *PushService) {
+func (e *PoolEngine) SetPushService(svc orderNotifier) {
 	e.pushSvc = svc
 }
 
@@ -234,9 +243,17 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 	defer e.mu.Unlock()
 
 	var order *models.Order
+	// itemCount tracks len(items) from inside the transaction closure —
+	// candidate.Items itself is never populated (items are persisted via the
+	// separate `items` slice below, and GORM's Create doesn't backfill the
+	// association), so reading order.Items after WithTx returns would always
+	// see nil/0 here. This was the root cause of every shopkeeper push
+	// notification reading "0 item(s)" (STATUS.md § 9.6-U1).
+	var itemCount int
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		order = nil
+		itemCount = 0
 		err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
 			active, err := e.orderRepo.FindActiveByUserIDForUpdate(txCtx, userID)
 			if err != nil {
@@ -280,6 +297,7 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 				return err
 			}
 			order = candidate
+			itemCount = len(items)
 			return nil
 		})
 		if err == nil {
@@ -296,7 +314,7 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 	e.broadcast(order.ID)
 	e.hub.NotifyShopOrdersUpdate()
 	if e.pushSvc != nil {
-		e.pushSvc.NotifyNewOrder(ctx, order)
+		e.pushSvc.NotifyNewOrder(ctx, order.OrderNo, itemCount)
 	}
 
 	stored, err := e.orderRepo.FindByID(ctx, order.ID)
