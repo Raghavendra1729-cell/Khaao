@@ -7,18 +7,74 @@
 > session-by-session diary. The one exception: work that's still **uncommitted**
 > has no other record yet, so it's kept here (condensed) until it lands.
 
-## Current state (2026-07-24)
+## Current state (2026-07-25)
 
 **Everything planned is implemented, gate-clean and committed.** R1–R31,
 F1–F24, the G-series (§ 9.3), every backend/frontend find-fix pass, the
 design-polish pass, the component restructure, the 2026-07-22 bug fixes, the
-§ 9.5 (T1–T5) 2026-07-22-audit fixes, and two rounds of a fresh 2026-07-24
-find-fix pass are all **committed** (git log through `730318a`, backend and
-frontend split into one commit each per round — `6e7972f`/`f652957` then
-`2ffc90c`/`730318a`). The working tree is clean — nothing uncommitted
-remains.
+§ 9.5 (T1–T5) 2026-07-22-audit fixes, two rounds of a fresh 2026-07-24
+find-fix pass, and § 9.6 (U1–U4) are all **committed** (git log through the
+§ 9.6 commits, backend and frontend split into one commit each per round —
+`6e7972f`/`f652957`, `2ffc90c`/`730318a`, then the U1 backend commit and the
+U2–U4 frontend commit that follows it). The working tree is clean — nothing
+uncommitted remains.
 
 ### Recent work, newest first
+
+**2026-07-25 (later) — § 9.6 (U1–U4) implemented, TDD, full gate green,
+committed.** Owner asked to implement the audit backlog written up
+earlier the same day. Done directly (no subagents), one task at a time,
+each with a regression test written first and verified to fail against the
+unfixed code (via `git stash` on just that file) before applying the fix:
+
+1. **U1 (backend):** `CreateOrder`'s `candidate.Items` was never populated
+   (items persist via a separate local slice, never assigned back), so
+   `NotifyNewOrder`'s `len(order.Items)` always read 0. Fixed by changing
+   `NotifyNewOrder`/`newOrderPayload` to take scalar `(orderNo, itemCount
+   int)` instead of `*models.Order` — a caller can no longer hand over a
+   half-populated model and have it silently degrade. `PoolEngine.pushSvc`
+   is now typed as a small `orderNotifier` interface (not the concrete
+   `*PushService`) purely so `pool_test.go` can substitute a fake and
+   assert what `CreateOrder` actually sends — `main.go` needed no change,
+   since `*PushService` already satisfies the interface. New test
+   `TestCreateOrderNotifiesPushWithCorrectItemCount` goes through the real
+   caller (the old payload-only test couldn't have caught this — it built
+   its own order with items).
+2. **U2 (frontend):** `Orders.tsx`'s accept/reject mutations and
+   `OrderModal.tsx`'s remove mutation all now call the primary action
+   (`acceptOrder`/`rejectOrder`/`removeOrderItem`) *first*, and only then
+   run the `setMenuItemStock` side effect — reversing the order that let a
+   failed primary action leave items out of stock with nothing to justify
+   it. T3's existing failure-reporting (toast naming the items whose stock
+   write itself failed) is unchanged. Three new tests (2 in
+   `Orders.test.tsx`, 1 new `OrderModal.test.tsx`) assert
+   `setMenuItemStock` is never called when the primary action rejects.
+3. **U3 (frontend):** `lib/cart.ts`'s `deriveCartEntries`/`staleCartIds`
+   now check `item.orderable`, not just presence in the menu response — an
+   item marked out of stock while sitting in the cart is pruned (with the
+   existing toast) exactly like a deleted item, instead of silently riding
+   into checkout and failing the whole order atomically. `Menu.tsx` needed
+   no change — it already consumes both functions and its toast copy
+   ("no longer available") already reads correctly for this case.
+4. **U4 (frontend):** `OrderStatus.tsx`'s "Order this again" button is now
+   disabled (with an honest "Couldn't check today's menu — try again
+   shortly." hint) whenever `menuQuery.data === undefined`, instead of
+   calling `reorderIntoCart` and rendering its conservative `!menuItems`
+   branch as "None of these items are on today's menu." Folded in:
+   `historyStatusHint`'s "Expired" copy no longer hardcodes "15-minute".
+   New `OrderStatus.test.tsx` (2 tests).
+
+**Full gate, both stacks:** backend — `go build`, `go vet`, `gofmt -l`
+clean, `go test ./... -race` clean, `golangci-lint run ./...` 0 issues,
+plus the Postgres integration suite (`-tags=integration`) clean. Frontend —
+`tsc -b --noEmit` clean, `eslint` 0 errors / 25 warnings (was 24 — one new
+non-null-assertion in a test file, the same convention already used in
+`StudentRealtime.test.tsx`), `vitest run` 78/78 (was 71/71 — 7 new tests),
+`vite build` 250.24 KB raw initial student JS (unchanged from the recorded
+baseline — none of the changes touch the initial chunk's weight
+meaningfully), `prettier --check` clean. Committed as one backend commit
+(U1) and one frontend commit (U2–U4), per the standing split-by-stack
+convention.
 
 **2026-07-24 (second find-fix pass, same day, two more parallel agents by
 stack — deeper pass, less-scrutinized areas):** owner asked for another
@@ -733,8 +789,8 @@ endpoints, state machines). Added since that doc was written:
 
 ## 9. What's LEFT
 
-**All planned code-side work, including § 9.5 (T1–T5), is implemented,
-gate-clean and committed.** The remaining items are, in priority order:
+**Everything through § 9.6 (U1–U4) is implemented, gate-clean and
+committed.** The remaining items are, in priority order:
 
 1. Decide on § 9.4 (B1–B15) — nothing in it is authorized to start on its own.
 2. Deployment (D-1..D-7, human-led).
@@ -1145,6 +1201,300 @@ it's disconnected. On reconnect everything else refreshes and the History tab
 
 This is the same class of bug as the 2026-07-22 shop-status-pill fix: a key
 that one code path refreshes and its sibling path doesn't. One line.
+
+---
+
+### 9.6 Find-fix tasks (U-series) — 2026-07-25 audit, **IMPLEMENTED, GATED, COMMITTED**
+
+**Status: all four implemented, TDD (each regression test verified to fail
+before its fix), full gate green on both stacks — committed as one backend
+commit (U1) and one frontend commit (U2–U4).** See "Recent work, newest first" above for the exact
+gate numbers and a one-paragraph summary of each fix. A fresh full-stack
+read on 2026-07-25 (owner first asked for an audit that produced *tasks*,
+then asked for them to be implemented) found these four, cross-checked
+against § 9.4 (B1–B15), § 9.5 (T1–T5), § 11 and the § 9 caveats first so
+nothing already-known or deliberately-deferred got re-flagged. Grouped into
+four **file-disjoint** tasks (same ownership discipline as the T-series) —
+kept below as the spec of what shipped, same convention as § 9.2/§ 9.5.
+
+Each was reachable in normal canteen operation — none was theoretical.
+
+| Task | Files owned (nothing else) | Stack | Severity |
+|---|---|---|---|
+| **U1** | `backend/internal/services/push.go`, `backend/internal/services/pool.go` (+ `push_internal_test.go`) | Go | MEDIUM |
+| **U2** | `frontend/src/pages/shop/Orders.tsx`, `frontend/src/components/student/OrderModal.tsx` (+ test) | TS | MEDIUM |
+| **U3** | `frontend/src/lib/cart.ts`, `frontend/src/pages/student/Menu.tsx` (+ test) | TS | MEDIUM |
+| **U4** | `frontend/src/pages/student/OrderStatus.tsx` (+ test) | TS | LOW |
+
+**Note on U1 vs U3/U2 overlap:** none. U1 is backend-only. U2 owns the two
+shop-facing mutation call sites; U3 owns the student cart path; U4 owns the
+student order-status page. No file appears twice.
+
+---
+
+#### U1 — [MEDIUM] The shopkeeper's "New order" push notification always says "0 item(s)"
+
+`services/pool.go` `CreateOrder` builds the order row and its items as two
+separate values:
+
+```go
+candidate := &models.Order{UserID: userID, OrderNo: maxNo + 1, ...}
+items := make([]models.OrderItem, 0, len(inputs))
+// ... items populated from the inputs ...
+e.orderRepo.Create(txCtx, candidate)
+for i := range items {
+    items[i].OrderID = candidate.ID
+    e.orderRepo.SaveItem(txCtx, &items[i])
+}
+order = candidate   // <- candidate.Items is never assigned
+```
+
+`candidate.Items` is **never** populated — the items are persisted through
+the standalone `items` slice, and GORM's `Create` doesn't backfill the
+association either. After the transaction, `CreateOrder` then does:
+
+```go
+e.pushSvc.NotifyNewOrder(ctx, order)
+```
+
+and `services/push.go` `newOrderPayload` builds the notification body as
+`fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items))`.
+`len(nil) == 0`, so **every** new-order push a shopkeeper has ever received
+reads `Order #7 — 0 item(s)`.
+
+**Failure scenario:** this is not a cosmetic string — Web Push is, by the
+project's own § 9.1.9 reasoning, *the only screen-off signal* a shopkeeper
+gets, and the notification body is the entire information payload (there is
+no in-app context when the phone is locked). The one number in it that tells
+the shopkeeper whether a real order just landed or something trivial did is
+always zero. "0 item(s)" also actively reads as "an empty/broken order",
+which is the opposite of the alert's purpose.
+
+Why no test caught it: `push_internal_test.go`'s
+`TestNewOrderPayloadIncludesShopURL` builds its **own** order
+(`Items: []models.OrderItem{{}, {}}`) and only asserts `Title`/`Body` are
+non-empty and `URL == "/shop"`. It never asserts the count, and it never
+exercises the real caller — so the payload function is proven correct while
+the only production call site feeds it an empty slice. The SSE path is
+unaffected (`e.broadcast` re-fetches via `FindByID`, which does
+`Preload("Items")`), which is why this never showed up in the UI.
+
+**Fix (recommended):** mirror `NotifyOrderReady`, which already takes plain
+scalars (`ctx, userID uint, orderNo int`) rather than a model — change
+`NotifyNewOrder` to `(ctx context.Context, orderNo int, itemCount int)` and
+have `CreateOrder` pass `len(items)`. `NotifyNewOrder` only ever reads
+`OrderNo` and `len(Items)` off that pointer, and there are exactly two
+references in the whole repo (the definition plus the one call), so this is
+contained. It also makes the defect structurally impossible rather than
+merely repaired: a caller can no longer hand over a half-populated model and
+have it silently degrade to zero.
+
+*Alternative, also correct:* assign `candidate.Items = items` after the
+SaveItem loop. Do this **only** with eyes open — GORM's `Save` auto-upserts
+populated associations, and today nothing calls `orderRepo.Save(candidate)`
+after that point, so it's safe *now*; if a future edit adds one, a populated
+`Items` slice changes what that statement writes. The scalar-parameter fix
+has no such tripwire, which is why it's the recommendation.
+
+**Test:** extend `push_internal_test.go` to assert the item count actually
+appears in the body (`newOrderPayload(42, 3)` → body contains `3 item(s)`),
+**and** add a caller-level assertion so the real path is covered this time —
+the existing test's blind spot is precisely that it never ran the caller. A
+`pool_test.go` test over the existing fake-repo harness that captures what
+`CreateOrder` hands the push layer is the honest version; if the scalar
+signature makes a seam awkward, a minimal func-field or interface seam on
+`PoolEngine` is acceptable and worth it. Verify the count assertion fails
+before the fix.
+
+---
+
+#### U2 — [MEDIUM] A failed accept/reject/remove still leaves the flagged items marked out of stock, silently
+
+Three shop-facing mutations run their "mark out of stock" side effect
+**before** the primary action they belong to, with no rollback and no report
+if the primary action then fails:
+
+1. `pages/shop/Orders.tsx` `IncomingOrderCard.acceptMutation` —
+   `await Promise.allSettled(rejectedItems.map(setMenuItemStock(..., true)))`
+   then `await acceptOrder(...)`.
+2. `pages/shop/Orders.tsx` `IncomingOrderCard.rejectMutation` — same shape,
+   stock writes then `await rejectOrder(...)`.
+3. `components/student/OrderModal.tsx` `OrderModalItem.removeMutation` —
+   `await setMenuItemStock(item.menu_item_id, true).catch(...)` then
+   `removeOrderItem(...)`.
+
+Note the comment already sitting in `acceptMutation`, directly above the
+`acceptOrder` call: *"Stock-flag failures must not block the accept —
+accepting the order is the more important half, and already succeeded by this
+point."* It hasn't succeeded — it's the next line. § 9.5-T3's own write-up
+made the same assumption ("accepting the order is the more important half and
+already succeeded"), so T3 correctly fixed the *ignored-`allSettled`-results*
+half of this while carrying a false premise about the ordering. That premise
+is the remaining bug.
+
+**Failure scenario:** rush hour, and the ordering is exactly backwards for
+the failure that actually happens. The shopkeeper unchecks the three items
+they've run out of and hits the green **Accept**. The three
+`POST /api/shop/menu/:id/stock` calls succeed. Then `acceptOrder` fails —
+and it has several ordinary ways to do so: `409 "order is not in submitted
+state"` because the student cancelled a second earlier or because the other
+device (counter tablet vs. owner's phone, the multi-device scenario this
+codebase has already been bitten by twice) accepted it first; or a `429`
+against the shopkeeper's own bucket (`middleware/ratelimit.go`: burst 40,
+refill 4/s — and this single tap fires four requests); or plain dropped
+Wi-Fi. The shopkeeper sees `"Could not accept order."`, concludes nothing
+happened, and moves on. But **three menu items are now out of stock on the
+student menu** with no order action to justify it — food the canteen
+actually has, invisible to every student, until someone notices and
+un-flags each one by hand on the Menu tab.
+
+The reject path is worse in one respect: `RejectDialog`'s own copy promises
+*"Tick any items that are unavailable — they'll be marked out of stock
+automatically"*, framing the stock change as a **consequence** of the
+rejection. When the rejection fails, that promise is inverted — the
+consequence lands and the cause doesn't.
+
+**Fix:** make the primary action the thing that gates the side effect. Do
+`acceptOrder` / `rejectOrder` / `removeOrderItem` **first**; only on its
+success run the stock writes; then keep T3's existing
+`stockUpdateFailureNames` / `stockUpdateFailureMessage` reporting for stock
+writes that fail after the primary action succeeded (that part is correct
+today and must survive). Keep invalidating `['shop','menu']` either way so
+true state lands. If on inspection the current ordering turns out to be
+deliberate (marking out of stock first does narrow the window for new
+student orders on those items), the alternative is acceptable — but then a
+failed primary action **must** either un-flag what it flagged or tell the
+shopkeeper exactly which items were left out of stock. Silently leaving them
+flagged is the one outcome that isn't allowed.
+
+**Do not** change the all-unchecked-Accept behaviour — that's § 9.4-B14,
+deliberately deferred as a product-copy decision.
+
+**Test:** a test per call site where the stock call resolves and the primary
+mutation rejects — assert the stock endpoint was **not** called (reordered
+fix) or that the failure names the affected items (rollback/report fix).
+Verify it fails against today's code.
+
+---
+
+#### U3 — [MEDIUM] An item that goes out of stock while sitting in the cart makes the whole order fail, with nothing in the cart saying so
+
+`lib/cart.ts` `deriveCartEntries` filters cart entries on *presence in the
+menu response* only:
+
+```ts
+const validIds = new Set(menuItems.map((i) => i.id));
+return Object.entries(cart)
+  .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
+  .filter((e) => e.qty > 0 && validIds.has(e.menu_item_id));
+```
+
+But `GET /api/menu` (`MenuService.ListAvailable` → `FindAll(ctx, true)`)
+filters on `is_available = true` **only** — an out-of-stock item is still in
+that response, carrying `out_of_stock: true`, `status: "out_of_stock"` and
+`orderable: false`. So `orderable` is fetched, is correct, and is simply
+never consulted on the cart/checkout path. `staleCartIds` has the same
+presence-only test, so the existing prune-and-toast self-heal doesn't cover
+this either — it only catches items the shopkeeper *hid or deleted*
+(`is_available = false`), never items they marked out of stock.
+
+Meanwhile the backend is strictly atomic: `pool.go` `CreateOrder` calls
+`itemOrderableNow` per line and returns
+`ErrUnorderable(mi.Name + " is not orderable right now")` for the **whole
+order** on the first unorderable line.
+
+**Failure scenario:** the single most common shopkeeper action during a rush
+is marking something out of stock. A student has Samosa ×2 and Chai ×1 in
+the cart; the shopkeeper marks Samosa out of stock; `menu_update` fans out
+and the student's menu refetches. Nothing prunes the cart. The cart bar
+still counts Samosa and still prices it into the total. The checkout Modal
+lists Samosa with no badge, no dimming, no warning — it renders only
+name/price/qty, so unlike `MenuItemCard` (which does dim and badge
+unorderable items) the Modal shows nothing at all. **"Place order" is
+enabled.** The student taps it, the backend refuses the entire order, and
+they get a red toast naming one item. Their cart is intact but unplaceable,
+and the only way out is to leave the Modal, hunt for Samosa in the list, and
+decrement it to zero — with no prompt telling them that's what's needed.
+The same thing happens to a time-windowed item whose `avail_to` passes while
+the cart sits open (a 375px phone in a lunch queue is exactly where a cart
+sits open for minutes).
+
+**Fix:** treat "no longer orderable" the way the codebase already treats "no
+longer on the menu". The existing `staleCartIds` → prune → toast effect in
+`Menu.tsx` is the established idiom and the honest place to extend: widen
+the staleness test to `!menuItem.orderable` (not just missing id) so an item
+that goes unorderable is removed from the cart with the toast the student
+already gets, or — if silently pruning a *paid-attention* choice feels too
+aggressive — keep it in the cart but mark it clearly in the Modal and
+exclude it from `cartEntries`/`cartTotal`, so "Place order" submits only
+what the backend will actually accept. Either is defensible; **what is not
+defensible is the current state, where the UI stays silent and the backend
+rejects everything.** Prefer reusing the existing toast copy over inventing
+a second explanation for the same situation. Keep the logic in `lib/cart.ts`
+so it stays unit-testable without rendering the page (the same reason
+`deriveCartEntries` lives there).
+
+**Test:** a `cart.test.ts` case with a menu item present but
+`orderable: false` — assert it is not returned as a placeable entry / is
+reported as stale. Verify it fails today (it will: presence is all that's
+checked).
+
+---
+
+#### U4 — [LOW] "Order this again" blames the menu when the real problem is that the menu didn't load
+
+`pages/student/OrderStatus.tsx` renders as soon as the **active-order** and
+**history** queries settle:
+
+```ts
+if (activeOrderQuery.isLoading || historyQuery.isLoading) return <OrderStatusSkeleton />;
+```
+
+`menuQuery` is deliberately not in that gate — but `HistoryCard`'s reorder
+button depends on it, and `lib/cart.ts` `reorderIntoCart` treats an absent
+menu as "nothing matched":
+
+```ts
+if (!menuItems) {
+  return { cart, addedCount: 0, skippedNames: orderedItems.map((i) => i.name) };
+}
+```
+
+which `reorderToastMessage` turns into the flat assertion **"None of these
+items are on today's menu."**
+
+**Failure scenario:** a student refreshes or cold-opens the installed PWA
+straight onto `/order` to check their order — the normal way this page is
+reached — so there is no warm `['menu']` cache. `getMenu` then fails on the
+campus Wi-Fi this app is explicitly built for (§ 9.1.7: "the network is
+hostile"). History renders fine from its own response. The student taps
+"Order this again" and is told, confidently and falsely, that none of the
+food they ate last week is on the menu today. This is the exact rule the
+project already enforces everywhere else — R3 / § 9.1.7, *never present a
+network failure as a data conclusion*, and R25's "a failed refetch must not
+be dressed up as an answer". `reorderIntoCart`'s `!menuItems` branch is
+right to be conservative; the **caller's copy** is what lies.
+
+**Fix:** at the call site, distinguish "menu not loaded" from "menu loaded
+and nothing matched". Either disable the "Order this again" button while
+`menuQuery.data === undefined` with the same in-place hint idiom already
+used for `hasActiveOrder` ("Finish your current order first."), or keep it
+tappable and toast something true ("Couldn't check today's menu — try
+again."). Do not add the menu query to the page's loading gate — the page
+must keep rendering order status without it, which is why it was left out.
+
+**Fold in while you're in this file (same file, one line):**
+`historyStatusHint` hardcodes *"Expired — the 15-minute pickup window was
+missed."* The hold window is `HOLD_MINUTES`, a real config knob
+(`config.go`, default 15, validated `> 0`) — exactly the sort of value a
+canteen tunes after go-live, at which point this copy silently lies. The
+order's own `expires_at`/`ready_at` are already on the wire; simplest honest
+fix is to drop the number from the sentence rather than plumb the config to
+the client.
+
+**Test:** a test rendering a completed history order with `menuItems`
+undefined — assert the reorder affordance does not claim the items are off
+the menu. Verify it fails today.
 
 ---
 

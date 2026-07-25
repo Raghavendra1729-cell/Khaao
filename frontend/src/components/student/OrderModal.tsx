@@ -51,13 +51,20 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
 
   const removeMutation = useMutation({
     mutationFn: async (alsoOutOfStock: boolean) => {
+      // Remove first — flagging out of stock is a consequence of the
+      // removal succeeding, not a precondition of it. Flagging stock before
+      // the removal meant a failed removeOrderItem call (item already fully
+      // handed over by the time this lands, a network drop) still left the
+      // item out of stock with nothing removed to justify it (STATUS.md
+      // § 9.6-U2).
+      const result = await removeOrderItem(order.id, item.id);
       if (alsoOutOfStock) {
         await setMenuItemStock(item.menu_item_id, true).catch(() => {
-          // Best-effort — removal below is the action that matters; a failed
-          // stock-flag shouldn't block or roll back the item removal.
+          // Best-effort — the removal above is the action that matters; a
+          // failed stock-flag shouldn't block or roll back it.
         });
       }
-      return removeOrderItem(order.id, item.id);
+      return result;
     },
     onSuccess: () => {
       invalidate();

@@ -158,12 +158,18 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
     mutationFn: async () => {
       const rejectedItems = pendingItems.filter((i) => !checked[i.id]);
       const rejectedItemIds = rejectedItems.map((i) => i.id);
+      // Accept first — it is the primary action, and marking the unchecked
+      // items out of stock is a consequence of the accept succeeding, not a
+      // precondition of it. Flagging stock before the accept call meant a
+      // failed accept (409 from a race with another device, a 429 against
+      // the shopkeeper's own rate-limit bucket, dropped Wi-Fi) still left
+      // those items out of stock with no order action to justify it —
+      // invisible on the student menu until someone noticed by hand
+      // (STATUS.md § 9.6-U2).
+      await acceptOrder(order.id, rejectedItemIds);
       const stockResults = await Promise.allSettled(
         rejectedItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
       );
-      // Stock-flag failures must not block the accept — accepting the order
-      // is the more important half, and already succeeded by this point.
-      await acceptOrder(order.id, rejectedItemIds);
       return stockUpdateFailureNames(rejectedItems, stockResults);
     },
     onSuccess: (failedStockNames) => {
@@ -186,11 +192,15 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
 
   const rejectMutation = useMutation({
     mutationFn: async (unavailableItems: OrderItem[]) => {
-      // Mark each flagged item out of stock before rejecting.
+      // Reject first, then flag stock — same reasoning as acceptMutation
+      // above (STATUS.md § 9.6-U2). RejectDialog's own copy already frames
+      // the stock change as a *consequence* of the rejection ("they'll be
+      // marked out of stock automatically"); the call order now matches
+      // that promise instead of inverting it.
+      await rejectOrder(order.id);
       const stockResults = await Promise.allSettled(
         unavailableItems.map((i) => setMenuItemStock(i.menu_item_id, true)),
       );
-      await rejectOrder(order.id);
       return stockUpdateFailureNames(unavailableItems, stockResults);
     },
     onSuccess: (failedStockNames) => {

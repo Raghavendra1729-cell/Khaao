@@ -300,7 +300,11 @@ function historyStatusHint(status: OrderStatusType): string | null {
     case 'rejected':
       return 'Rejected by the canteen — you can place a new order anytime.';
     case 'expired':
-      return 'Expired — the 15-minute pickup window was missed.';
+      // Deliberately no number here — the hold window is HOLD_MINUTES, a
+      // real config knob (default 15, but tunable), not a fixed constant;
+      // hardcoding "15-minute" would silently start lying the moment a
+      // canteen operator tunes it after go-live (STATUS.md § 9.6-U4).
+      return 'Expired — the pickup window was missed.';
     case 'cancelled':
       return 'You cancelled this order.';
     case 'completed':
@@ -340,8 +344,21 @@ function HistoryCard({
   const navigate = useNavigate();
   const hint = historyStatusHint(order.status);
   const canReorder = order.status === 'completed';
+  // menuItems is undefined both while the menu query is still loading and
+  // when it has failed (this page deliberately does not gate its own
+  // loading state on the menu query — see the OrderStatusPage component
+  // below). Either way, reorderIntoCart can't yet tell whether these items
+  // are still on today's menu — its own `!menuItems` branch is right to be
+  // conservative and report every item as skipped, but rendering that as
+  // "None of these items are on today's menu" presents a network/loading
+  // state as a confident factual claim, which is exactly the rule this
+  // project already enforces everywhere else (R3 / § 9.1.7: never treat a
+  // network failure as a data conclusion). Disable the button instead of
+  // guessing (STATUS.md § 9.6-U4).
+  const menuUnavailable = menuItems === undefined;
 
   const handleReorder = () => {
+    if (menuUnavailable) return;
     const { cart, addedCount, skippedNames } = reorderIntoCart(loadStoredCart(), order.items, menuItems);
     showToast(reorderToastMessage(addedCount, skippedNames), addedCount === 0 ? 'error' : 'success');
     if (addedCount === 0) return;
@@ -384,10 +401,13 @@ function HistoryCard({
       </p>
       {canReorder && (
         <div className="mt-3 border-t border-edge pt-3">
-          <Button variant="secondary" disabled={hasActiveOrder} onClick={handleReorder}>
+          <Button variant="secondary" disabled={hasActiveOrder || menuUnavailable} onClick={handleReorder}>
             Order this again
           </Button>
           {hasActiveOrder && <p className="mt-1.5 text-xs text-ink/45">Finish your current order first.</p>}
+          {!hasActiveOrder && menuUnavailable && (
+            <p className="mt-1.5 text-xs text-ink/45">Couldn't check today's menu — try again shortly.</p>
+          )}
         </div>
       )}
     </Card>

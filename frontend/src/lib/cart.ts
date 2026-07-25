@@ -7,28 +7,36 @@ export interface CartEntry {
 
 /**
  * Derives orderable cart entries from raw {itemId: qty} cart state and the
- * current menu. Entries for ids no longer present in the menu (a shopkeeper
- * deleted/hid the item while it sat in a student's cart) are silently
- * dropped — a stale entry here crashed checkout downstream before this
- * existed (STATUS.md R2).
+ * current menu. Entries are dropped both for ids no longer present in the
+ * menu (a shopkeeper deleted/hid the item while it sat in a student's cart —
+ * STATUS.md R2) AND for ids still present but no longer `orderable` (marked
+ * out of stock, or a time window that just closed) — `/api/menu` keeps
+ * returning out-of-stock items (with `orderable: false`) rather than
+ * omitting them, so presence alone isn't enough. Without the `orderable`
+ * check, the checkout total/list still included such an item with nothing
+ * flagging it, "Place order" stayed enabled, and the backend then refused
+ * the *entire* order atomically — a silent dead end (STATUS.md § 9.6-U3).
  */
 export function deriveCartEntries(
   cart: Record<number, number>,
   menuItems: MenuItem[] | undefined,
 ): CartEntry[] {
   if (!menuItems) return [];
-  const validIds = new Set(menuItems.map((i) => i.id));
+  const orderableIds = new Set(menuItems.filter((i) => i.orderable).map((i) => i.id));
   return Object.entries(cart)
     .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
-    .filter((e) => e.qty > 0 && validIds.has(e.menu_item_id));
+    .filter((e) => e.qty > 0 && orderableIds.has(e.menu_item_id));
 }
 
-/** Cart ids with qty > 0 that are no longer present in the current menu. */
+/** Cart ids with qty > 0 that are either no longer present in the current
+ * menu, or present but no longer `orderable` (out of stock / outside its
+ * availability window) — see deriveCartEntries' doc comment for why
+ * presence alone isn't the right test (STATUS.md § 9.6-U3). */
 export function staleCartIds(cart: Record<number, number>, menuItems: MenuItem[] | undefined): number[] {
   if (!menuItems) return [];
-  const validIds = new Set(menuItems.map((i) => i.id));
+  const orderableIds = new Set(menuItems.filter((i) => i.orderable).map((i) => i.id));
   return Object.entries(cart)
-    .filter(([id, qty]) => qty > 0 && !validIds.has(Number(id)))
+    .filter(([id, qty]) => qty > 0 && !orderableIds.has(Number(id)))
     .map(([id]) => Number(id));
 }
 

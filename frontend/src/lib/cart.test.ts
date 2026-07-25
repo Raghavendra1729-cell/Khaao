@@ -64,6 +64,18 @@ describe('deriveCartEntries', () => {
   it('returns an empty array for an empty cart', () => {
     expect(deriveCartEntries({}, [menuItem({ id: 1 })])).toEqual([]);
   });
+
+  // STATUS.md § 9.6-U3: /api/menu keeps returning out-of-stock items (with
+  // orderable: false) rather than omitting them, so presence in the menu
+  // response alone isn't enough to decide an entry is still placeable — an
+  // item marked out of stock while sitting in the cart used to stay priced
+  // into the checkout total with "Place order" enabled, and the backend
+  // then refused the whole order atomically.
+  it('drops an entry for an item that is still on the menu but no longer orderable', () => {
+    const cart = { 1: 2, 2: 1 };
+    const menu = [menuItem({ id: 1 }), menuItem({ id: 2, orderable: false, out_of_stock: true })];
+    expect(deriveCartEntries(cart, menu)).toEqual([{ menu_item_id: 1, qty: 2 }]);
+  });
 });
 
 describe('staleCartIds', () => {
@@ -87,6 +99,16 @@ describe('staleCartIds', () => {
 
   it('returns an empty array while the menu has not loaded yet', () => {
     expect(staleCartIds({ 1: 2 }, undefined)).toEqual([]);
+  });
+
+  // STATUS.md § 9.6-U3 — same reasoning as deriveCartEntries' own case above:
+  // an item still present in the menu response but marked out of stock must
+  // be treated as stale too, or the existing prune-and-toast self-heal in
+  // Menu.tsx (which reads staleCartIds) never fires for it.
+  it('finds cart ids that are still on the menu but no longer orderable', () => {
+    const cart = { 1: 2, 2: 1 };
+    const menu = [menuItem({ id: 1 }), menuItem({ id: 2, orderable: false, out_of_stock: true })];
+    expect(staleCartIds(cart, menu)).toEqual([2]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, within, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { ShopOrdersPage } from './Orders';
@@ -97,5 +97,60 @@ describe('Shop Accept surfaces stock-update failures (STATUS.md § 9.5 T3)', () 
       const alert = screen.getByRole('alert');
       expect(alert.textContent).toContain('Samosa');
     });
+  });
+});
+
+// Guards STATUS.md § 9.6-U2: the stock-flag write used to fire *before* the
+// primary accept/reject call, with no rollback — so a failed accept/reject
+// (a race with another device, a rate limit, dropped Wi-Fi) still left the
+// flagged items marked out of stock on the student menu, with no order
+// action to justify it.
+describe('Shop Accept/Reject do not flag stock when the primary action itself fails (STATUS.md § 9.6 U2)', () => {
+  beforeEach(() => {
+    getShopOrdersMock.mockReset();
+    acceptOrderMock.mockReset();
+    rejectOrderMock.mockReset();
+    setMenuItemStockMock.mockReset();
+  });
+
+  it('does not mark the unchecked item out of stock when accept itself fails', async () => {
+    const order = baseOrder();
+    getShopOrdersMock.mockResolvedValue({ incoming: [order], in_progress: [], awaiting_payment: [] });
+    acceptOrderMock.mockRejectedValue(new Error('409 order already accepted'));
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await waitFor(() => expect(screen.getByText('Samosa ×2')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByText('Accept'));
+
+    await waitFor(() => expect(acceptOrderMock).toHaveBeenCalledWith(1, [1]));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+
+    expect(setMenuItemStockMock).not.toHaveBeenCalled();
+  });
+
+  it('does not mark the flagged item out of stock when reject itself fails', async () => {
+    const order = baseOrder();
+    getShopOrdersMock.mockResolvedValue({ incoming: [order], in_progress: [], awaiting_payment: [] });
+    rejectOrderMock.mockRejectedValue(new Error('409 order already accepted'));
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await waitFor(() => expect(screen.getByText('Samosa ×2')).toBeInTheDocument());
+
+    // Open the reject dialog and tick the item as unavailable.
+    fireEvent.click(screen.getByText('Reject'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByText('Reject order'));
+
+    await waitFor(() => expect(rejectOrderMock).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+
+    expect(setMenuItemStockMock).not.toHaveBeenCalled();
   });
 });
