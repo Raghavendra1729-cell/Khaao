@@ -1,518 +1,80 @@
 # Khaao — Project Status
 
-> **For the next agent:** read this top-to-bottom before touching code. It's the
-> single source of truth for current state, architecture, and what's left. Full
-> history of *how* we got here lives in `git log` (every **committed** change has
-> a descriptive message) — this file only tracks the *current* picture, not a
-> session-by-session diary. The one exception: work that's still **uncommitted**
-> has no other record yet, so it's kept here (condensed) until it lands.
+> **For the next agent:** read this top-to-bottom before touching code. It is
+> the single source of truth for current state, architecture, and what's left.
+> The full history of *how* we got here lives in `git log` — every committed
+> change has a descriptive message. This file tracks the *current picture and
+> the open work*, not a session-by-session diary.
+>
+> **§ 12 is the working protocol.** Read it before you pick up a task.
 
-## Current state (2026-07-25)
+## Current state (2026-07-26)
 
-**Everything planned is implemented, gate-clean and committed.** R1–R31,
-F1–F24, the G-series (§ 9.3), every backend/frontend find-fix pass, the
-design-polish pass, the component restructure, the 2026-07-22 bug fixes, the
-§ 9.5 (T1–T5) 2026-07-22-audit fixes, two rounds of a fresh 2026-07-24
-find-fix pass, and § 9.6 (U1–U4) are all **committed** (git log through the
-§ 9.6 commits, backend and frontend split into one commit each per round —
-`6e7972f`/`f652957`, `2ffc90c`/`730318a`, then the U1 backend commit and the
-U2–U4 frontend commit that follows it). The working tree is clean — nothing
-uncommitted remains.
+**The working tree is clean and everything previously planned is committed.**
+R1–R31, F1–F24, the G-series, the T-series (2026-07-22 audit) and the U-series
+(2026-07-25 audit) all landed. Verified baseline as of this rewrite:
 
-### Recent work, newest first
+| Gate | Result |
+|---|---|
+| `go build ./...` | clean |
+| `go vet ./...` | clean |
+| `gofmt -l .` | clean |
+| `go test ./...` | all packages ok |
+| `tsc -b --noEmit` | clean |
+| `vitest run` | **78/78 passing**, 13 test files |
+| `vite build` initial student JS | **239.57 KB raw — under the 250 KB hard stop, after H2 (§ 9.1.8)** |
 
-**2026-07-25 (later) — § 9.6 (U1–U4) implemented, TDD, full gate green,
-committed.** Owner asked to implement the audit backlog written up
-earlier the same day. Done directly (no subagents), one task at a time,
-each with a regression test written first and verified to fail against the
-unfixed code (via `git stash` on just that file) before applying the fix:
+**This document was rewritten on 2026-07-26** after a fresh full-stack audit.
+The historical narrative of completed passes was removed (it lives in `git log`);
+what replaces it is three new backlogs of open, unstarted work:
 
-1. **U1 (backend):** `CreateOrder`'s `candidate.Items` was never populated
-   (items persist via a separate local slice, never assigned back), so
-   `NotifyNewOrder`'s `len(order.Items)` always read 0. Fixed by changing
-   `NotifyNewOrder`/`newOrderPayload` to take scalar `(orderNo, itemCount
-   int)` instead of `*models.Order` — a caller can no longer hand over a
-   half-populated model and have it silently degrade. `PoolEngine.pushSvc`
-   is now typed as a small `orderNotifier` interface (not the concrete
-   `*PushService`) purely so `pool_test.go` can substitute a fake and
-   assert what `CreateOrder` actually sends — `main.go` needed no change,
-   since `*PushService` already satisfies the interface. New test
-   `TestCreateOrderNotifiesPushWithCorrectItemCount` goes through the real
-   caller (the old payload-only test couldn't have caught this — it built
-   its own order with items).
-2. **U2 (frontend):** `Orders.tsx`'s accept/reject mutations and
-   `OrderModal.tsx`'s remove mutation all now call the primary action
-   (`acceptOrder`/`rejectOrder`/`removeOrderItem`) *first*, and only then
-   run the `setMenuItemStock` side effect — reversing the order that let a
-   failed primary action leave items out of stock with nothing to justify
-   it. T3's existing failure-reporting (toast naming the items whose stock
-   write itself failed) is unchanged. Three new tests (2 in
-   `Orders.test.tsx`, 1 new `OrderModal.test.tsx`) assert
-   `setMenuItemStock` is never called when the primary action rejects.
-3. **U3 (frontend):** `lib/cart.ts`'s `deriveCartEntries`/`staleCartIds`
-   now check `item.orderable`, not just presence in the menu response — an
-   item marked out of stock while sitting in the cart is pruned (with the
-   existing toast) exactly like a deleted item, instead of silently riding
-   into checkout and failing the whole order atomically. `Menu.tsx` needed
-   no change — it already consumes both functions and its toast copy
-   ("no longer available") already reads correctly for this case.
-4. **U4 (frontend):** `OrderStatus.tsx`'s "Order this again" button is now
-   disabled (with an honest "Couldn't check today's menu — try again
-   shortly." hint) whenever `menuQuery.data === undefined`, instead of
-   calling `reorderIntoCart` and rendering its conservative `!menuItems`
-   branch as "None of these items are on today's menu." Folded in:
-   `historyStatusHint`'s "Expired" copy no longer hardcodes "15-minute".
-   New `OrderStatus.test.tsx` (2 tests).
+| Backlog | What | Size | Status |
+|---|---|---|---|
+| **§ 9.3 — V-series (V1–V10)** | Backend defects found in the 2026-07-26 audit | 10 tasks | **Done, gate green, uncommitted at time of writing** |
+| **§ 9.4 — H-series (H1–H8)** | Frontend design + UX work | 8 tasks | **H2 done; H1/H3–H8 open, unstarted, authorized** |
+| **§ 9.5 — Q-series (Q1–Q9)** | Testing, written as real student / real shopkeeper scenarios | 9 tasks | **Q1, Q2 done; Q3–Q9 open, unstarted, authorized** |
+| § 9.6 — B-series (B1–B15) | Deferred product decisions | 15 items | **NOT authorized — owner picks deliberately** |
+| Deployment D-1..D-7 | Human-led, needs real infra | 7 items | Open |
 
-**Full gate, both stacks:** backend — `go build`, `go vet`, `gofmt -l`
-clean, `go test ./... -race` clean, `golangci-lint run ./...` 0 issues,
-plus the Postgres integration suite (`-tags=integration`) clean. Frontend —
-`tsc -b --noEmit` clean, `eslint` 0 errors / 25 warnings (was 24 — one new
-non-null-assertion in a test file, the same convention already used in
-`StudentRealtime.test.tsx`), `vitest run` 78/78 (was 71/71 — 7 new tests),
-`vite build` 250.24 KB raw initial student JS (unchanged from the recorded
-baseline — none of the changes touch the initial chunk's weight
-meaningfully), `prettier --check` clean. Committed as one backend commit
-(U1) and one frontend commit (U2–U4), per the standing split-by-stack
-convention.
+> **Numbering note:** older commit messages reference "§ 9.5 (T-series)" and
+> "§ 9.6 (U-series)". Those backlogs are complete and were removed in this
+> rewrite; § 9.3/9.4/9.5 now hold the *new* V/H/Q backlogs. When reading old
+> commits, map T→ 2026-07-22 audit and U→ 2026-07-25 audit and go to `git log`.
 
-**2026-07-24 (second find-fix pass, same day, two more parallel agents by
-stack — deeper pass, less-scrutinized areas):** owner asked for another
-round on top of the pass below. Same split (one agent per stack, run in
-background, briefed to treat everything already in this file — including
-the pass below — as known and not to re-flag it), pointed at areas that had
-gotten comparatively less attention in prior passes (rate limiting,
-allocation, controllers, hub lifecycle, migrations on the backend;
-`useSSE.ts`, `sw.ts`, prompt-coordination timing, `api/client.ts` on the
-frontend). The backend agent's process stalled after finding and fully
-implementing its fix (a harness watchdog issue, not a defect in the work
-itself) — verified independently before trusting it: read every diff line
-by line, then re-ran the full gate (build/vet/gofmt/test -race, plus the
-integration suite against real Postgres) myself before committing. Found
-and fixed 4 real bugs:
+### Start here
 
-1. **[Concurrency] `services/menu.go` `MenuService.Update` could silently
-   revert a concurrent `SetStock` call (a lost-update race).** `Update` did
-   an unlocked `FindByID`, mutated only the `MenuItemInput`-owned fields in
-   memory, then `Save()`d the whole row — GORM's `Save` writes every column
-   verbatim, including `out_of_stock`, which `Update` itself never touches
-   but `SetStock` owns via its own targeted single-column `UPDATE`. A
-   `SetStock` call landing between `Update`'s read and its `Save` was
-   silently reverted by `Update`'s stale in-memory snapshot: exactly the
-   multi-device shopkeeper scenario already established as real in this
-   codebase (the 2026-07-22 `ShopStatusControl` fix, counter tablet vs.
-   owner's phone) — one device edits an item's price/name while another
-   marks it out of stock at nearly the same moment; both actions report
-   success, but the item silently stays orderable on the student menu.
-   Fixed: `Update` now reads via a new `FindByIDForUpdate`
-   (`SELECT … FOR UPDATE`) inside a `uow` transaction, so a concurrent
-   `SetStock` either commits first (seen correctly) or blocks until
-   `Update`'s transaction commits. New regression test
-   (`TestMenuUpdateDoesNotClobberConcurrentStockChange`) with a fake repo
-   modeling real Postgres row-locking semantics, verified to fail without
-   the fix; also added `TestMenuUpdateAppliesInputFields` since `Update` had
-   zero prior test coverage on its ordinary path.
-2. **`internal/config/config.go` `Config.Location()` cached its result with
-   a bare nil-check, a real data race for any concurrent caller that
-   bypasses `Validate()`'s eager warm-up** (production is safe today only
-   because every real boot calls `Validate()` first, which eagerly sets the
-   cache — but correctness relying purely on caller discipline was the bug,
-   and the new concurrency test above is exactly such a caller: two
-   goroutines racing `Update`/`SetStock` against a bare `&config.Config{}`).
-   Fixed with `sync.Once` so it's correct unconditionally.
-3. **`api/client.ts` `apiFetch` treated every `401` as "the session died,"
-   even for requests that never carried a token.** `POST /api/auth/firebase`
-   (the login exchange itself) legitimately 401s for a bad/expired Firebase
-   ID token or an unverified email, and `Login.tsx` renders that `ApiError`'s
-   `.message` directly in its error banner — so a student whose sign-in was
-   rejected for a real reason saw the hardcoded "Your session expired.
-   Please log in again." instead of the backend's actual reason, and the
-   (harmless but pointless) `khaao:unauthorized` event fired with nothing
-   to clear. Fixed: the session-teardown branch now only fires when a token
-   was actually sent (`res.status === 401 && token`); a token-less 401 falls
-   through to the existing generic error-body path. Two new tests, verified
-   the token-less case fails without the fix.
-4. **`components/layout/PushNotificationSetup.tsx` could show its prompt on
-   top of `InstallPrompt`'s.** The mount effect checked the shared
-   install-prompt slot only once, synchronously, before an async
-   `serviceWorker.ready` → `getSubscription()` chain — but
-   `beforeinstallprompt` is a browser-timed event that can fire mid-chain
-   (unlike the iOS hint, computed synchronously for exactly this reason),
-   so both bottom-sheet prompts (same fixed slot) could end up visible at
-   once. Fixed: re-check the slot again right before the actual
-   `setShowPrompt(true)` call. New test file, verified to fail without the
-   fix.
+**2026-07-26 update: H2, all of V1–V10, and Q1/Q2 are implemented**, each with
+a regression test written first and confirmed red against the unfixed code,
+full backend/frontend gates green (build/vet/gofmt/`test -race`/lint/tsc/
+eslint/vitest/build/format, plus the Postgres integration suite). Landed as
+four parallel agent passes, re-verified together afterward. **Uncommitted at
+the time of this note** — see the commits immediately following it in `git
+log` for the actual landing.
 
-Full GATE after all four: backend — `go build`, `go vet`, `gofmt -l` clean,
-`go test ./... -race` clean (unit and integration, real Postgres). Frontend
-— `tsc -b --noEmit` clean, `lint` 0 errors/24 warnings (unchanged), `test`
-71/71 (was 67/67 — 4 new tests), `build` 250.24 KB raw initial student JS
-(a ~0.02 KB nudge from the two frontend fixes, both landing in the shared
-initial chunk), `format:check` clean. Committed as `2ffc90c` (backend),
-`730318a` (frontend).
+Remaining, in priority order:
 
-**2026-07-24 (fresh full-stack find-fix pass, two parallel agents by
-stack):** another evidence-based read of both stacks, disjoint from every
-prior pass — backend and frontend each independently cross-checked against
-this file's own §9.4/§9.5/§11 tables first, so nothing already-known or
-deliberately-deferred got re-flagged. Found and fixed 2 real bugs, plus one
-gap recorded (not fixed) as a new deferred item:
-
-1. **[Security] `services/auth.go` `FirebaseLogin` never refreshed a
-   returning user's stored email, silently undermining the shopkeeper-
-   revocation guarantee.** The repeat-login branch (existing user found by
-   `FirebaseUID`) refreshed `Name`/`PhotoURL` from the freshly verified
-   Firebase identity but left `Email` frozen at whatever was stored on first
-   login — even though `role` on that same login is recomputed from the
-   *new* `identity.Email`. `AuthService.GetUser`'s per-request allowlist
-   re-check (the 2026-07-21 instant-revocation fix) keys off that stale
-   stored value, not the person's live identity: an admin removing a
-   shopkeeper's *current* email from `SHOPKEEPER_EMAILS` would not actually
-   revoke them if their old, forgotten email was still (or again)
-   allow-listed, and conversely a legitimate Workspace email change could
-   spuriously lock someone out. `FirebaseUID` is the stable identity
-   Firebase guarantees across an email change, so the repeat-login path is
-   exactly where the change would have surfaced. Fixed: refresh `Email`
-   alongside `Name`/`PhotoURL` on every login. New regression test
-   (`TestFirebaseLoginRefreshesStoredEmailOnRepeatLogin`), verified to fail
-   without the fix.
-2. **`pages/shop/MenuManage.tsx`'s photo picker erased a working photo on a
-   failed re-upload.** The `catch` block unconditionally reset
-   `form.photo_url` to `''` on any upload failure, including while editing
-   an item that already had a working, previously-saved photo. A shopkeeper
-   swapping a photo on flaky counter Wi-Fi who then pressed Save — a
-   reasonable next action, since Save wasn't disabled and nothing indicated
-   the existing photo had been touched — silently removed the item's live
-   photo even though nothing new was ever successfully uploaded. Fixed: the
-   `catch` block only shows the error toast now; `form.photo_url` is left
-   exactly as it was. New regression test, verified to fail without the fix.
-
-One gap found and deliberately **not** fixed — recorded as § 9.4-B15 instead
-of a targeted code change: `item_pool.qty`/`menu_items.out_of_stock` have no
-reset at a business-day boundary in the current codebase, even though
-`docs/SPEC.md`'s frozen v3 baseline documents a `day/close` endpoint for
-exactly this and the repo methods to do it (`ResetStock`/`ZeroAll`) still
-exist unused. See § 9.4-B15 for the full write-up.
-
-Full GATE after both fixes: backend — `go build`, `go vet`, `gofmt -l`
-clean, `go test ./... -race` clean (unit and, where a local Postgres was
-reachable, integration). Frontend — `tsc -b --noEmit` clean, `lint` 0
-errors/24 warnings (unchanged baseline), `test` 67/67 (was 66/66 — 1 new
-test), `build` succeeds, `format:check` clean.
-
-**Bundle note:** rebuilding the previously-committed tree alone (no code
-change) now also produces **250.22 KB** raw initial student JS, not the
-250.01 KB this file previously recorded — confirmed via `git stash` before
-either fix landed, so the drift is environmental (toolchain/dependency
-version movement since that number was last measured), not caused by either
-of today's fixes; both land in already-lazy chunks (the backend fix isn't
-frontend code at all, and the frontend fix lives entirely in the lazy
-`MenuManage` chunk). Recorded value below updated to the now-verified
-250.22 KB; still over the § 9.1.8 250 KB line, same lever identified
-(§ 9.4-B13).
-
-**2026-07-22 (component restructure + fresh full-stack find-fix pass):** the
-`frontend/src/components/` folder had grown to 30 files in one flat directory
-mixing role-agnostic primitives, app-shell, and student-/shop-only code with
-no separation — split it into `components/ui/` (11 role-agnostic primitives:
-Button, Card, Modal, Toast, ConfirmDialog, EmptyState(+Icons), Spinner,
-StatusBadge, QtyStepper, VegMark), `components/layout/` (5: Layout,
-ProtectedRoute, ErrorBoundary, InstallPrompt, PushNotificationSetup),
-`components/student/` (10: MenuItemCard, OrderModal, OrderTicket,
-StudentRealtime(+test), StatusStamps, TrendingRail, FavoritesRail,
-DietFilter, MenuSkeleton), and `components/shop/` (2: ShopRealtime,
-ShopStatusControl). Two non-component pub-sub helper modules
-(`promptCoordination.ts`, `shopNotifications.ts`) moved to `lib/` instead,
-alongside `liveAnnouncer.ts` whose exact idiom they already mirrored — a
-plain `.ts` state-store module living in `components/` was the odd one out,
-not the convention. All moves via `git mv` (history preserved); every import
-across the tree (30+ files) updated by hand for the new depth, including
-`vi.mock()` string literals that a `from '...'` sed pass can't reach (caught
-by a full test run, not by `tsc` — mock specifiers aren't type-checked).
-
-Then a fresh, evidence-based bug hunt across both stacks — frontend read
-directly (hooks/useSSE.ts, api/client.ts, lib/cart.ts, lib/image.ts,
-AuthContext.tsx, Login.tsx, sw.ts, PushNotificationSetup.tsx, Orders.tsx,
-OrderModal.tsx, History.tsx, MenuManage.tsx), backend delegated to a
-background pass over files/areas the two 2026-07-21 backend passes hadn't
-already covered in depth (ratings.go, sse_ticket.go, gorm.go's query/preload
-shapes, ratelimit.go, hub.go, main.tsx's expiry ticker, models vs.
-migrations). Found and fixed 3 real bugs:
-
-1. **[Data integrity] `services/ratings.go` `SubmitRatings` let a student
-   rate an order item that was never delivered.** `itemMap` was built from
-   *all* of `order.Items` with no filter on `Status`, and validation only
-   checked the item belonged to the order and `stars` was 1–5 — never that
-   `Status != rejected`. A line goes `rejected` when the shopkeeper trims it
-   mid-order (`PoolEngine.RemoveItem`, e.g. running out of an ingredient)
-   while the rest of the order proceeds normally to `completed`; the student
-   never received that item but `POST /api/orders/:id/ratings` accepted a
-   rating for it anyway, and `GormRatingRepo.GetMenuAggregates` aggregates
-   purely by `menu_item_id`/`stars` with no join back to item status — so it
-   directly pollutes that menu item's public `avg_rating`/`rating_count`
-   shown to every student. The frontend already filters rejected items out
-   of the normal rating UI (`OrderStatus.tsx`), so this wasn't reachable
-   through the intended flow today, but it was a missing *server-side*
-   invariant, not a deliberate tradeoff — trivially reachable via a direct
-   API call, or by any future frontend regression that stops filtering.
-   Fixed: reject with 400 if the targeted item's status is `rejected`. New
-   regression test (`rating_a_rejected_item`), verified to fail without the
-   fix.
-2. **`sw.ts`'s push handler silently dropped a data-less push event** —
-   showing nothing at all, which is exactly the browser-goodwill/throttling
-   risk the handler's own adjacent comment already warns about for a
-   malformed payload, just left unhandled for the "no payload" case. Not
-   currently reachable (this backend's `push.go` always sends a marshaled
-   payload for every push it fires), but a real defensive-coding gap for any
-   push arriving without one. Fixed: fall back to the same generic
-   notification in both cases.
-3. **The backend's `avail_window_warning` (services/menu.go, set when
-   `avail_from >= avail_to` on a menu item create/update — ambiguous between
-   a genuine overnight window and a same-day typo) was a dead feature on the
-   frontend.** `MenuItem` never declared the field and neither mutation
-   handler in `MenuManage.tsx` read the response body, so a shopkeeper who
-   mistyped an availability window got zero feedback despite the backend
-   doing the work to compute it. Fixed: added the field to the `MenuItem`
-   type and surfaced it as an `info` toast on both create and update.
-
-Plus two doc corrections found along the way: § 4's codebase map claimed
-`useSSE.ts` has a "MAX_RETRIES cap" — the hook now retries indefinitely with
-only a *backoff-delay* cap (`MAX_BACKOFF_MS`); the attempt-count cap this
-line described no longer exists in the code (confirmed via
-`useSSE.test.ts`'s own comment referencing "the old MAX_RETRIES(8) cap").
-And a stale comment in `OrderStatus.tsx` still pointed at
-`components/StudentRealtime.tsx` post-reorg.
-
-Full GATE after everything above: frontend — `tsc -b --noEmit` clean, `lint`
-0 errors/23 warnings (unchanged baseline), `test` 61/61, `build` 250.01 KB
-raw initial student JS (unchanged — the reorg is pure file movement, and the
-`avail_window_warning` fix lands in a lazy-loaded route chunk), `format:check`
-clean. Backend — `go build`, `go vet`, `gofmt -l` clean, `golangci-lint run`
-0 issues, `go test ./... -race` clean (including the new ratings regression
-test).
-
-**2026-07-22 (frontend find-fix pass — realtime cache sync):** a fresh read of
-the frontend focused on React Query cache keys vs. the SSE events that are
-supposed to keep them live — the class of bug where a broadcast fires but the
-component listening for it reads a *different* key. Found and fixed one real
-one:
-
-1. **The shopkeeper's header status pill never refetched from SSE or on
-   reconnect — it only updated from its own mutation.**
-   `components/ShopStatusControl.tsx` read its status from query key
-   `['shop', 'status']`, but *nothing else in the app used that key*. The rest
-   of the app (student `Menu.tsx`, both `StudentRealtime`/`ShopRealtime`
-   invalidations) uses `['shop-status']`. Two consequences: (a)
-   `hub.NotifyShopStatusUpdate()` explicitly `broadcastAll`s a `shop_status`
-   event to **every** client "student AND shop" (its own doc comment), but
-   `ShopRealtime.handleMessage` had no `shop_status` branch at all, so the shop
-   silently dropped it; (b) `ShopRealtime`'s reconnect resync (`handleOpen`)
-   *did* invalidate `['shop-status']` — a key the shop side never read — so
-   even the "onOpen resyncs everything" self-heal missed the pill. Net: a
-   status change made on another shopkeeper device/session (counter tablet vs.
-   owner's phone) left this device's pill stale until a full reload. Since
-   `refetchOnWindowFocus` is off and there's no refetch interval (main.tsx),
-   nothing else masked it. **Fix:** unified `ShopStatusControl` onto the
-   app-wide `['shop-status']` key (its own mutation `setQueryData`/invalidate
-   included — a shorter string, so a net *reduction* on that path), and added
-   the missing `shop_status` branch to `ShopRealtime.handleMessage` so the
-   broadcast now lands instantly, matching the hub's documented intent. Only
-   affects multi-device shopkeeper sessions (the pill is the shopkeeper's own
-   info display; students were never affected — their `['shop-status']` path
-   was already correct), so it's low-severity, but it silently defeated a
-   broadcast the backend was already paying to send.
-
-   **Bundle note:** the new `else if` branch is ~65 bytes of runtime code in
-   the shared initial chunk, nudging the Vite-reported initial student JS from
-   249.95 KB to **250.01 KB** — 0.01 KB past the 250 KB line § 9.1.8 calls a
-   hard stop. Not byte-golfed back under: the honest lever is structural, not
-   a 65-byte contortion of working notification code — `ShopRealtime` /
-   `ShopStatusControl` are shopkeeper-only components that ride the *student's*
-   shared chunk because `Layout.tsx` statically imports them. Lazy-splitting
-   the shop shell out of the initial chunk (recorded as § 9.4-B13) reclaims far
-   more than needed whenever the budget wants real headroom. Gate after fix:
-   `tsc` clean, `lint` 0 errors/23 warnings (unchanged), `test` 61/61,
-   `build` 250.01 KB initial student JS.
-
-**2026-07-21 (full-stack find-fix pass):** a fresh, complete read of the
-codebase — backend order/menu/shop-status/push lifecycle, and the frontend
-booking, cancel, accept/reject/handover, menu-edit, and shop-status flows —
-hunting for functional bugs and unhandled edge cases, not style. Found and
-fixed one real backend security bug and 4 frontend bugs:
-
-1. **[Security] `services/push.go` `Subscribe` had no validation on the
-   client-supplied `endpoint` URL — a genuine SSRF.** `POST
-   /api/push/subscribe` requires only `requireAuth` (any authenticated
-   student, the lowest privilege tier), and `send()` later makes a real
-   outbound HTTPS POST to `sub.Endpoint` via `webpush-go` whenever a push
-   fires for that user (e.g. their own order reaching "ready" — easy to
-   trigger almost at will). A self-generated P-256 keypair is trivial to
-   produce and doesn't need to come from a real browser subscription —
-   webpush-go's encryption step only checks the key is well-formed, not
-   that it's genuine — so "valid encryption keys are required" was never a
-   real barrier to pointing `endpoint` at an internal host or an
-   attacker-controlled URL. Fixed with a hostname allowlist covering the
-   three real Web Push vendors this PWA's target platforms use (`fcm.
-   googleapis.com`, `updates.push.services.mozilla.com`,
-   `web.push.apple.com`) — exact-hostname match, not prefix/suffix, so a
-   lookalike like `fcm.googleapis.com.evil.example` doesn't sneak through.
-   The legitimate flow (`PushNotificationSetup.tsx`) always gets its
-   `endpoint` from the browser's own real `pushManager.subscribe()`, so
-   this doesn't affect real usage; its existing catch/toast (F9) already
-   handles a rejection gracefully if it ever fires. New `push_test.go`
-   (9 cases: 6 rejected including the lookalike-host and http-scheme-to-a-
-   real-host attempts, 3 real vendor hosts accepted). Full backend GATE
-   re-run clean: `go build`, `go vet`, `gofmt -l`, `golangci-lint run` (0
-   issues), `go test ./... -race`.
-
-2. **`lib/cart.ts` `reorderIntoCart` merged quantities with no upper bound.**
-   Every other path to a cart quantity (`QtyStepper`, the backend's
-   `CreateOrder`) caps a line at 20 — reorder didn't, so reordering on top of
-   an already-substantial cart could produce a qty >20 that the backend
-   rejects whole-cloth with a generic "qty must be between 1 and 20," naming
-   no item and stranding the student. Now clamps to the same 20, matching
-   `QtyStepper`'s existing silent-clamp behavior. Regression tests added.
-3. **`pages/shop/History.tsx`'s date input had no failure-safe boundary.**
-   Clearing the native `<input type="date">` (a normal browser interaction)
-   set `date` to `""`; stepping from there via `shiftDate("", 1)` produced
-   the literal string `"NaN-NaN-NaN"`, which the backend 400s on a
-   never-before-cached query key — tripping the `isError`-with-no-cached-data
-   early return that replaces the *entire* section, date input included,
-   with an error screen with no in-page way back. Fixed: empty input falls
-   back to today; added `max={todayLocal()}` so the native picker can't be
-   driven past today either (the ▶ button already blocked that path, the
-   picker itself didn't).
-4. **`pages/shop/MenuManage.tsx`'s tap-to-arm mistouch guard could desync
-   from Edit.** The 3s auto-disarm timer keeps running while the edit form
-   is open (the row isn't unmounted). A quick open-then-cancel of Edit
-   within that window returned to a card that was still armed but no longer
-   showing the "tap again" banner — the next incidental tap anywhere on the
-   card would silently mark the item out of stock. Fixed: opening Edit now
-   also disarms.
-5. **`components/ShopStatusControl.tsx`'s pause-reopen time input had the
-   same clearable-native-input gap as #3.** An emptied `<input type="time">`
-   fed `reopenTimeToISO("")`, which built an Invalid Date and threw on
-   `.toISOString()` inside the mutation (caught by React Query, so not a
-   hard crash, but surfaced a misleading "Could not change status" toast for
-   what was really a client-side blank field). Fixed at the same input
-   boundary: falls back to the picker's own 30-minutes-from-now default.
-
-One thing found and deliberately **not** changed — recorded as § 9.4-B12
-instead of silently altering product behavior: an order that's had **some**
-but not all items handed over, then abandoned by the student, has no
-terminal path. `Reject` refuses once any item's `handed_qty > 0`; the 15-min
-hold-then-expire in `ExpiryTick` explicitly skips any order with handover
-activity. This matches § 3's documented state machine verbatim ("ready →
-expired, 15-min hold **if nothing handed**") — it's a real operational gap
-(the order, and the student's one-active-order slot, stay stuck until the
-shopkeeper notices and manually hands over the remainder to force
-`awaiting_payment`), but closing it means adding an explicit "write off /
-abandon" action, which is a product decision, not a bug fix.
-
-Full GATE after all five fixes: frontend — `npx tsc -b --noEmit` clean,
-`npm run lint` 0 errors (23 pre-existing warnings, unchanged), `npm test`
-61/61 (59 + 2 new `reorderIntoCart` cap cases), `npm run build` 249.95 KB raw
-initial student JS (effectively unchanged, still under the 250 KB line).
-Backend — `go build`, `go vet`, `gofmt -l` (clean), `golangci-lint run`
-(0 issues), `go test ./... -race` (`internal/services` 2.259s, including 9
-new `push_test.go` cases for the SSRF fix).
-
-**2026-07-21 (backend find-fix pass):** same file-by-file, verify-
-empirically discipline extended to `backend/` at the project owner's
-explicit direction. Read every service/repository/middleware file at least
-once; found and fixed 4 issues:
-
-1. **`services/auth.go` `GetUser` didn't re-check the shopkeeper allowlist.**
-   The allowlist was only ever consulted at `FirebaseLogin` time; a
-   shopkeeper removed from `SHOPKEEPER_EMAILS` kept full access on their
-   already-issued JWT for up to its full 7-day life. Fixed: `GetUser`
-   re-verifies a shopkeeper-role user's email is still on the live allowlist
-   on every request (student role has no equivalent per-user list, so this
-   only costs a lookup for the handful of shopkeeper accounts). Regression
-   test verified to fail without the fix.
-2. **`services/pool.go` `Reject`/`Handover`/`Paid` silently returned empty
-   `student_name`/`student_email`.** All three built their response from the
-   transaction-scoped order (loaded via `FindByIDForUpdate`, which skips
-   `Preload("User")` on purpose) while claiming `includeStudent=true`.
-   `Accept`/`RemoveItem`/`CreateOrder` already re-fetched correctly — this
-   was a 3-of-6 inconsistency, invisible today only because the frontend
-   never reads a mutation response body (it always refetches the list
-   instead). Fixed by adding the same re-fetch the other three use. New
-   integration test (`TestIntegration_MutationResponsesIncludeStudentName`,
-   real Postgres) — the mocked unit suite couldn't have caught this since
-   the mock's `FindByID`/`FindByIDForUpdate` return the same pointer.
-3. **gofmt drift in 8 files** (whitespace/alignment only, diffed before
-   applying — same category the frontend already got bitten by once).
-4. **CI had no Go equivalent of the frontend's format-check step at all** —
-   the root cause of #3. Added `gofmt -l` to the `backend-unit` CI job.
-
-Full GATE: `go build`, `go vet`, `gofmt -l` clean, `golangci-lint run`
-(plain and `--build-tags=integration`, 0 issues each), `go test ./... -race`
-(unit), `go test -tags=integration -p 1 ./... -race` (real Postgres),
-`scripts/smoke.sh` 15/15.
-
-**2026-07-20 (frontend design-polish micro-pass, two rounds):** a fresh
-file-by-file read of the full frontend on top of the G-series diff, then a
-second round hunting the same bug categories plus a live-browser sweep.
-Found and fixed 8 issues: `Menu.tsx`'s diet-filter and search zero-results
-states now use the shared `EmptyState` (icon + "Clear filter" action)
-instead of a bare sentence; `MenuSkeleton.tsx` grew a bone for G2's search
-input and lost a real CSS-specificity bug (`Bone`'s hardcoded `bg-edge/50`
-default was silently beating every caller's lighter override in the
-cascade — Tailwind emits utilities in ascending numeric order regardless of
-JSX source order); `Orders.tsx` picked up `loading="lazy" decoding="async"`
-on two thumbnail spots G1's file list didn't literally name, plus its tablet
-skeleton now matches the real `lg:` two-column breakpoint; `TrendingRail.tsx`
-got the missing `decoding="async"`; `OrderStatus.tsx`'s `RatingPrompt` had
-the same cascade-collision bug as `Bone` (a `border-brand-dark` override
-losing to `Card`'s baked-in `border-edge`) — fixed with a `ring-2` instead
-of a border, since box-shadow can't collide with the property it was losing
-to. Verified live across two scratch-stack Playwright rounds (both roles, a
-real order lifecycle for real proportions). Gate unchanged: `tsc` clean,
-`lint` 0/23, `test` 59/59, `build` 249.94 KB.
-
-**2026-07-20 (G-series verification pass):** independently re-verified all
-eight G-items diff-by-diff against § 9.3's spec, then did the live-browser
-pass a previous round couldn't (no OAuth creds at the time) — an isolated
-scratch stack, both roles, real SSE round-trip for G7. Found and fixed 2
-more issues: (1) G2's search input showed a duplicate clear icon (Chromium/
-WebKit paint their own native `::-webkit-search-cancel-button` on
-`type="search"`, which Tailwind's preflight doesn't strip — fixed with a
-6-line rule in `index.css`); (2) **CI was red on `origin/main`**,
-independent of the G-series — `Orders.tsx`/`Prep.tsx` had drifted out of
-Prettier format sometime during the F-series and nobody had checked the
-Actions tab; fixed (`prettier --write`, whitespace only, diffed before
-applying). `npm run format:check` is now clean repo-wide.
-
-**G-series (G1–G8) and F-series (F1–F24) implementation:** see § 9.3 and
-§ 9.2 below for the full per-item spec — everything listed there shipped as
-written, gated after every item (types/lint/tests/build/no horizontal
-scroll/reduced-motion), and (G-series) live-verified via Playwright against
-an isolated scratch stack. F-series is committed (git log); G-series is the
-newest layer of the uncommitted diff.
-
-### Two things remain
-
-1. **Decide on § 9.4-B12** (the partial-handover/abandoned-order gap) — or
-   leave it recorded and unstarted, same as the rest of § 9.4. § 9.4-B13
-   (lazy-split the shop shell for bundle headroom) is likewise recorded and
-   unstarted.
-2. **Deployment (D-1..D-7)** below — human-led, needs real infra access, not
-   more code.
+1. **H1** (the counter's cash moment) is now unblocked — H2 landed, so H1 can
+   land behind its lazy boundary without touching the student bundle.
+2. **H3** (surface the V3 price-drift on the student's ticket) is unblocked —
+   V3's backend half (`expected_total` / `price_changed`) is in.
+3. **Q3/Q4** ("the rush", "shopkeeper runs out mid-cook") are the next-highest
+   value tests — they exercise the concurrency invariants V1/V2/V10 just
+   hardened.
+4. H4–H8 and Q5–Q9 remain open and authorized, unstarted.
 
 ---
 
 ## 1. What is Khaao?
 
 A **mobile-first installable PWA** for a single college canteen. Students sign
-in with their college Google account, build a cart, place one order at a
-time, and track it live. The shopkeeper/chef accepts orders, cooks to
-aggregate demand, hands items over one-by-one, and collects payment. No
+in with their college Google account, build a cart, place one order at a time,
+and track it live. The shopkeeper/chef accepts orders, cooks to aggregate
+demand, hands items over one-by-one, and collects payment at the counter. No
 in-app payments, no OTP, no multi-canteen.
 
 **Scale target:** ~2000 students, single college. Lunch/break rush = bursts of
 orders + ~1–2k long-lived SSE connections. Sustainably served by **one Go
-instance** (see § Topology decision).
+instance** (see § 2 Topology decision).
 
 ---
 
@@ -522,9 +84,9 @@ instance** (see § Topology decision).
 |---|---|
 | **Backend** | Go 1.23 · Gin · GORM · **PostgreSQL only** |
 | **Architecture** | Layered SOLID: `controllers → services → repositories` with `authn`, `realtime`, `config`, `database` packages. Composition root in `cmd/server/main.go`. |
-| **Auth** | Firebase Google sign-in only. Backend verifies Firebase ID tokens against Google's public certs (no Admin SDK, golang-jwt). Issues its own HS256 Khaao JWT. Role re-read from DB on every request, including a live shopkeeper-allowlist re-check (2026-07-21). `FakeVerifier` for dev/e2e (`AUTH_FAKE=true`, disabled in production). |
-| **Real-time** | Server-Sent Events, in-memory `realtime.Hub`. Students get `order_update`/`menu_update`. Shop gets `orders_update`/`prep_update`/`menu_update`/`shop_status`. Plus best-effort Web Push (VAPID) so a shopkeeper is notified of a new order even with the app closed. SSE connections authenticate via a short-lived one-use ticket (`POST /api/auth/sse-ticket`), never the raw JWT. |
-| **Observability** | Structured `log/slog` throughout (JSON in production, text in dev/test) — `middleware.RequestLogger()` logs one line per request (method/path/status/latency/user_id); the shared `respondError` logs every 5xx at Error and every 409 (conflict) at Warn. |
+| **Auth** | Firebase Google sign-in only. Backend verifies Firebase ID tokens against Google's public certs (no Admin SDK, golang-jwt). Issues its own HS256 Khaao JWT. Role re-read from DB on every request, including a live shopkeeper-allowlist re-check. `FakeVerifier` for dev/e2e (`AUTH_FAKE=true`, disabled in production). |
+| **Real-time** | Server-Sent Events, in-memory `realtime.Hub`. Students get `order_update`/`menu_update`. Shop gets `orders_update`/`prep_update`/`menu_update`/`shop_status`. Plus best-effort Web Push (VAPID). SSE connections authenticate via a short-lived one-use ticket (`POST /api/auth/sse-ticket`), never the raw JWT. |
+| **Observability** | Structured `log/slog` throughout (JSON in production, text in dev/test) — `middleware.RequestLogger()` logs one line per request; the shared `respondError` logs every 5xx at Error and every 409 at Warn. |
 | **Frontend** | React 18 · TypeScript · Vite · Tailwind CSS · TanStack Query · react-router · Firebase JS SDK · installable PWA (`injectManifest` mode, hand-written `frontend/src/sw.ts`) |
 | **Uploads** | Menu photos go straight to Cloudinary via a backend-signed upload (image bytes never touch the Gin server). |
 | **Topology** | **ONE backend instance** behind a TLS reverse proxy (Caddy/nginx). Deliberate, not deferred — see below. |
@@ -538,12 +100,12 @@ distributed SSE transport** unless the scale target itself changes.
   SSE connections. Go handles this trivially on 2–4 vCPU.
 - `PoolEngine.mu` (`sync.Mutex`) is correct and fast in one process — each
   mutation is a single short DB transaction (single-digit ms).
-- Scaling out would need distributed locking (Postgres advisory locks) *and*
-  distributed SSE (Redis/LISTEN-NOTIFY) — real cost for a scale this app will
-  never hit.
-- The DB is still the ultimate arbiter: `SELECT … FOR UPDATE` is already in
-  every mutation transaction, so a second instance would serialize correctly
-  rather than corrupt data if it ever came to that. But run one.
+- Scaling out would need distributed locking *and* distributed SSE — real cost
+  for a scale this app will never hit.
+- The DB is still the ultimate arbiter: `SELECT … FOR UPDATE` plus a
+  transaction-scoped `pg_advisory_xact_lock` is already in every mutation
+  transaction, so a second instance would serialize correctly rather than
+  corrupt data if it ever came to that. But run one.
 
 ```
 Students' phones (PWA)           Shopkeeper/Chef tablet
@@ -592,7 +154,7 @@ Order:  submitted → preparing → partially_ready → ready
         branch: submitted → cancelled (student, submitted-only)
         branch: submitted/preparing/partially_ready/ready → rejected (shopkeeper,
                  refused once anything's been handed over)
-        branch: ready → expired (15-min hold if nothing handed — see § 9.4-B12
+        branch: ready → expired (15-min hold if nothing handed — see § 9.6-B12
                  for the gap this leaves once *something* has been handed)
 
 Item:   pending → queued → allocated → handed_over
@@ -622,51 +184,42 @@ backend/
     database/database.go          → Open (GORM, citext, versioned SQL migrations via
                                      golang-migrate, pool tuning), Seed
     repository/                   → interfaces (repository.go) + GORM impls (gorm.go)
-    realtime/hub.go                → in-memory SSE hub (fan-out by userID/role)
+                                     ⚠ integration tests cover schema constraints only, not queries
+    realtime/hub.go               → in-memory SSE hub (fan-out by userID/role)
     services/
       auth.go, menu.go, orders.go, shopstatus.go, ratings.go, push.go, sse_ticket.go
       pool.go                     → PoolEngine: the core order/prep/handover/payment engine
-      allocation.go                → FCFS allocation strategy
-      *_test.go                    → unit tests (mocked repos)
-    controllers/                   → auth, menu, orders, shop, shopstatus, push, cloudinary, health
-    routes/routes.go               → all route wiring
+      allocation.go               → FCFS allocation strategy
+      *_test.go                   → unit tests (mocked repos)
+    controllers/                  → auth, menu, orders, shop, shopstatus, push, cloudinary, health  ⚠ no tests
+    routes/routes.go              → all route wiring  ⚠ no tests
 
 frontend/
   src/
     main.tsx, App.tsx              → root, route tree (role-split: student vs shopkeeper)
     lib/                           → firebase init, format helpers, sound (WebAudio, no assets),
-                                     cart.ts (cart derivation/persistence + G3 reorder merge),
-                                     liveAnnouncer.ts (G7 aria-live pub-sub), promptCoordination.ts
-                                     (InstallPrompt/PushNotificationSetup bottom-sheet-slot pub-sub),
-                                     shopNotifications.ts (shopkeeper header-bell pub-sub)
+                                     cart.ts, liveAnnouncer.ts, promptCoordination.ts,
+                                     shopNotifications.ts
     context/AuthContext.tsx        → auth state
-    context/LanguageContext.tsx    → shopkeeper-only Hindi/English toggle (localStorage-persisted)
-    hooks/useSSE.ts                → SSE hook, jittered exponential backoff (capped at
-                                     MAX_BACKOFF_MS; retries indefinitely, no attempt-count cap —
-                                     the "MAX_RETRIES cap" this line described until 2026-07-22 no
-                                     longer exists in the code, see this session's find-fix pass)
+    context/LanguageContext.tsx    → shopkeeper-only Hindi/English toggle
+    hooks/useSSE.ts                → SSE hook, jittered exponential backoff (retries indefinitely)
     api/                           → typed API clients per domain
-    components/ui/                 → role-agnostic primitives: Button, Card, Modal (portal-based),
-                                     Toast, ConfirmDialog, EmptyState(+Icons), Spinner, StatusBadge,
-                                     QtyStepper, VegMark
-    components/layout/              → app shell: Layout (header+nav+realtime handlers),
-                                     ProtectedRoute, ErrorBoundary, InstallPrompt,
-                                     PushNotificationSetup
+    components/ui/                 → Button, Card, Modal (portal-based), Toast, ConfirmDialog,
+                                     EmptyState(+Icons), Spinner, StatusBadge, QtyStepper, VegMark
+    components/layout/             → Layout (header+nav+realtime handlers), ProtectedRoute,
+                                     ErrorBoundary, InstallPrompt, PushNotificationSetup
     components/student/            → MenuItemCard, OrderModal, OrderTicket, StudentRealtime,
-                                     StatusStamps, TrendingRail / FavoritesRail (G8), DietFilter,
+                                     StatusStamps, TrendingRail / FavoritesRail, DietFilter,
                                      MenuSkeleton
-    components/shop/               → ShopRealtime, ShopStatusControl
-    pages/student/                 → Menu (browse/cart/checkout/search/favorites), OrderStatus
-                                     (tracking/history/rating/reorder)
-    pages/shop/                    → Orders, Prep, History (day stepper + ledger bars), MenuManage
-    sw.ts                          → hand-written service worker (injectManifest mode — precache +
-                                     /api NetworkOnly + push/notificationclick listeners)
+    components/shop/               → ShopRealtime, ShopStatusControl  ⚠ ShopStatusControl untested
+    pages/student/                 → Menu, OrderStatus
+    pages/shop/                    → Orders, Prep ⚠, History ⚠, MenuManage
+    sw.ts                          → hand-written service worker ⚠ untested
 
-docs/
-  SPEC.md                          → frozen v3 baseline spec (auth, core lifecycle, DB schema) — see
-                                     its header note for what it does NOT cover
-scripts/
-  smoke.sh                         → e2e smoke test (boots server, full lifecycle)
+docs/SPEC.md                       → frozen v3 baseline spec — see its header for what it omits
+scripts/smoke.sh                   → e2e smoke test (boots server, full lifecycle, curl-driven)
+scripts/loadtest.js                → k6 script (NOT part of routine verification — see § 10)
+deploy/                            → Caddyfile, systemd unit, RUNBOOK.md
 ```
 
 ---
@@ -689,11 +242,11 @@ Backend (`backend/.env`, copy from `backend/.env.example`):
 | `BUSINESS_TIMEZONE` | `Asia/Kolkata` | IANA tz for daily tokens, history dates, availability windows |
 | `FRONTEND_ORIGIN` | `http://localhost:5173` | CORS origin, must be `https://` in production |
 | `SEED_SAMPLE_MENU` | `true` | Seed sample menu if empty on boot |
-| `CLOUDINARY_CLOUD_NAME`/`_API_KEY`/`_API_SECRET` | — | Menu photo uploads. Cloud `r2avfle3`, a Programmable Media account. **Never regenerate** these once real menu photos exist (see § 10). |
+| `CLOUDINARY_CLOUD_NAME`/`_API_KEY`/`_API_SECRET` | — | Menu photo uploads. Cloud `r2avfle3`. **Never regenerate** once real photos exist (§ 10). |
 | `VAPID_PUBLIC_KEY`/`_PRIVATE_KEY`/`_SUBJECT` | — | Web Push. **Never regenerate — rotating invalidates every existing subscription.** |
 
-Frontend (`frontend/.env`, copy from `frontend/.env.example`): `VITE_FIREBASE_API_KEY`,
-`VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`.
+Frontend (`frontend/.env`): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
+`VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`.
 
 ---
 
@@ -712,247 +265,946 @@ Testing without Firebase (dev only): `AUTH_FAKE=true` in `backend/.env`, then
 The UI always uses the real Google popup — fake tokens are for curl/Playwright,
 not the login button.
 
-**Verification before any commit:**
+**The gate — run all of it before any commit:**
 ```bash
-cd backend && go build ./... && go vet ./... && gofmt -l . && go test ./... -race
-cd frontend && npx tsc -b --noEmit && npm run lint && npm test && npm run build
+cd backend  && go build ./... && go vet ./... && gofmt -l . && go test ./... -race && golangci-lint run ./...
+cd backend  && go test -tags=integration ./...     # needs real Postgres
+cd frontend && npx tsc -b --noEmit && npm run lint && npm test && npm run build && npm run format:check
 ```
 
 ---
 
 ## 7. API surface
 
-See `docs/SPEC.md` for the frozen v3 core contract (auth, orders, menu, shop
-endpoints, state machines). Added since that doc was written:
+See `docs/SPEC.md` for the frozen v3 core contract. Added since that doc:
 
-- `POST /api/orders/:id/ratings` — student submits 1–5★ per item on a
-  completed order (ownership-checked, re-rating is a no-op)
-- `GET /api/menu` / `GET /api/shop/menu` — now include `avg_rating`,
-  `rating_count`, `diet`, `tags`, `order_count_today`
-- `GET /api/shop-status`, `POST /api/shop/status` — open/paused/closed
-  control; pause/close refused (409) while any *accepted* order is still
-  outstanding (submitted-but-not-yet-triaged orders don't block it)
+- `POST /api/orders/:id/ratings` — student submits 1–5★ per item on a completed
+  order (ownership-checked, re-rating is a no-op)
+- `GET /api/menu` / `GET /api/shop/menu` — include `avg_rating`, `rating_count`,
+  `diet`, `tags`, `order_count_today`
+- `GET /api/shop-status`, `POST /api/shop/status` — open/paused/closed control;
+  pause/close refused (409) while any *accepted* order is outstanding
 - `POST /api/shop/menu/photo-signature` — signs a direct-to-Cloudinary upload
 - `GET /api/push/vapid-public-key`, `POST /api/push/subscribe` — Web Push
-- `GET /api/shop/history` — now includes an `insights` block (order_count,
+- `GET /api/shop/history` — includes an `insights` block (order_count,
   item_counts, customers)
 - `POST /api/auth/sse-ticket` — mints a short-lived one-use ticket for `?ticket=`
-  on the SSE endpoints (replaces the raw JWT in the query string)
-- `POST /api/shop/menu` (create) / `PUT /api/shop/menu/:id` (update) responses
-  now include `avail_window_warning` (non-blocking, omitted when empty) —
-  set when `avail_from >= avail_to`, since that's ambiguous between a
-  genuine overnight window and a same-day typo
+- `POST /api/shop/menu` / `PUT /api/shop/menu/:id` responses include
+  `avail_window_warning` (non-blocking, omitted when empty)
 
 ---
 
 ## 8. What's DONE
 
 - Full order lifecycle: cart → order → accept/reject/trim → prep pool → FCFS
-  allocation → per-item handover → payment → history, with one active order
-  per student enforced in code and at the DB level (partial unique index)
-- Firebase Google auth, DB-driven role/allowlist re-read on every request —
-  removing a shopkeeper locks them out immediately, both for actions
-  (long-standing) and now (2026-07-21) even on an already-issued JWT
-- Shop status control (open/paused/closed), menu diet + tags + trending,
-  history insights with a day stepper and proportional ledger bars
-- Item ratings (1–5★ per order item, menu-level average + count)
-- Menu search, diet-filter persistence, "Order this again" (reorder merges
-  additively into the cart, capped at the same 20/line every other path
-  enforces), and device-local "Your usuals" favorites — the student-side
-  depth features (G-series)
-- A visually-hidden `aria-live` region announcing the same status
-  transitions that already chime/vibrate, for screen-reader parity (G7)
-- Web Push notifications for new orders (best-effort, self-cleaning dead
-  subscriptions), alongside the existing in-tab SSE sound
-- Cloudinary signed photo uploads for menu items
-- Installable PWA (custom service worker, offline shell, `/api` NetworkOnly)
-- Real-time SSE for both roles; ready-chime + vibration + browser
-  notification for students, incoming-order alert for shopkeepers
+  allocation → per-item handover → payment → history, with one active order per
+  student enforced in code and at the DB level (partial unique index)
+- Firebase Google auth, DB-driven role/allowlist re-read on every request
+- Shop status control, menu diet + tags + trending, history insights with a day
+  stepper and proportional ledger bars
+- Item ratings, menu search, diet-filter persistence, "Order this again",
+  device-local "Your usuals" favorites
+- A visually-hidden `aria-live` region announcing status transitions
+- Web Push for new orders (best-effort, self-cleaning dead subscriptions)
+- Cloudinary signed photo uploads; installable PWA with a custom service worker
+- Real-time SSE for both roles; ready-chime + vibration for students
 - Server hardening: fail-closed prod config, request timeouts/body caps,
-  security headers, DB row-locking (`SELECT … FOR UPDATE`) + advisory locks
-  for concurrency correctness
-- Full mobile-first visual redesign (paper-chit/steel-counter theme, the
-  "ready" moment as the signature animated beat), and a Hindi/English
-  **language toggle** on shopkeeper-facing pages. Student pages stay
-  English-only by design and are guarded to stay that way even if a
-  shopkeeper's stored preference is 'hi' on a shared device.
-- Structured `log/slog` logging, Postgres integration test suite + CI,
-  k6 load test script, root error boundary, crash-proof cart, network-
-  tolerant SSE, redirect sign-in for installed PWAs, Cloudinary
-  thumbnailing, one `ConfirmDialog`/`Modal` system (no `window.confirm`),
-  offline banner, ESLint/Prettier/Vitest + golangci-lint wired into CI,
-  route-group/Firebase code-splitting
-- All backend unit tests pass (`go test ./... -race`); `scripts/smoke.sh`
-  covers the full golden-path lifecycle live against Postgres
+  security headers, row locking + advisory locks, per-user rate limiting,
+  SSE-connection caps, push-endpoint SSRF allowlist
+- Full mobile-first visual redesign (paper-chit/steel-counter theme, the "ready"
+  moment as the signature animated beat), Hindi/English toggle on shop pages
+- Structured `log/slog`, Postgres integration test suite + CI, root error
+  boundary, crash-proof cart, network-tolerant SSE, redirect sign-in for
+  installed PWAs, ESLint/Prettier/Vitest + golangci-lint in CI, code-splitting
 
 ---
 
 ## 9. What's LEFT
 
-**Everything through § 9.6 (U1–U4) is implemented, gate-clean and
-committed.** The remaining items are, in priority order:
-
-1. Decide on § 9.4 (B1–B15) — nothing in it is authorized to start on its own.
-2. Deployment (D-1..D-7, human-led).
-
-**Caveats worth knowing (recorded, not tasks):**
-
-- **R14 residual race (documented in `shopstatus.go`):** the accepted-order
-  check + status save are atomic under the engine's advisory lock, but
-  `RejectAllSubmitted` runs as a *separate* transaction afterwards (nesting
-  would deadlock on the advisory lock). A concurrent Accept can still land in
-  the commit-to-sweep gap, leaving the shop paused with one accepted order.
-  Narrow; closing it fully means restructuring `RejectAllSubmitted` to join
-  the caller's transaction. Not worth it unless observed live.
-- **Bundle budget:** raw initial student JS is at 250.24 KB (Vite-reported,
-  2026-07-24) — over the 250 KB hard stop (§ 9.1.8). Treat this as
-  over-budget: the next addition of real size **must** trim something first,
-  and § 9.4-B13 (lazy-split the shop shell out of the shared initial chunk)
-  is the identified lever to get back under.
-- Student history is `LIMIT 20` (no pagination yet — see § 9.4-B5); shop
-  history caps the *response list* at 200 rows but computes insights/totals
-  over the full day.
-- A slow SSE consumer is dropped by closing its channel; the browser
-  reconnects and `onOpen` resyncs it. Deliberate self-heal, not data loss.
-
 ### 9.1 Mobile design rules — read before ANY frontend change
 
-Students use this exclusively on phones (installed PWA); the shopkeeper uses
-a phone or counter tablet. These are standing rules, not suggestions:
+Students use this exclusively on phones (installed PWA); the shopkeeper uses a
+phone or counter tablet. These are standing rules, not suggestions:
 
 1. **Design at 375×667 first** (iPhone SE class), then check ~360 px small
-   Android and ~768–1024 px shopkeeper tablet. Desktop only needs to not
-   break. DevTools device mode is the working canvas, but iOS-specific
-   behavior is only ever proven on a real device (D-6).
-2. **Touch targets ≥ 44×44 px** — `min-h-[44px]` is the established idiom.
-   No hover-only affordances (hover doesn't exist on touch); `hover:` styles
-   are progressive extras, tap feedback comes from `active:`/pressed states.
-3. **Thumb zone:** primary actions live at the bottom — bottom nav, sticky
-   footer CTAs, bottom sheets. `Modal` already renders as a bottom sheet on
-   phones and a centered card at `sm:`. **Every overlay goes through
-   `Modal`/`ConfirmDialog`** — never `window.confirm`, never a hand-rolled
-   `fixed` div (§ 10: a `fixed` child of a `backdrop-filter` ancestor breaks;
-   `Modal` portals to `document.body` for exactly that reason).
-4. **Safe areas:** anything pinned to the bottom (nav, modal footers) needs
-   the `pb-safe` utility, or the iOS home indicator overlaps it.
+   Android and ~768–1024 px shopkeeper tablet. Desktop only needs to not break.
+   iOS-specific behavior is only ever proven on a real device (D-6).
+2. **Touch targets ≥ 44×44 px** — `min-h-[44px]` is the established idiom. No
+   hover-only affordances; `hover:` styles are progressive extras, tap feedback
+   comes from `active:`/pressed states.
+3. **Thumb zone:** primary actions live at the bottom. `Modal` already renders
+   as a bottom sheet on phones and a centered card at `sm:`. **Every overlay
+   goes through `Modal`/`ConfirmDialog`** — never `window.confirm`, never a
+   hand-rolled `fixed` div (§ 10: a `fixed` child of a `backdrop-filter`
+   ancestor breaks; `Modal` portals to `document.body` for exactly that reason).
+4. **Safe areas:** anything pinned to the bottom needs the `pb-safe` utility, or
+   the iOS home indicator overlaps it.
 5. **No horizontal page scroll, ever.** Wide content scrolls inside its own
-   `overflow-x-auto` container; long labels get `min-w-0` + truncation on
-   flex children (Hindi item names run long).
-6. **Inputs:** font-size ≥ 16 px on every input or iOS zooms the page on
-   focus; set `inputmode`/`type` so the right keyboard opens (numeric for
-   qty/price). **Native `date`/`time` inputs are user-clearable** (an "×"
-   affordance or Backspace) — always guard the `onChange` handler against an
-   empty value rather than letting it flow into downstream date arithmetic
-   (see the History/ShopStatusControl fixes in "Current state" above).
-7. **The network is hostile** (campus Wi-Fi, elevators): every screen must
-   stay usable on cached data — stale data + the offline banner beats an
-   error state (`isError` alone must never replace rendered data; see R25).
-   Never treat a network failure as an auth failure (R3). Every mutation
-   shows a pending state and toasts on error.
-8. **Performance budget:** initial student JS ≤ ~250 KB raw (currently
-   250.24 KB — over, see § 9 bundle-budget caveat and § 9.4-B13). New
-   heavy dependencies must be lazy chunks (follow
-   `App.tsx`'s route-group `lazy()` pattern; `lib/firebase` is dynamically
-   imported at the moment of login). Menu photos always render through
+   `overflow-x-auto` container; long labels get `min-w-0` + truncation on flex
+   children (Hindi item names run long).
+6. **Inputs:** font-size ≥ 16 px on every input or iOS zooms the page on focus;
+   set `inputmode`/`type` so the right keyboard opens. **Native `date`/`time`
+   inputs are user-clearable** — always guard the `onChange` handler against an
+   empty value rather than letting it flow into date arithmetic.
+7. **The network is hostile** (campus Wi-Fi, elevators): every screen must stay
+   usable on cached data — stale data + the offline banner beats an error state
+   (`isError` alone must never replace rendered data). Never treat a network
+   failure as an auth failure. Every mutation shows a pending state and toasts
+   on error.
+8. **Performance budget:** initial student JS ≤ ~250 KB raw. **Currently 250.24
+   KB — over.** New heavy dependencies must be lazy chunks (follow `App.tsx`'s
+   route-group `lazy()` pattern). Menu photos always render through
    `cloudinaryThumb(url, 2×display-px)` — never a raw `secure_url`.
-9. **iOS installed-PWA rules** (standalone mode is the real target, and it
-   has separate storage from Safari):
-   - No `new Notification(...)` — only `registration.showNotification` via
-     the service worker. No `navigator.vibrate`. WebAudio starts suspended —
-     unlock on first user gesture (`lib/sound.ts` pattern). Web Push is the
-     only screen-off signal.
-   - Sign-in uses `signInWithRedirect` in standalone mode (popups break
-     there) — keep both paths working when touching auth.
-   - Feature-detect everything (`'Notification' in window`, etc.) — webview
-     capability sets vary wildly.
-10. **Visual language:** stay inside the paper-chit/steel-counter theme —
-    the Tailwind tokens (`paper`, `ink`, `edge`, `steel`, `stamp`,
-    `turmeric`, `brand`), `font-display` for headings, and the existing
-    `Card`/`Button`/`EmptyState`/`StatusBadge`/`Modal` components. Don't
-    invent new grays/shadows/radii; don't add a UI library. **A hardcoded
-    base class merged with a caller `className` can silently lose the
-    Tailwind cascade tie** (utilities are emitted in source-file order, not
-    JSX order — bit both `Bone` and `Card` this pass; a `ring-*` box-shadow
-    sidesteps the collision when a border override needs to win).
-11. **Language:** shopkeeper-facing strings are paired via `useLanguage()`
-    (`language === 'hi' ? … : …`); student-facing UI is English-only by
-    design and guarded to stay that way (`Layout.tsx`).
-12. **Orientation:** never lock it — the manifest deliberately has no
-    `orientation` key; shopkeeper tablets go landscape.
+9. **iOS installed-PWA rules** (standalone mode is the real target, with storage
+   separate from Safari):
+   - No `new Notification(...)` — only `registration.showNotification` via the
+     service worker. No `navigator.vibrate`. WebAudio starts suspended — unlock
+     on first user gesture (`lib/sound.ts` pattern). Web Push is the only
+     screen-off signal.
+   - Sign-in uses `signInWithRedirect` in standalone mode (popups break there).
+   - Feature-detect everything (`'Notification' in window`, `window.matchMedia?.`).
+10. **Visual language:** stay inside the paper-chit/steel-counter theme — the
+    Tailwind tokens (`paper`, `ink`, `edge`, `steel`, `stamp`, `turmeric`,
+    `brand`), `font-display` for headings, and the existing components. Don't
+    invent new grays/shadows/radii; don't add a UI library. **A hardcoded base
+    class merged with a caller `className` can silently lose the Tailwind
+    cascade tie** — a `ring-*` box-shadow sidesteps the collision when a border
+    override needs to win.
+11. **Language:** shopkeeper-facing strings are paired via `useLanguage()`;
+    student-facing UI is English-only by design and guarded to stay that way.
+12. **Orientation:** never lock it — shopkeeper tablets go landscape.
 
-### 9.2 Frontend design-polish backlog (F-series) — DONE, committed
+### 9.2 Visual identity — binding design direction
 
-**Status: complete and committed** (git log — five parallel worktree agents
-by file-ownership group, each diff reviewed before merging; two real bugs
-caught in review and fixed directly: a Hindi-copy leak-into-student-session
-risk in `ConfirmDialog`, and an `InstallPrompt`/`PushNotificationSetup`
-timing gap). Kept below as the spec of what shipped — nothing here is an
-open task.
-
-Design direction (still binding for any future frontend beauty work): the
-identity is the **paper chit and the steel counter** — kraft-paper order
+The identity is the **paper chit and the steel counter**: kraft-paper order
 tokens stamped as they move down the line, cool institutional steel around
 them. IBM Plex Mono for the "printed on the chit" voice (numbers, prices,
-stamps), IBM Plex Sans for everything else. `brand` moss = the awning,
-`stamp` red = rubber-stamp ink, `turmeric` = the kitchen. **Sharpen this,
-don't dilute it toward generic food-delivery** (no gradients, no
-glassmorphism, no emoji-as-icon). The signature element is the rubber-stamp
-language on the **"ready" moment** — the emotional peak of the product.
+stamps, labels); IBM Plex Sans for everything else. `brand` moss = the awning,
+`stamp` red = rubber-stamp ink, `turmeric` = the kitchen. The signature element
+is the rubber-stamp language on the **"ready" moment** — the emotional peak of
+the product (`StatusStamps.tsx`, with its `feTurbulence` distressed-ink filter).
 
-F1–F12 (rule violations & small bugs) and F13–F24 (the beauty pass — Login
-as a set-piece, the Ready-moment animation choreography, skeletons over
-spinners, empty states with a hand-drawn glyph, order age on incoming
-cards, the prep-board tally tick, shopkeeper tablet layout, Modal focus
-trap, keyframe reconciliation) are the two halves of the backlog; all 24
-items shipped. Gate on the fully merged tree: `tsc` clean, `lint` 0 errors/
-23 warnings, `test` 53/53 at the time, `build` 249.37 KB.
+**Sharpen this direction, don't dilute it.** No gradients, no glassmorphism, no
+emoji-as-icon, no generic food-delivery styling. Every new surface should be
+answerable to the question *"what is this in a real canteen?"* — the prep board
+is a chalkboard (ink background, paper mono digits), the history panel is a
+ledger, the order is a chit. When § 9.4 asks for a new element, derive its form
+from the counter, not from a component library.
 
-### 9.3 Frontend depth backlog (G-series) — IMPLEMENTED, GATED, UNCOMMITTED
+**Writing rules** (they carry as much of the identity as the color does):
+- Active voice, plain verbs, sentence case. A control says what happens:
+  "Place order," not "Submit." The name survives the whole flow — a button that
+  says "Hand over" produces a toast that says "Handed over."
+- Errors explain what happened and what to do, in the interface's voice. They
+  never apologize and are never vague. Empty screens invite an action.
+- Name things by what the person controls, never by how the system is built.
+  "Left to cook," not "remaining_qty."
+- Shopkeeper strings need a Hindi pair via `useLanguage()`. Student strings are
+  English-only by design.
 
-**Status: G1–G8 all implemented, gated, and live-verified** (isolated
-scratch stack, both roles, a real SSE round-trip for G7) — see "Current
-state" above. Sitting uncommitted in the working tree for review. Kept below
-as the spec of what shipped:
+---
 
-- **G1 — floor sweep:** `loading="lazy" decoding="async"` on every thumbnail
-  that didn't already have it; grew the `RatingPrompt` "Skip" hit area to
-  44px.
-- **G2 — menu search:** quiet client-side search (name + tags, no network),
-  composes with the diet filter, hides `TrendingRail`/chip-bar while active;
-  category `<section>`s stay mounted-but-hidden so F7's scroll-spy observer
-  never loses its element references.
-- **G3 — "Order this again":** `reorderIntoCart` in `lib/cart.ts` (unit-
-  tested, additive merge, capped at 20/line as of the 2026-07-21 fix above)
-  writes straight to the shared `khaao_cart_v2` key so it works from
-  `/order` even though `Menu` is unmounted there. Honest full/partial/none
-  toast.
-- **G4 — diet filter persistence:** `khaao_diet_filter_v1`, validated
-  against the live union before trusting a stored value.
-- **G5 — History day stepper:** ◀/▶ + "Jump to today", local-date
-  arithmetic (never `toISOString()`, which drifts a day near local
-  midnight); now also guards against an emptied native date input (2026-07-21).
-- **G6 — Top-items ledger bars:** hand-built proportional meter bars
-  (`dataviz` skill's "meter" spec — brand fill over brand-light track,
-  `aria-hidden`, numbers stay the accessible content), 6% width floor so a
-  small count is still visible.
-- **G7 — live status announcements:** a Layout-level `sr-only
-  aria-live="polite"` region fed by `lib/liveAnnouncer.ts`, reusing the
-  `prevStatusRef` transition-detection idiom already in `StudentRealtime`/
-  `ShopRealtime` rather than duplicating it. Announces exactly the
-  transitions that already chime.
-- **G8 — "Your usuals":** a pin toggle on `MenuItemCard`'s photo corner
-  (ink-line SVG, not an emoji), `khaao_favorites_v1` localStorage, a
-  `FavoritesRail` deliberately distinct from `TrendingRail` (solid brand
-  border, no rank numbers — this is "yours," not "everyone's data").
+### 9.3 Backend find-fix backlog (V-series) — DONE (2026-07-26)
 
-GATE: `tsc` clean, `lint` 0 errors, `test` 59/59 baseline + reorder cases,
-`build` under the 250 KB line throughout, `format:check` clean repo-wide
-(fixed a pre-existing drift in `Orders.tsx`/`Prep.tsx` found along the way).
+Found in the 2026-07-26 full-backend audit. **All ten fixed**, each with a
+regression test written first and confirmed red against the unfixed code, full
+gate green (build/vet/gofmt/`test -race`/golangci-lint + the Postgres
+integration suite). V8 was investigated per its own instructions and confirmed
+to be a real defect (not a false alarm) — see its entry.
 
-### 9.4 Deferred backlog — recorded for LATER, **NOT authorized**
+| # | Severity | One-line | Status |
+|---|---|---|---|
+| V1 | **HIGH** | A "your order is ready" push fires before the transaction commits — a rollback leaves the student with a phantom ready alert | **Fixed** — ready-transitions queued during the tx, flushed post-commit only |
+| V2 | **HIGH** | `CreateOrder` checks shop-open outside the lock and outside the transaction — an order can be accepted into a just-closed shop and then sit forever | **Fixed** — check moved inside `WithTx`, ahead of the active-order lookup |
+| V3 | **HIGH** | Menu prices can drift between the student's cart and the server's charge, silently | **Fixed** — optional `expected_total` in, `price_changed` out; order always created at live price |
+| V4 | MEDIUM | `Accept` silently ignores `rejected_item_ids` that don't belong to the order | **Fixed** — foreign IDs now reject the whole call with `ErrBadRequest` |
+| V5 | MEDIUM | A student is never notified when their order is rejected or expires | **Fixed** — `NotifyOrderRejected`/`NotifyOrderExpired` added, wired post-commit |
+| V6 | MEDIUM | An expired order's items are left in `queued` status, not `rejected` — a terminal order with live-looking items | **Fixed** — expiring items now set to `ItemRejected`, mirroring `Cancel` |
+| V7 | MEDIUM | `SubmitRatings` accepts an unbounded, un-deduplicated ratings array | **Fixed** — capped at 30, de-duplicated by `order_item_id` (last wins) |
+| V8 | LOW | `GormOrderRepo.Save` implicitly upserts the whole `Items` association on every order mutation | **Confirmed real, fixed** — `.Omit(clause.Associations)`; a SQL-capturing test proved the extra per-item upserts existed |
+| V9 | LOW | `Subscribe` stores unvalidated `p256dh`/`auth` key material of any length | **Fixed** — base64url charset + length-bound validation |
+| V10 | LOW | `RejectAllSubmitted` reads orders without `FOR UPDATE`, unlike every sibling mutation | **Fixed** — new `FindIncomingForUpdate`, row-lock proven via a second-connection `NOWAIT` test |
 
-Backend work, product decisions, or deliberately-postponed frontend.
-Nothing here may be started without the owner picking it deliberately.
+---
+
+#### V1 — [HIGH] The "order ready" push fires before the transaction commits
+
+**Where:** `services/pool.go` — `recomputeStatus` → `notifyOrderReady`.
+
+`recomputeStatus` calls `e.notifyOrderReady(order)` at the moment it flips an
+order to `ready`. But `recomputeStatus` is only ever called from *inside* a
+`uow.WithTx` callback — in `Accept`, `Handover`, `RemoveItem` and (via
+`reallocate`) in `MarkDone`, `Reject` and `ExpiryTick`. The push goroutine is
+launched immediately; the transaction commits later, and may not commit at all.
+
+**Failure scenario:** the shopkeeper taps **Done** on the last unit of a dish.
+`MarkDone` → `reallocate` → `recomputeStatus` flips order #14 to `ready` and
+fires the push. The very next statement in the same transaction — the
+`EventItemReady` log write, or the `orderRepo.Save` inside `reallocate` — fails
+(deadlock, connection drop, constraint). The transaction rolls back: order #14
+is still `preparing` in the database, nothing is cooked, and the pool units were
+never deducted. Meanwhile the student's locked phone has already buzzed *"Order
+#14 is ready — head to the counter."* They walk down for food that does not
+exist. The `ready_at`/`expires_at` timestamps set in memory are also discarded,
+so the 15-minute hold never starts.
+
+The existing doc comment on `notifyOrderReady` acknowledges the transaction may
+"still be rolled back by a later step" but treats that as a reason to detach the
+*context*, not as a reason to defer the *send*. Detaching the context does not
+help: it makes the phantom push more reliable, not less.
+
+**Fix shape:** collect ready-transitions during the transaction instead of
+sending them. Give `PoolEngine` a per-call slice (or have `recomputeStatus`
+return the transition), and flush the pushes after `WithTx` returns `nil`,
+alongside the existing `e.broadcast(...)` / `hub.Notify*` calls that are already
+correctly placed post-commit. Do not send anything on the error path.
+
+**Test first:** a `pool_test.go` case with a fake `orderNotifier` and a `uow`
+stub whose `WithTx` runs the callback and then returns an error (simulating a
+commit failure). Assert `NotifyOrderReady` was **not** called. Verify it fails
+against today's code. Add the mirror case — successful commit *does* notify
+exactly once — so the fix can't be "never send."
+
+---
+
+#### V2 — [HIGH] `CreateOrder` checks shop-open outside the lock and the transaction
+
+**Where:** `services/pool.go` — `CreateOrder`, first line.
+
+```go
+if err := e.ensureShopOpen(ctx); err != nil { ... }   // ← unlocked, untransacted
+...
+e.mu.Lock()
+defer e.mu.Unlock()
+err = e.uow.WithTx(ctx, func(txCtx context.Context) error { ... })
+```
+
+`ensureShopOpen` reads `shop_status` on its own connection, before the engine
+mutex is taken and before the transaction (and therefore before the advisory
+lock) exists. Every other invariant in this engine is checked inside the
+transaction that acts on it; this one is not.
+
+**Failure scenario:** it's 3 pm and the shopkeeper taps **Close**.
+`ShopStatusService.Set` saves `closed`, commits, then runs `RejectAllSubmitted`
+to sweep away undecided orders. A student's phone, which has had the menu open
+since lunch, submits an order in the gap. `ensureShopOpen` runs *before* the
+close commits and reads `open` — the check passes. The engine then blocks on
+the advisory lock until the close commits and the sweep finishes, and inserts a
+brand-new `submitted` order **into a closed shop, after the sweep has already
+run**. Nothing will ever reject it: the shop is closed so the shopkeeper isn't
+looking at the Orders screen, `ExpiryTick` only touches `ready` orders, and the
+student now holds their one-active-order slot indefinitely. They cannot place
+another order tomorrow without someone manually resolving it. This is the same
+class of gap as the known R14 residual (§ 9.6 caveats), but on the more common
+path — students submit far more often than shopkeepers close.
+
+**Fix shape:** move the `ensureShopOpen` read inside the existing `WithTx`
+callback, ahead of the `FindActiveByUserIDForUpdate` call. The advisory lock
+then serializes it against `ShopStatusService.Set`'s own transaction, so the
+read either sees the pre-close state (and the sweep will catch the order) or
+sees `closed` (and the order is refused with the existing 409). Keep the
+error messages identical — "The canteen is closed." / "The canteen is on a
+break." are already correct copy.
+
+**Test first:** `pool_test.go` with a fake `shopStatusRepo` whose `Get` records
+whether it was called with a transaction context (the existing test fakes can
+inspect `txCtx`). Assert the shop-status read happens inside the transaction.
+Better if feasible: an integration test (`-tags=integration`) that closes the
+shop concurrently with a create and asserts the resulting order count is either
+0, or 1-and-rejected — never 1-and-submitted.
+
+---
+
+#### V3 — [HIGH] Menu prices drift silently between the student's cart and the charge
+
+**Where:** `services/pool.go` `CreateOrder` (`candidate.TotalPrice += mi.Price *
+in.Qty`), `services/orders.go` (`OrderResponse`), and the student cart on the
+frontend (see the paired **H3**).
+
+The server correctly prices the order from the live `menu_items` row at submit
+time. The student's cart total, though, is computed on the phone from whatever
+menu payload it last fetched. There is no agreement between the two and no
+signal when they disagree.
+
+**Failure scenario:** a student builds a ₹120 cart at 12:40. The shopkeeper
+edits the samosa from ₹20 to ₹30 at 12:44 (a real thing that happens — supply
+prices move, and `MenuManage` makes it a two-tap edit). The student's phone is
+in their pocket, screen off; the `menu_update` SSE event is delivered but the
+refetch result never gets looked at. At 12:45 they hit **Place order** having
+last seen ₹120. The server charges ₹140. The order ticket shows ₹140, the
+counter asks for ₹140, and the student is certain they were shown ₹120. In a
+canteen where payment is cash at a counter, that argument costs the shopkeeper
+real time during a rush, and it is the app's fault.
+
+The reverse direction is just as bad in trust terms: a price *drop* the student
+never sees means the app under-delivers on a win.
+
+**Fix shape (backend half):** the order response already carries the
+authoritative `total_price`; the missing piece is telling the client that it
+changed. Accept an optional `expected_total` on the create-order request. When
+it is present and does not match the computed total, still create the order
+(refusing it during a rush would be worse), but return the discrepancy in the
+response — e.g. `price_changed: {expected, charged}` — so H3 can surface it
+honestly on the ticket the student lands on. Do **not** silently refuse and do
+not re-price to the stale value.
+
+**Test first:** `pool_test.go` — create an order whose menu item price differs
+from the submitted `expected_total`; assert the order is created at the live
+price *and* the response carries the discrepancy. Second case: matching
+expectation → no discrepancy field. Third: omitted `expected_total` → behaves
+exactly as today (old clients must not break).
+
+**Coordinate with H3.** Land the backend first; H3 consumes the new field.
+
+---
+
+#### V4 — [MEDIUM] `Accept` silently ignores unknown `rejected_item_ids`
+
+**Where:** `services/pool.go` — `Accept`.
+
+`rejectedSet` is built from the caller's IDs and then only ever *consulted*
+while looping over `order.Items`. An ID that belongs to a different order, or
+to no order at all, is silently discarded.
+
+**Failure scenario:** the shop tablet has two incoming order cards open. A stale
+render, a double-tap during a rush, or a retried request after a timeout sends
+order #12's accept with item IDs that belong to order #11. The API returns
+`200 OK` with a fully-accepted order. The shopkeeper's screen shows the trim
+they asked for did not apply, and they cannot tell whether the tap registered —
+so they tap again. Meanwhile the item they meant to drop is now queued for
+cooking.
+
+**Fix shape:** validate before mutating. Build the set of the order's own item
+IDs; if any supplied ID is not in it, return `ErrBadRequest` naming the count
+("2 of the items sent aren't part of this order"). Fail the whole call rather
+than partially applying — a partially-applied trim is worse than a rejected one.
+
+**Test first:** `pool_test.go` — `Accept` with one valid and one foreign item ID
+returns a 400 and leaves every item's status untouched.
+
+---
+
+#### V5 — [MEDIUM] A student is never told their order was rejected or expired
+
+**Where:** `services/push.go` (only `NotifyNewOrder` and `NotifyOrderReady`
+exist), `services/pool.go` (`Reject`, `ExpiryTick`).
+
+The push channel notifies the shopkeeper of a new order and the student of a
+ready order. There is nothing for the two outcomes a student most needs to hear
+about, both of which are decided by someone else while their phone is in their
+pocket.
+
+**Failure scenario A (reject):** a student orders at 12:30 and puts the phone
+away. At 12:33 the shopkeeper runs out of paneer and rejects the order. The SSE
+event fires into a backgrounded tab that iOS has already frozen. The student
+walks to the counter at 12:50 expecting food, and finds out there. Worse, they
+believe they still have an active order and cannot place a new one until they
+open the app and see the REJECTED stamp.
+
+**Failure scenario B (expire):** the 15-minute hold lapses on a ready order. The
+student gets no warning before it happens and no notice after. From their side
+the app simply stopped working.
+
+**Fix shape:** add `NotifyOrderRejected(ctx, userID, orderNo, reason)` and
+`NotifyOrderExpired(ctx, userID, orderNo)` alongside the existing notifiers,
+with the same pure-payload-function shape (`rejectedPayload` /
+`expiredPayload`, unit-testable without a fake endpoint) and a `URL` of
+`/order`. Wire them from `Reject` and `ExpiryTick` — **post-commit, per V1's
+rule**, not from inside the transaction. Extend the `orderNotifier` interface so
+`pool_test.go` can assert on them. Copy must follow § 9.2: state what happened
+and what to do ("Order #14 couldn't be prepared. Nothing to pay — order again
+when you're ready."), never apologize, never blame the student.
+
+**Consider (product call, flag it rather than deciding):** a warning push ~3
+minutes before expiry is arguably more valuable than the after-the-fact one.
+Implement the two above; note the warning as a follow-up.
+
+**Test first:** `push_test.go` for the exact payload bytes; `pool_test.go`
+asserting `Reject` and `ExpiryTick` each notify the right user exactly once, and
+do not notify when the transaction fails.
+
+---
+
+#### V6 — [MEDIUM] Expired orders keep items in `queued` status
+
+**Where:** `services/pool.go` — `ExpiryTick`.
+
+When an order expires, allocated units are returned to the pool and the item is
+walked *backwards*: `if it.Status == models.ItemAllocated { it.Status =
+models.ItemQueued }`. The order itself is then terminal (`expired`), but its
+items claim to be waiting to be cooked.
+
+**Why it matters:** nothing reads it wrongly *today* — `remainingByMenuItem`
+scans `FindInProgress`, which excludes expired orders — so this is latent, not
+live. But it is a lie in the data, and the next thing to scan `order_items` by
+status will believe it. Two of the already-planned items scan exactly that way:
+§ 9.6-B15 (the business-day reset) and any future analytics or waste report. An
+expired order's items were never handed over and never will be; `rejected` is
+the status that means that, and it is what `Cancel` and `Reject` both use.
+
+**Fix shape:** set `it.Status = models.ItemRejected` for every non-rejected item
+on an expiring order, and save it — mirroring `Cancel`'s loop. Keep the pool
+return exactly as it is.
+
+**Test first:** `pool_test.go` — expire a ready order with one allocated and one
+queued item; assert both end as `rejected` and the allocated qty went back to
+the pool. Verify the current code fails the status assertion.
+
+---
+
+#### V7 — [MEDIUM] `SubmitRatings` accepts an unbounded, un-deduplicated array
+
+**Where:** `services/ratings.go` — `SubmitRatings`.
+
+Every element is validated individually (ownership, not-rejected, 1–5 stars),
+but the slice length is never checked and duplicates within one request are
+never collapsed. An order holds at most 30 lines; a request can carry 30,000
+entries pointing at the same line, and they all reach `SaveAll` as a single
+multi-row insert. The 1 MiB body cap is the only ceiling, and it permits roughly
+30k entries. `SubmitRatings` also runs outside a transaction, so a partial
+insert failure leaves whatever the DB accepted.
+
+**Failure scenario:** low-drama but real — a buggy retry loop in a client, or one
+bored student with curl, turns a rating submit into a multi-megabyte insert
+during the lunch rush, on the same connection pool the order engine needs.
+
+**Fix shape:** cap `len(inputs)` at a number derived from reality — an order
+cannot have more than 30 lines, so 30 is the honest cap — and return
+`ErrBadRequest` above it. De-duplicate by `order_item_id` (last value wins, or
+first — pick one and say so in a comment). Keep the existing `ON CONFLICT DO
+NOTHING` behavior for genuine re-rating.
+
+**Test first:** `ratings_test.go` — 31 inputs → 400; duplicate `order_item_id`
+in one request → exactly one row reaches the repo.
+
+---
+
+#### V8 — [LOW] `Save` implicitly upserts the whole `Items` association
+
+**Where:** `repository/gorm.go` — `GormOrderRepo.Save`.
+
+`getDB(ctx, r.db).Save(order)` is called with an `order` whose `Items` slice is
+populated (every caller loads via `FindByIDForUpdate`, which fills it). GORM's
+default `Save` also upserts loaded associations, so each order-status write also
+emits an insert-with-conflict-clause for every order item — extra statements
+inside the advisory-locked critical section, on the hottest path in the app.
+
+**Verify before fixing.** Turn on GORM's SQL logging (or add a session-scoped
+logger in a test) and confirm the association statements actually appear on the
+current version. If they do not, close this task as not-a-defect and record that
+here. If they do, the fix is `Session(&gorm.Session{SkipHooks: false}).Omit(clause.Associations).Save(order)`
+— or an explicit `Select` of the columns `Save` is meant to own.
+
+**Test first:** an integration-tagged test asserting the statement count for one
+`Accept` (GORM's logger can count). If counting proves fiddly, a plain assertion
+that item rows are untouched when `Save` is called with a deliberately-stale
+in-memory `Items` slice is the more valuable test anyway.
+
+---
+
+#### V9 — [LOW] Push subscription key material is stored unvalidated
+
+**Where:** `services/push.go` — `Subscribe`.
+
+`endpoint` is properly validated against the vendor-host allowlist (the 2026-07-21
+SSRF fix). `p256dh` and `auth`, however, are stored verbatim: any length, any
+character set. A real subscription's `p256dh` is a 65-byte base64url-encoded
+P-256 point and `auth` is 16 bytes; anything else can only be junk that will fail
+at encryption time inside `webpush-go`, per row, per send, forever.
+
+**Fix shape:** length-bound and charset-check both (base64url alphabet), and
+reject on mismatch with a clear 400. Cheap, and it keeps the `push_subscriptions`
+table honest.
+
+**Note:** this touches the same file as V5. Sequence them (V5 first, it is the
+larger change) or give both to one agent.
+
+**Test first:** `push_test.go` — over-length and non-base64url values are
+rejected; a real-shaped pair is accepted.
+
+---
+
+#### V10 — [LOW] `RejectAllSubmitted` reads without `FOR UPDATE`
+
+**Where:** `services/pool.go` — `RejectAllSubmitted`; `repository/gorm.go` —
+`FindIncoming`.
+
+Every other engine mutation loads its target through a `…ForUpdate` variant.
+This one uses the plain `FindIncoming` and then `Save`s the rows it read. It is
+protected today by the advisory lock that `WithTx` takes, so this is a
+consistency-of-idiom issue rather than a live race — but it is precisely the
+"unlocked read then whole-row `Save`" shape that produced the 2026-07-24
+`MenuService.Update` lost-update bug, and the next person to add a code path
+that writes `orders` outside the advisory lock will be bitten by it.
+
+**Fix shape:** add `FindIncomingForUpdate` (mirroring `findOrdersForUpdate`'s
+existing pattern, filtering `status = submitted`) and use it here. Leave
+`FindIncoming` for the read-only `ShopOrders` path.
+
+**Note:** touches `repository/gorm.go`, shared with V8. Sequence or combine.
+
+**Test first:** given the protection is already there, the honest test is at the
+repository level under `-tags=integration`: assert `FindIncomingForUpdate` holds
+a row lock (a second connection's `SELECT … FOR UPDATE NOWAIT` on the same row
+errors).
+
+---
+
+### 9.4 Frontend design + UX backlog (H-series) — H2 DONE, H1/H3–H8 OPEN, AUTHORIZED, UNSTARTED
+
+Written against § 9.1 (mobile rules) and § 9.2 (identity). **Read both before
+starting any H-task.** The direction is already pinned — these tasks sharpen it;
+none of them are licence to restyle the app.
+
+| # | Priority | One-line | Files owned |
+|---|---|---|---|
+| H2 | **DONE** | Lazy-split the shop shell out of the student's initial chunk — buys the bundle headroom every other H-task spends | Bundle 250.24 KB → **239.57 KB**; `Layout.test.tsx` added |
+| H1 | **HIGH** | The counter's cash moment has no interface — build it | `pages/shop/Orders.tsx`, new `components/shop/CashDrawer.tsx` |
+| H3 | **HIGH** | Surface the price-drift V3 exposes, on the ticket the student lands on | `pages/student/OrderStatus.tsx`, `api/orders.ts`, `api/types.ts` |
+| H4 | **HIGH** | A 422 at checkout throws away the whole cart instead of the one unavailable item | `pages/student/Menu.tsx`, `lib/cart.ts` |
+| H5 | MEDIUM | The prep board shows *what* to cook but never *who is waiting* | `pages/shop/Prep.tsx` |
+| H6 | MEDIUM | Terminal-state arrival is silent — no chime, no announcement, no closure | `components/student/StudentRealtime.tsx`, `lib/sound.ts` |
+| H7 | MEDIUM | Low-contrast secondary text fails WCAG AA across both roles | `tailwind.config.js`, sweep across pages/components |
+| H8 | LOW | Error and empty-state copy has drifted from the § 9.2 writing rules | copy-only sweep, all pages |
+
+---
+
+#### H2 — [DO FIRST] Lazy-split the shop shell out of the initial student chunk
+
+Formerly § 9.6-B13; **promoted out of the deferred backlog and authorized**,
+because the budget is now blocking: initial student JS is 250.24 KB against a
+250 KB hard stop (§ 9.1.8). Every other H-task adds bytes.
+
+`Layout.tsx` statically imports `ShopRealtime` and `ShopStatusControl`, and
+carries the shop-only header/nav branches. All of it ships to every student's
+phone, over campus Wi-Fi, on first load, and none of it will ever execute there.
+
+**Fix shape:** put a `lazy()`/`Suspense` boundary around the shop-only realtime
+and status components, following the route-group pattern already in `App.tsx`.
+The shell is always mounted, so the boundary needs a fallback that renders
+nothing visible and does not shift layout — the shopkeeper must never see a
+flash of missing header controls.
+
+**Verify:** `npm run build` and record the new number *in this file*. Then live-
+verify both roles: a student session must never fetch the shop chunk (check the
+network panel), and a shopkeeper's status control must still be interactive on
+first paint. Reclaims far more than the 240 bytes currently over.
+
+**Test:** existing `Orders.test.tsx` / `ShopRealtime.test.tsx` must stay green;
+add a `Layout` test asserting the student render does not mount the shop
+components.
+
+---
+
+#### H1 — [HIGH] The counter's cash moment has no interface
+
+**The gap:** when an order reaches `awaiting_payment`, `Orders.tsx` renders
+`{formatPrice(order.total_price)}` — a number in a row. That number is the
+single most operationally loaded moment in the whole product: the student is
+standing at the counter, there is a queue behind them, and cash is changing
+hands. The app currently contributes nothing to it.
+
+Everything else in this app was designed from the real object — the chit, the
+chalkboard, the ledger. The cash moment has no such object yet, and it is the
+one the shopkeeper touches most often.
+
+**What to build:** the counter's cash surface. Concretely:
+- The amount to collect, set at the largest type on the screen, in
+  `font-display` tabular figures — readable at arm's length on a tablet propped
+  behind a counter, not at reading distance.
+- **Tender + change.** The shopkeeper taps what the student handed over (₹50 /
+  ₹100 / ₹200 / ₹500, plus "exact") and the change to return is computed and
+  shown at the same weight as the total. Indian canteen cash is overwhelmingly
+  these denominations; a change subtraction under time pressure with a queue
+  waiting is exactly the arithmetic worth removing. This is device-local UI
+  state only — **no backend, no persistence, no new endpoint.** Clear it when
+  the order is marked paid.
+- **Mark paid** stays the committing action, unchanged in behavior, and stays in
+  the thumb zone (§ 9.1.3).
+
+**Design constraints:** derive the form from the counter, not from a payments
+UI. No card/wallet iconography — there are no in-app payments and never will be
+(§ 1). The denominations are physical notes: the existing `paper`/`edge` tokens
+and mono numerals already speak that language. Spend the boldness here on
+*scale and clarity*, not on new color — this is the one screen where a very
+large number is the whole design. Keep the Hindi pairing (§ 9.1.11): "देना है"
+/ "to return".
+
+**Rules to honor:** 44 px targets on every denomination key; `pb-safe` if it
+docks to the bottom; overlay (if any) goes through `Modal`; no horizontal
+scroll at 375 px; the whole thing must be operable one-handed on a phone, since
+the shopkeeper sometimes runs the counter off a phone.
+
+**Test:** a new `CashDrawer.test.tsx` — tender below the total offers no
+change and does not block; exact tender shows zero change; change math is right
+across the denomination set; the panel resets after "Mark paid."
+
+**Watch the budget:** this is shop-only code. It must land behind H2's lazy
+boundary so it never reaches a student's bundle.
+
+---
+
+#### H3 — [HIGH] Surface the price drift on the ticket the student lands on
+
+**Depends on V3.** Land V3 first.
+
+Once the create-order response can report `price_changed`, `OrderStatus.tsx`
+must tell the student, once, at the moment they arrive: what they last saw, what
+they were charged, and that the order stands. One line, on the chit, in the
+interface's voice — not a toast that vanishes while they are still reading it,
+and not an apology.
+
+Suggested copy (tune it, don't ceremonialize it): *"The samosa went from ₹20 to
+₹30 while you were ordering. You'll pay ₹140 at the counter."*
+
+Also send `expected_total` from the cart at submit time (`api/orders.ts`), taken
+from the same `cartTotal` the student was actually shown — not recomputed at
+submit, which would defeat the point.
+
+**Test:** `OrderStatus.test.tsx` — a response carrying `price_changed` renders
+both numbers; a response without it renders nothing extra; the notice does not
+reappear on a later SSE-driven refetch of the same order.
+
+---
+
+#### H4 — [HIGH] A 422 at checkout throws away the whole cart
+
+**Where:** `pages/student/Menu.tsx` `submitMutation.onError`, `lib/cart.ts`.
+
+`CreateOrder` returns `422` with a message naming the offending item — *"Paneer
+Roll is not orderable right now"* — the instant any one line has gone
+unorderable. The client shows that message in a toast and leaves the cart
+exactly as it was. U3 already prunes items the *menu payload* says are
+unorderable, but that only helps when the phone has fresh menu data; the race
+this covers is precisely the one where it does not.
+
+**Failure scenario:** 12:47, the rush. A student has six items in the cart. The
+shopkeeper marks paneer out of stock at 12:46:58. The student taps **Place
+order** at 12:47:00 — before the `menu_update` refetch lands. They get a red
+toast, an unchanged cart, and a **Place order** button that will fail
+identically every time they tap it. There is no affordance telling them which
+line to remove. Most students will tap three or four times and then close the
+app.
+
+**Fix shape:** parse the 422 (match on the returned item name against the cart's
+own entries, or — better — coordinate a small backend change to return the
+offending `menu_item_id`; if you take that route it belongs in V-series scope
+and must be recorded here). Remove that line from the cart, mark it visually as
+unavailable in the list, and re-open checkout with the corrected total so the
+student can confirm and submit in one tap. Never silently re-submit on their
+behalf — the total changed and they must see it.
+
+**Test:** `Menu.test.tsx` — a 422 naming one cart item prunes exactly that item,
+leaves the rest, and updates the displayed total. Verify the test fails today.
+
+---
+
+#### H5 — [MEDIUM] The prep board shows what to cook, never who is waiting
+
+**Where:** `pages/shop/Prep.tsx`.
+
+The board is an aggregate: dish name, "left to cook," a tally, a Done button.
+That is the right primary abstraction — a chef cooks to total demand, not to
+individual orders. But it flattens away the one thing that decides cooking
+*order*: someone has been waiting nine minutes and someone else just ordered.
+
+`Orders.tsx` already surfaces order age on incoming cards, so the pattern and
+the data are both established; the prep board simply does not use them.
+
+**Fix shape:** add the oldest waiting time per row — a small mono figure in the
+existing chalkboard idiom (the row's tally block is already ink-on-paper). Sort
+rows by it, so the board reads top-to-bottom as cooking order. Derive it from
+the shop orders query already in the cache; **no new endpoint.** If the number
+must fall back (query not loaded), fall back to today's ID sort silently rather
+than showing a wrong time.
+
+Keep it quiet: one figure, one unit, no color-coded urgency ramp. A red "late"
+badge in a kitchen becomes wallpaper within a day.
+
+**Test:** a new `Prep.test.tsx` — rows sort oldest-first; a row with no
+derivable age still renders; the tally-tick animation still fires (don't break
+the existing `expectTickRef` behavior).
+
+---
+
+#### H6 — [MEDIUM] Terminal-state arrival is silent
+
+**Where:** `components/student/StudentRealtime.tsx`, `lib/sound.ts`.
+
+`ready` chimes, vibrates and announces. `rejected` / `expired` / `cancelled`
+arrive with no sound and — verify this — likely no `liveAnnouncer` call either.
+The `StatusStamps` component already renders a proper REJECTED/EXPIRED stamp, so
+the *visual* closure exists; a student who is not looking at the screen gets
+nothing.
+
+**Fix shape:** a distinct, quieter, lower tone for terminal states via the
+existing WebAudio helper — deliberately **not** the ready chime, which must stay
+unique to the good news. No vibration for bad news. Announce the transition
+through `liveAnnouncer` exactly as the ready path does, so screen-reader parity
+holds (this was G7's whole point). Respect the existing first-gesture unlock and
+the reduced-motion / muted paths.
+
+Pairs with **V5** (the push for the same transitions) but is independent of it:
+V5 covers the phone in a pocket, H6 covers the phone in a hand.
+
+**Test:** extend `StudentRealtime.test.tsx` — a submitted→rejected transition
+announces once and plays the terminal tone, not the ready chime; no
+double-announce on a repeated identical SSE payload.
+
+---
+
+#### H7 — [MEDIUM] Low-contrast secondary text fails WCAG AA
+
+**The finding:** `text-ink/40` on the `paper` surface (`#211F1A` at 40 % over
+`#EEDFBB`) computes to roughly **2.1:1** — well under the 4.5:1 AA threshold for
+body text, and under 3:1 even for large text. It is used for the small
+uppercase labels that carry real meaning ("left to cook" on the prep board is
+one). `text-ink/50` and `text-paper/70` are in similar territory and need
+measuring, not assuming.
+
+This is not a theoretical audit item. The shopkeeper's tablet sits on a counter
+under canteen lighting, often near a doorway; students read their phones
+outdoors in Indian daylight. Low-contrast small caps are the first thing to
+disappear.
+
+**Fix shape:** measure every `/NN` opacity used on text against its actual
+background (compiled CSS, not assumed source order — § 10). Define two or three
+named token values that *pass* — e.g. an `ink-muted` that meets AA on `paper`
+and one that meets AA on `ink` — and replace the ad-hoc opacities with them. Do
+not simply darken everything: the visual hierarchy is doing real work, so
+recover the hierarchy through weight, size and letter-spacing where contrast
+must rise.
+
+**Verify:** compute contrast ratios and record them here. Screenshot the prep
+board and the student menu before/after.
+
+**Test:** no unit test is meaningful for this; the deliverable is the recorded
+measurements plus screenshots.
+
+---
+
+#### H8 — [LOW] Error and empty-state copy has drifted
+
+A copy-only sweep against § 9.2's writing rules. Known offenders to check:
+- *"Could not submit your order."* — says nothing about what to do next.
+- *"Could not mark item done."* — same, and it is the message a shopkeeper sees
+  mid-rush when they most need to know whether to tap again.
+- *"Some items are no longer available and were removed from your cart."* —
+  passive, and does not name the items (it can).
+
+Rules: name what happened, name the next action, active voice, no apology, keep
+the shopkeeper pairs in Hindi. Do not restructure components — text only.
+
+**Test:** update any test asserting on the old strings. Nothing new needed.
+
+---
+
+### 9.5 Testing backlog (Q-series) — Q1/Q2 DONE, Q3–Q9 OPEN, AUTHORIZED, UNSTARTED
+
+The gate is green, but green over the wrong surface. Two structural holes:
+
+1. **`internal/controllers` and `internal/routes` have zero test files.** Every
+   auth guard, every role gate and every status code in this app is currently
+   unverified except incidentally, through `scripts/smoke.sh`'s golden path.
+   `internal/repository` has 6 integration tests, but they all prove *schema*
+   invariants (unique constraints, partial unique indexes, foreign keys) — the
+   619 lines of hand-written query and locking logic in `gorm.go` are not
+   covered by them.
+2. **There is no browser-level end-to-end suite.** Playwright has been used
+   interactively for verification, but nothing is checked in and nothing runs in
+   CI.
+
+The tasks below are deliberately written as **scenarios a real student and a
+real shopkeeper would produce**, not as coverage targets. A test that mirrors a
+real Tuesday at 12:45 catches bugs that a test named
+`TestAcceptReturnsOrderResponse` never will.
+
+| # | Priority | Scenario / target | Where |
+|---|---|---|---|
+| Q1 | **DONE** | Route-level auth and role matrix — every endpoint, every wrong-role and no-token case | `internal/routes/routes_test.go` — 31/31 routes, driven off Gin's live route table |
+| Q2 | **DONE** | Repository SQL contracts against real Postgres | `internal/repository/integration_test.go` — 9 new tests, no bugs found |
+| Q3 | **HIGH** | "The rush" — concurrent student orders against finite cooked units | `services/integration_test.go` |
+| Q4 | **HIGH** | "The shopkeeper runs out mid-cook" — reject after accept, pool returns, next order advances | `services/integration_test.go` |
+| Q5 | MEDIUM | "Two devices, one shopkeeper" — the counter tablet and the owner's phone disagree | `services/*_test.go` |
+| Q6 | MEDIUM | "The student's phone dies" — SSE drop, reconnect, resync correctness | `hooks/useSSE.test.ts`, `StudentRealtime.test.tsx` |
+| Q7 | MEDIUM | Browser end-to-end: one full lifecycle, both roles, checked in and runnable | new `frontend/e2e/` |
+| Q8 | MEDIUM | The untested frontend surfaces: `Prep`, `History`, `ShopStatusControl`, `Layout` | new `*.test.tsx` |
+| Q9 | LOW | Service worker behavior: precache, `/api` NetworkOnly, push + notificationclick | new `sw.test.ts` |
+
+---
+
+#### Q1 — [HIGH] The route auth and role matrix
+
+Every route in `routes.go` is wired with some combination of `requireAuth`,
+`requireStudent`/`requireShopkeeper`, `rateLimit`, `requireSSEAuth` and
+`limitSSEConns`. A single misplaced middleware — one route registered on the
+wrong group — is a total authorization failure, and nothing in the repo would
+catch it. This is the highest-value missing test in the codebase.
+
+**Build:** a table-driven test that boots the real `routes.Setup` against fake
+services and asserts, for **every registered route**:
+- no token → 401
+- valid student token on a `/api/shop/*` route → 403
+- valid shopkeeper token on a student route → 403
+- the correct role → not 401/403
+- public routes (`/api/health`, `GET /api/menu`, `GET /api/shop-status`,
+  `GET /api/push/vapid-public-key`, `POST /api/auth/firebase`) → reachable
+  with no token, and confirm that list is exactly right
+
+Drive it off `router.Routes()` so a **newly added route that the table does not
+cover fails the test.** That property is what makes this test keep paying.
+
+**Also assert:** an SSE ticket is single-use (second connect with the same
+ticket → 401), and a student cannot open `/api/shop/stream`.
+
+---
+
+#### Q2 — [HIGH] Repository SQL contracts against real Postgres
+
+`repository/gorm.go` is 619 lines of hand-written queries, locking clauses, and
+one raw `INSERT … ON CONFLICT`. The existing
+`repository/integration_test.go` covers *schema* invariants only — unique
+constraints, the partial unique index, foreign keys — not the query methods
+themselves. The service tests all use fakes, which means **the fakes, not the
+SQL, are what is verified.** Extend the existing file rather than replacing it.
+
+**Build** (integration-tagged, real Postgres): per-method tests for the
+non-obvious ones —
+- `FindActiveByUserIDForUpdate` returns exactly one active order and locks it
+- `FindPreparingOldestForUpdate` orders strictly oldest-first including items
+- `PoolRepo.Add` with a negative delta on a missing row (the documented
+  UPDATE-then-INSERT path — assert the CHECK constraint behavior it exists for)
+- `GetMaxOrderNo` per business day, and the `idx_orders_date_no` conflict the
+  create-order retry loop depends on
+- `HasActiveItemsForMenuItem` across each order status
+- `SumOrderedQtyByDate` excluding rejected orders
+- soft-delete: a deleted menu item disappears from `FindAll` but its
+  `order_items` snapshot still renders
+
+Fixtures should read like real data: one shopkeeper, three students, a lunch
+menu.
+
+---
+
+#### Q3 — [HIGH] "The rush"
+
+**Scenario:** 12:45. Twelve students order the same dish within four seconds.
+Seven units are cooked. The shopkeeper marks them done in two batches.
+
+**Assert:** FCFS holds strictly by order creation time — the first seven orders
+get their units, order eight through twelve stay `preparing`; the pool never
+goes negative; total allocated never exceeds total cooked; every order that
+went `ready` did so exactly once and got exactly one ready notification (which
+also pins **V1**); no order gets a duplicate order number for the day.
+
+Run the twelve creates genuinely concurrently (goroutines + `-race`), against
+real Postgres. This is the test that proves the single-instance topology claim
+in § 2 is actually true.
+
+---
+
+#### Q4 — [HIGH] "The shopkeeper runs out mid-cook"
+
+**Scenario:** three orders queued for the same dish. Two units cooked and
+allocated to orders #1 and #2. The shopkeeper discovers the paneer is finished
+and rejects order #1.
+
+**Assert:** #1's allocated unit returns to the pool; the freed unit is
+re-allocated FCFS to #3, not back to #1; #3's status recomputes correctly; #1
+is `rejected` with `total_price` zeroed; the student on #1 is notified (pins
+**V5**); the shopkeeper's prep board tally reflects the new remaining demand.
+
+Then the variant that matters most: **reject after partial handover must be
+refused** — hand one unit of #2 over, then attempt to reject #2, and assert the
+409 and that nothing changed. That refusal is the invariant protecting the
+shopkeeper from giving away food they cannot account for.
+
+---
+
+#### Q5 — [MEDIUM] "Two devices, one shopkeeper"
+
+This scenario has already produced two real bugs in this codebase (the
+`ShopStatusControl` fix and the `MenuService.Update` lost-update race), which is
+exactly why it deserves standing coverage rather than being re-discovered.
+
+**Scenario:** the counter tablet and the owner's phone are both logged in as the
+same shopkeeper.
+
+**Assert:** tablet edits an item's price while the phone marks it out of stock →
+both land, neither is silently reverted (this is the regression guard for the
+2026-07-24 fix); tablet accepts an order while the phone tries to pause the shop
+→ the pause is refused with the accepted-order 409, or succeeds and no accepted
+order is left dangling; both devices mark the same prep unit done → the second
+gets the "not needed right now" 409 rather than over-allocating.
+
+---
+
+#### Q6 — [MEDIUM] "The student's phone dies"
+
+**Scenario:** a student is on the order screen when they walk into the lift.
+SSE drops. Thirty seconds later they come out. In between, their order went
+`ready`.
+
+**Assert:** `useSSE` reconnects with jittered backoff and no attempt cap; on
+reconnect, `onOpen` triggers a full refetch so the missed transition is picked
+up from REST, not inferred; the ready chime and announcement fire **once** for
+the state they arrive into, not once per reconnect; a network failure during the
+gap never surfaces as an auth failure or a logout (§ 9.1.7).
+
+Extend `useSSE.test.ts` and `StudentRealtime.test.tsx`. The double-fire case is
+the one most likely to be broken today.
+
+---
+
+#### Q7 — [MEDIUM] A checked-in browser end-to-end test
+
+One test, one lifecycle, both roles, running against a real backend with
+`AUTH_FAKE=true`: student signs in → adds two items → places the order →
+shopkeeper accepts → marks done → hands over → marks paid → student sees the
+PAID stamp and can rate.
+
+**Requirements:** committed under `frontend/e2e/`, runnable with one documented
+command, and wired into CI **only if it is reliable** — a flaky e2e in CI is
+worse than none, because the team learns to ignore red. Keep it to the golden
+path; the edge cases belong in Q3–Q6 where they run in milliseconds.
+
+Verify at 375×667 (§ 9.1.1), which also makes it a standing check against
+horizontal-scroll and thumb-zone regressions.
+
+---
+
+#### Q8 — [MEDIUM] The untested frontend surfaces
+
+`Prep.tsx`, `History.tsx`, `ShopStatusControl.tsx` and `Layout.tsx` have no
+tests. Between them they hold the day stepper's local-date arithmetic (which has
+already had a midnight-drift bug), the reopen-time picker (which has already had
+an empty-input bug), the language guard that keeps Hindi out of student
+sessions, and the prompt-coordination timing between `InstallPrompt` and
+`PushNotificationSetup`.
+
+Prioritize by prior blast radius: `ShopStatusControl` and `History` first — both
+have already broken in production-shaped ways — then `Layout`'s language guard,
+then `Prep` (which H5 will touch anyway; coordinate).
+
+---
+
+#### Q9 — [LOW] Service worker behavior
+
+`sw.ts` is hand-written and completely untested: precache manifest handling,
+`/api` NetworkOnly (a cached API response would be a correctness disaster in an
+app whose whole point is live order state), the `push` listener, and
+`notificationclick` focus/open routing to `/shop` vs `/order` (R30).
+
+Unit-test the handlers directly with a mocked SW global rather than trying to
+drive a real registration.
+
+---
+
+### 9.6 Deferred backlog — recorded for LATER, **NOT authorized**
+
+Backend work, product decisions, or deliberately-postponed frontend. Nothing
+here may be started without the owner picking it deliberately. **B13 was
+promoted to § 9.4-H2 and is no longer deferred.**
 
 | # | What | Why it's deferred |
 |---|---|---|
@@ -960,705 +1212,170 @@ Nothing here may be started without the owner picking it deliberately.
 | B2 | Favorites sync across devices | Backend: table + endpoints. G8 ships device-local first. |
 | B3 | Menu item descriptions | Backend: new column + API field; would unlock a student item-detail sheet. |
 | B4 | Scheduled pickup time slots | Product decision + backend scheduling; changes the FCFS model. |
-| B5 | Student history beyond `LIMIT 20` | Backend pagination param (R13) + UI. Not felt until months of use. |
+| B5 | Student history beyond `LIMIT 20` | Backend pagination param + UI. Not felt until months of use. |
 | B6 | Weekly/range shop insights | Backend aggregation across days + a real dataviz pass. |
 | B7 | Queue position / ETA for students | Backend derivation from pool state; needs careful honesty about accuracy. |
-| B8 | Shopkeeper allowlist admin UI | Backend endpoints; today it's env-seeded (`SHOPKEEPER_EMAILS`), fine at this scale. |
+| B8 | Shopkeeper allowlist admin UI | Backend endpoints; today it's env-seeded, fine at this scale. |
 | B9 | httpOnly cookie sessions | § 11.2 — an architecture project, not a task. |
-| B10 | iOS splash screens (`apple-touch-startup-image`) | Pure asset generation; wait for D-6 real-device pass to prove it's worth the asset set. |
-| B11 | SW update-prompt UX | `registerType` is `autoUpdate` today; switching to a "refresh for update" prompt is a product decision. |
-| B12 | Abandoned-order recovery | Found 2026-07-21: an order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0` on any item, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck until the shopkeeper notices and manually hands over the remainder to force `awaiting_payment`. A real fix needs an explicit shopkeeper "write off / abandon" action: new endpoint + service method + UI + copy + Hindi pairing — a product decision on what that action should mean (unpaid-completed? a new terminal status?), not a bug fix. |
-| B13 | Lazy-split the shop shell out of the shared initial chunk | Found 2026-07-22: `ShopRealtime`, `ShopStatusControl` (and the shop bits of `Layout`) are shopkeeper-only but ride the *student's* initial JS chunk because `Layout.tsx` statically imports them — so the ~250 KB "initial student JS" budget is partly spent on code students never run. The 2026-07-22 realtime fix pushed that number to 250.01 KB, 0.01 KB over the § 9.1.8 hard stop; this is the identified lever to get well back under. Frontend-only, but touches the always-mounted shell (needs a `lazy()`/`Suspense` boundary around the shop-only realtime/status components, following App.tsx's route-group pattern) — real enough to want a deliberate pass and a live re-verify, not a reactive tweak. Reclaims far more than the 65 bytes that tipped it over. |
-| B14 | "Accept" with every item unchecked silently rejects the order | Found 2026-07-22 (low priority, arguably-correct behavior): on the shop New-orders card, unchecking *all* pending items and pressing the green **Accept** marks them all out of stock and sends `rejectedItemIds = all`, which the backend's `Accept` turns into a full `OrderRejected` (allRejected branch). Outcome is defensible (you're out of everything → nothing to fulfil), but a green "Accept" producing a rejection is a mild UX trap. A fix would disable/relabel Accept when nothing is checked (point the shopkeeper at Reject instead) — cosmetic, and a product-copy decision + Hindi pairing, so recorded rather than changed. |
-| B15 | No business-day reset for `item_pool.qty` / `menu_items.out_of_stock` | Found 2026-07-24: `docs/SPEC.md`'s frozen v3 baseline documents a `POST /api/shop/day/close` endpoint zeroing the pool and resetting `out_of_stock`, and `MenuRepo.ResetStock`/`PoolRepo.ZeroAll` still exist in `repository.go`/`gorm.go` for exactly that — but nothing in the current codebase calls either one (no route, no service method, no scheduler; confirmed by full-repo grep). Leftover pool units (e.g. `ExpiryTick` returning allocated-but-unclaimed units to the pool at day's end with no other order waiting) silently carry into the next business day and get instantly FCFS-allocated to the first new order for that item — food from a previous day served without the shopkeeper cooking or acknowledging anything. Real and reachable, but the correct fix needs a product decision (automatic at local midnight vs. tied to the open/paused/closed shop-status transition vs. an explicit new shopkeeper action), not a targeted code change, so recorded rather than implemented. |
+| B10 | iOS splash screens | Pure asset generation; wait for D-6 to prove it's worth the asset set. |
+| B11 | SW update-prompt UX | `registerType` is `autoUpdate` today; switching to a prompt is a product decision. |
+| B12 | Abandoned-order recovery | An order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0`, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck. A real fix needs an explicit shopkeeper "write off / abandon" action: endpoint + service + UI + copy + Hindi pairing, and a product decision on what it means (unpaid-completed? a new terminal status?). |
+| ~~B13~~ | ~~Lazy-split the shop shell~~ | **Promoted to § 9.4-H2** — the bundle is now over budget, so this is blocking rather than optional. |
+| B14 | "Accept" with every item unchecked silently rejects the order | Unchecking *all* pending items and pressing green **Accept** sends `rejectedItemIds = all`, which the backend turns into a full rejection. Defensible, but a green "Accept" producing a rejection is a UX trap. A fix would disable/relabel Accept when nothing is checked — cosmetic, and a copy decision + Hindi pairing. |
+| B15 | No business-day reset for `item_pool.qty` / `menu_items.out_of_stock` | `docs/SPEC.md` documents a `POST /api/shop/day/close` zeroing the pool and resetting stock, and `MenuRepo.ResetStock`/`PoolRepo.ZeroAll` still exist for it — but nothing calls either (no route, no service, no scheduler). Leftover pool units carry into the next business day and get instantly FCFS-allocated to the first new order: food from a previous day served without anyone cooking or acknowledging it. **Real and reachable.** The fix needs a product decision (automatic at local midnight vs. tied to the shop-status transition vs. an explicit shopkeeper action), not a targeted code change. **Note the interaction with V6** — fixing V6 makes any status-based day-reset implementation correct rather than subtly wrong. |
 
-### 9.5 Find-fix tasks (T-series) — 2026-07-22 audit, DONE, committed
+**Caveats worth knowing (recorded, not tasks):**
 
-**Status: complete and committed** (2026-07-23). A fresh full-stack read on
-2026-07-22 (after everything above had landed and committed) found six real
-defects that no prior pass covered, grouped into five file-disjoint tasks
-(T1–T5). All five landed: each got its own regression test, verified to fail
-without the fix before the fix was written. Gate after all five: backend
-`go build` / `go vet` / `gofmt -l` clean, `go test ./...` all green; frontend
-`tsc -b --noEmit` clean, `lint` 0 errors / 24 warnings, `test` 66/66 (was
-61/61 — 5 new tests, one per task). Kept below as the spec of what shipped —
-nothing here is an open task.
-
-| Task | Files owned (nothing else) | Stack |
-|---|---|---|
-| **T1** | `backend/internal/middleware/auth.go` (+ new middleware test) | Go |
-| **T2** | `frontend/src/context/AuthContext.tsx`, `src/api/client.ts`, `src/api/auth.ts` (+ test) | TS |
-| **T3** | `frontend/src/pages/shop/Orders.tsx` | TS |
-| **T4** | `backend/internal/services/menu.go`, `backend/internal/services/pool.go` (+ tests) | Go |
-| **T5** | `frontend/src/components/shop/ShopRealtime.tsx` | TS |
+- **R14 residual race** (documented in `shopstatus.go`): the accepted-order check
+  and status save are atomic under the advisory lock, but `RejectAllSubmitted`
+  runs as a *separate* transaction afterwards (nesting would deadlock). A
+  concurrent Accept can land in the commit-to-sweep gap, leaving the shop paused
+  with one accepted order. Narrow. **V2 covers the more common twin of this on
+  the create-order path.**
+- Student history is `LIMIT 20` (B5); shop history caps the *response list* at
+  200 rows but computes insights/totals over the full day.
+- A slow SSE consumer is dropped by closing its channel; the browser reconnects
+  and `onOpen` resyncs it. Deliberate self-heal, not data loss.
+- `MarkDone` caps qty at current unmet demand — a shopkeeper cannot cook ahead
+  speculatively. Deliberate, enforced server-side so the API can't bypass it.
 
 ---
 
-#### T1 — [HIGH] A transient DB error is served to the client as `401`, which force-logs-out every user and destroys their token
-
-`middleware/auth.go` collapses *every* error from `authSvc.GetUser` into
-`401 {"error":"unknown user"}` — in `RequireAuth` (the `if err != nil` after
-the `GetUser` call) and identically in `RequireSSEAuth`. But
-`AuthService.GetUser` (`services/auth.go`) returns two very different classes
-of error:
-
-- **Genuine auth failures** — `ErrNotFound("user not found")` when the user
-  row is gone, or when a shopkeeper's email is no longer on the live
-  allowlist. 401 is correct here; this is the 2026-07-21 instant-revocation
-  behavior and must keep working.
-- **Infrastructure failures** — a raw driver error propagated straight out of
-  `userRepo.FindByID` or `emailRepo.Exists`: connection-pool exhaustion,
-  managed-Postgres failover, a statement timeout, a context deadline. 401 is
-  flatly wrong here; the session is fine, the database blinked.
-
-The frontend takes 401 at face value and treats it as terminal:
-`api/client.ts` clears `khaao_token`/`khaao_user` and dispatches
-`khaao:unauthorized`, which `AuthContext` turns into a forced redirect to
-`/login`. The 7-day JWT is *destroyed* — recovery is a full Google sign-in,
-not a retry.
-
-**Failure scenario:** lunch rush. `database.go` caps the pool at
-`SetMaxOpenConns(25)`, and every `PoolEngine` mutation serializes on the
-`pg_advisory_xact_lock` in `GormUnitOfWork.WithTx`, so connections are held
-while queued. Auth adds 1–2 more queries on *every single request* (2 for a
-shopkeeper — user lookup plus the allowlist check) with no caching, on top of
-the SSE-driven refetch fan-out. One `too many connections` or
-`context deadline exceeded` out of the pool and every student mid-order is
-logged out and bounced to the sign-in screen at once. A brief managed-Postgres
-failover — exactly what D-1 provisions — does the same thing.
-
-This is also the server-side twin of the rule the project already enforces on
-the client: § 9.1.7 / R3, "never treat a network failure as an auth failure."
-It was only ever enforced in one direction.
-
-**Fix:** `services.AppError` already carries the right `Status`, and
-`controllers`' `respondError` already does exactly this destructuring — the
-middleware just doesn't. In both `RequireAuth` and `RequireSSEAuth`,
-`errors.As` the error to `*services.AppError` and return 401 only for a
-genuine 401/404; anything else (including a bare non-`AppError` driver error)
-must be a **503** with a retryable message, so the client surfaces "try again"
-instead of wiping the session. Keep the `slog.Warn` for real auth failures and
-use `slog.Error` for the infrastructure branch — they are different incidents
-and should not share a log line.
-
-**Fold in while you're here (same file, same fix):** `RequireSSEAuth` calls
-`tickets.Consume(ticket)` — which deletes the ticket unconditionally —
-*before* `GetUser` can fail. With the bug above, a DB blip therefore burns the
-ticket *and* 401s, and `useSSE`'s reconnect loop spins minting fresh tickets
-against a database that is already struggling. Consuming before validating is
-the right order (one-use must mean one-use), so don't reorder it; just make
-sure the 503 path doesn't feed a tight remint loop.
-
-**Test:** a middleware-level test with a fake `UserRepo` that returns a
-plain `errors.New("connection refused")` — assert 503, not 401 — plus the
-existing-behavior case (repo returns nil user → still 401). Verify both fail
-before the fix.
-
----
-
-#### T2 — [HIGH] Logout leaves the previous student's order history, cart and favorites on a shared device
-
-`AuthContext.logout()` and the `onUnauthorized` handler both do only
-`setUser(null)` + `navigate('/login')`. Two stores survive that:
-
-1. **The React Query cache.** The `QueryClient` is constructed at module scope
-   in `main.tsx` and is never cleared. `['orders','history']` (every past
-   order: item names, quantities, prices, order numbers), `['orders','active']`
-   and `['menu']` all stay resident.
-2. **`localStorage`.** `api/auth.ts`'s `logout()` calls `clearAuthStorage()`,
-   which removes *only* `khaao_token` and `khaao_user`. Left behind:
-   `khaao_cart_v2` (the previous student's cart — ids and quantities),
-   `khaao_favorites_v1` ("Your usuals", explicitly personal), and
-   `khaao_rated_orders`.
-
-**Failure scenario:** shared hostel phone, or the canteen's own demo handset.
-Student A logs out. Student B signs in — no page reload, it's a SPA — and
-lands on `/`. `Menu.tsx` hydrates its cart from `khaao_cart_v2` and its pins
-from `khaao_favorites_v1`, so B starts with A's cart. B taps "Order status"
-and `OrderStatus.tsx` mounts against the same `QueryClient`: `['orders',
-'history']` is already populated with A's orders and renders **immediately**.
-`staleTime` is 10s, and by deliberate design (R25, § 9.1.7) a failed refetch
-must *not* blank rendered data — so on the flaky campus Wi-Fi this app is
-built for, A's history can stay on B's screen indefinitely. This is a
-cross-account data leak, and the codebase already treats shared devices as a
-real threat model (the `isShop`-gated Hindi guard in `Layout.tsx` exists for
-exactly this reason).
-
-**Fix:** make session teardown clear everything session-scoped, from **both**
-exits — the explicit `logout()` and the `khaao:unauthorized` handler, which
-today are separate code paths that must not drift. Call `queryClient.clear()`
-(`AuthContext` needs `useQueryClient()`), and extend `clearAuthStorage()` to
-remove the student-local `khaao_*` keys. Judgment call worth stating in the
-commit message: `khaao_install_dismissed` is device-scoped, not
-user-scoped — leave it. `khaao_lang` is already render-time-guarded by
-`isShop`; clearing it is optional but harmless.
-
-**Also note (record it, don't necessarily fix it here):** the device's Web
-Push subscription row stays bound to student A server-side. `services/push.go`
-`Subscribe` re-binds the row to B only if B actually opts into notifications;
-until then, an "order ready" push for A (ordering from another device) lands
-on the phone B is holding. Fixing properly means an unsubscribe call on
-logout — flag it and let the owner decide rather than expanding this task's
-file ownership.
-
-**Test:** a test that seeds `['orders','history']` and the `khaao_*` keys,
-calls logout, and asserts both are empty. Verify it fails without the fix.
-
----
-
-#### T3 — [MEDIUM] Shop Accept/Reject silently swallow every "mark out of stock" failure
-
-In `pages/shop/Orders.tsx`, `IncomingOrderCard`'s `acceptMutation` and
-`rejectMutation` both do
-`await Promise.allSettled(...map((i) => setMenuItemStock(i.menu_item_id, true)))`
-and then **never inspect the results**. `allSettled` by construction never
-rejects, so every one of those calls can fail and the mutation still reports
-success.
-
-**Failure scenario:** rush hour. The shopkeeper unchecks the three items
-they've just run out of and hits the green Accept. The three
-`POST /api/shop/menu/:id/stock` calls 429 against their own bucket
-(`middleware/ratelimit.go`: burst 40, refill 4/s — reachable when
-accept/handover/done traffic is already flowing), or simply fail on a counter
-tablet that dropped Wi-Fi for two seconds. The order is accepted, those lines
-are correctly rejected on that one order, and the shopkeeper sees no error at
-all — **but the items stay in stock on the student menu.** Students keep
-ordering food that does not exist, and the shop has to reject each new order
-by hand. The failure is invisible precisely when it's most likely.
-
-**Fix:** inspect the settled results, collect the names of the items whose
-stock update rejected, and show an error toast naming them ("Couldn't mark
-Samosa, Chai out of stock — set them manually on the Menu tab"), with the
-Hindi pairing. Then still invalidate `['shop','menu']` so the true state
-lands. The order accept/reject itself must **not** be blocked by a stock-flag
-failure — accepting the order is the more important half and already
-succeeded; this is about telling the truth, not about rolling back.
-
-**Do not** also change the all-unchecked Accept behavior — that is § 9.4-B14,
-deliberately deferred as a product-copy decision.
-
----
-
-#### T4 — [MEDIUM] Deleting a menu item strands its prep-pool row, and the prep API then returns a nameless ghost item forever
-
-`MenuService.Delete` blocks the delete while an active order references the
-item (`HasActiveItemsForMenuItem`), then calls `repo.Delete` — which is a
-**soft** delete (`models.MenuItem.DeletedAt` is a `gorm.DeletedAt`). It never
-touches `item_pool`. The schema's
-`item_pool.menu_item_id → menu_items(id) ON DELETE CASCADE` looks like it
-covers this, but a soft delete is an `UPDATE`; the cascade never fires.
-
-`PoolEngine.PrepList` then unions the pool's menu-item ids with the ids that
-have outstanding demand, and resolves names via `menuRepo.FindMapByIDs` —
-which *does* respect the soft delete. So the deleted item comes back as
-`{menu_item_id: N, name: "", remaining_qty: 0, pool_qty: K}` on every
-`GET /api/shop/prep` from then on, permanently.
-
-**Reachable, not theoretical:** cooked units return to the pool on `Reject`,
-`RemoveItem` and `ExpiryTick`, and stay there when no other order is waiting
-on that item. With the last order now terminal, `HasActiveItemsForMenuItem` is
-false and the delete is allowed. The stranded units are real cooked food that
-the system has silently stopped counting.
-
-Blast radius is contained on the UI today only by accident —
-`Prep.tsx` filters `remaining_qty > 0` before rendering, which its own comment
-frames as defensive, not as the thing holding this together. The API response
-is still wrong, and any future consumer of `/api/shop/prep` inherits the bug.
-
-**Fix:** zero (or delete) the item's `item_pool` row inside a
-`uow.WithTx` alongside the delete, so both land or neither does — `MenuService`
-does not currently hold a `UnitOfWork`, so wiring one in is part of this task.
-Belt-and-braces, also skip ids that resolve to no menu item in `PrepList`
-rather than emitting `name: ""`.
-
-**Fold in while you're in `menu.go` (same file):** `Delete`'s
-`HasActiveItemsForMenuItem` check and the delete itself are two separate
-statements with no transaction around them — a `CreateOrder` landing in the
-gap produces exactly the orphaned `order_items` row the check exists to
-prevent. Putting the whole thing in the `WithTx` above closes it for free,
-since that transaction takes the same advisory lock every `PoolEngine`
-mutation takes.
-
-**Test:** an integration test that puts units in the pool for an item with no
-active orders, deletes the item, and asserts `PrepList` returns no row for it
-and the pool row is gone/zero.
-
----
-
-#### T5 — [LOW] The shop's reconnect resync misses `['shop','history']`
-
-`ShopRealtime.handleOpen` invalidates `['shop','orders']`, `['shop','prep']`,
-`['shop','menu']` and `['shop-status']` on every (re)connect. But
-`handleMessage`'s `orders_update` branch invalidates `['shop','history']`
-*as well* — so the one query kept fresh **only** by an event is the one the
-"onOpen resyncs everything" self-heal doesn't cover.
-
-**Failure scenario:** the counter tablet's SSE stream drops mid-rush (§ 10's
-slow-consumer drop, a backend restart, an elevator). Orders complete while
-it's disconnected. On reconnect everything else refreshes and the History tab
-— including the day's `total_paid` — keeps showing pre-drop numbers until some
-*later* order happens to complete and fire a fresh `orders_update`.
-
-This is the same class of bug as the 2026-07-22 shop-status-pill fix: a key
-that one code path refreshes and its sibling path doesn't. One line.
-
----
-
-### 9.6 Find-fix tasks (U-series) — 2026-07-25 audit, **IMPLEMENTED, GATED, COMMITTED**
-
-**Status: all four implemented, TDD (each regression test verified to fail
-before its fix), full gate green on both stacks — committed as one backend
-commit (U1) and one frontend commit (U2–U4).** See "Recent work, newest first" above for the exact
-gate numbers and a one-paragraph summary of each fix. A fresh full-stack
-read on 2026-07-25 (owner first asked for an audit that produced *tasks*,
-then asked for them to be implemented) found these four, cross-checked
-against § 9.4 (B1–B15), § 9.5 (T1–T5), § 11 and the § 9 caveats first so
-nothing already-known or deliberately-deferred got re-flagged. Grouped into
-four **file-disjoint** tasks (same ownership discipline as the T-series) —
-kept below as the spec of what shipped, same convention as § 9.2/§ 9.5.
-
-Each was reachable in normal canteen operation — none was theoretical.
-
-| Task | Files owned (nothing else) | Stack | Severity |
-|---|---|---|---|
-| **U1** | `backend/internal/services/push.go`, `backend/internal/services/pool.go` (+ `push_internal_test.go`) | Go | MEDIUM |
-| **U2** | `frontend/src/pages/shop/Orders.tsx`, `frontend/src/components/student/OrderModal.tsx` (+ test) | TS | MEDIUM |
-| **U3** | `frontend/src/lib/cart.ts`, `frontend/src/pages/student/Menu.tsx` (+ test) | TS | MEDIUM |
-| **U4** | `frontend/src/pages/student/OrderStatus.tsx` (+ test) | TS | LOW |
-
-**Note on U1 vs U3/U2 overlap:** none. U1 is backend-only. U2 owns the two
-shop-facing mutation call sites; U3 owns the student cart path; U4 owns the
-student order-status page. No file appears twice.
-
----
-
-#### U1 — [MEDIUM] The shopkeeper's "New order" push notification always says "0 item(s)"
-
-`services/pool.go` `CreateOrder` builds the order row and its items as two
-separate values:
-
-```go
-candidate := &models.Order{UserID: userID, OrderNo: maxNo + 1, ...}
-items := make([]models.OrderItem, 0, len(inputs))
-// ... items populated from the inputs ...
-e.orderRepo.Create(txCtx, candidate)
-for i := range items {
-    items[i].OrderID = candidate.ID
-    e.orderRepo.SaveItem(txCtx, &items[i])
-}
-order = candidate   // <- candidate.Items is never assigned
-```
-
-`candidate.Items` is **never** populated — the items are persisted through
-the standalone `items` slice, and GORM's `Create` doesn't backfill the
-association either. After the transaction, `CreateOrder` then does:
-
-```go
-e.pushSvc.NotifyNewOrder(ctx, order)
-```
-
-and `services/push.go` `newOrderPayload` builds the notification body as
-`fmt.Sprintf("Order #%d — %d item(s)", order.OrderNo, len(order.Items))`.
-`len(nil) == 0`, so **every** new-order push a shopkeeper has ever received
-reads `Order #7 — 0 item(s)`.
-
-**Failure scenario:** this is not a cosmetic string — Web Push is, by the
-project's own § 9.1.9 reasoning, *the only screen-off signal* a shopkeeper
-gets, and the notification body is the entire information payload (there is
-no in-app context when the phone is locked). The one number in it that tells
-the shopkeeper whether a real order just landed or something trivial did is
-always zero. "0 item(s)" also actively reads as "an empty/broken order",
-which is the opposite of the alert's purpose.
-
-Why no test caught it: `push_internal_test.go`'s
-`TestNewOrderPayloadIncludesShopURL` builds its **own** order
-(`Items: []models.OrderItem{{}, {}}`) and only asserts `Title`/`Body` are
-non-empty and `URL == "/shop"`. It never asserts the count, and it never
-exercises the real caller — so the payload function is proven correct while
-the only production call site feeds it an empty slice. The SSE path is
-unaffected (`e.broadcast` re-fetches via `FindByID`, which does
-`Preload("Items")`), which is why this never showed up in the UI.
-
-**Fix (recommended):** mirror `NotifyOrderReady`, which already takes plain
-scalars (`ctx, userID uint, orderNo int`) rather than a model — change
-`NotifyNewOrder` to `(ctx context.Context, orderNo int, itemCount int)` and
-have `CreateOrder` pass `len(items)`. `NotifyNewOrder` only ever reads
-`OrderNo` and `len(Items)` off that pointer, and there are exactly two
-references in the whole repo (the definition plus the one call), so this is
-contained. It also makes the defect structurally impossible rather than
-merely repaired: a caller can no longer hand over a half-populated model and
-have it silently degrade to zero.
-
-*Alternative, also correct:* assign `candidate.Items = items` after the
-SaveItem loop. Do this **only** with eyes open — GORM's `Save` auto-upserts
-populated associations, and today nothing calls `orderRepo.Save(candidate)`
-after that point, so it's safe *now*; if a future edit adds one, a populated
-`Items` slice changes what that statement writes. The scalar-parameter fix
-has no such tripwire, which is why it's the recommendation.
-
-**Test:** extend `push_internal_test.go` to assert the item count actually
-appears in the body (`newOrderPayload(42, 3)` → body contains `3 item(s)`),
-**and** add a caller-level assertion so the real path is covered this time —
-the existing test's blind spot is precisely that it never ran the caller. A
-`pool_test.go` test over the existing fake-repo harness that captures what
-`CreateOrder` hands the push layer is the honest version; if the scalar
-signature makes a seam awkward, a minimal func-field or interface seam on
-`PoolEngine` is acceptable and worth it. Verify the count assertion fails
-before the fix.
-
----
-
-#### U2 — [MEDIUM] A failed accept/reject/remove still leaves the flagged items marked out of stock, silently
-
-Three shop-facing mutations run their "mark out of stock" side effect
-**before** the primary action they belong to, with no rollback and no report
-if the primary action then fails:
-
-1. `pages/shop/Orders.tsx` `IncomingOrderCard.acceptMutation` —
-   `await Promise.allSettled(rejectedItems.map(setMenuItemStock(..., true)))`
-   then `await acceptOrder(...)`.
-2. `pages/shop/Orders.tsx` `IncomingOrderCard.rejectMutation` — same shape,
-   stock writes then `await rejectOrder(...)`.
-3. `components/student/OrderModal.tsx` `OrderModalItem.removeMutation` —
-   `await setMenuItemStock(item.menu_item_id, true).catch(...)` then
-   `removeOrderItem(...)`.
-
-Note the comment already sitting in `acceptMutation`, directly above the
-`acceptOrder` call: *"Stock-flag failures must not block the accept —
-accepting the order is the more important half, and already succeeded by this
-point."* It hasn't succeeded — it's the next line. § 9.5-T3's own write-up
-made the same assumption ("accepting the order is the more important half and
-already succeeded"), so T3 correctly fixed the *ignored-`allSettled`-results*
-half of this while carrying a false premise about the ordering. That premise
-is the remaining bug.
-
-**Failure scenario:** rush hour, and the ordering is exactly backwards for
-the failure that actually happens. The shopkeeper unchecks the three items
-they've run out of and hits the green **Accept**. The three
-`POST /api/shop/menu/:id/stock` calls succeed. Then `acceptOrder` fails —
-and it has several ordinary ways to do so: `409 "order is not in submitted
-state"` because the student cancelled a second earlier or because the other
-device (counter tablet vs. owner's phone, the multi-device scenario this
-codebase has already been bitten by twice) accepted it first; or a `429`
-against the shopkeeper's own bucket (`middleware/ratelimit.go`: burst 40,
-refill 4/s — and this single tap fires four requests); or plain dropped
-Wi-Fi. The shopkeeper sees `"Could not accept order."`, concludes nothing
-happened, and moves on. But **three menu items are now out of stock on the
-student menu** with no order action to justify it — food the canteen
-actually has, invisible to every student, until someone notices and
-un-flags each one by hand on the Menu tab.
-
-The reject path is worse in one respect: `RejectDialog`'s own copy promises
-*"Tick any items that are unavailable — they'll be marked out of stock
-automatically"*, framing the stock change as a **consequence** of the
-rejection. When the rejection fails, that promise is inverted — the
-consequence lands and the cause doesn't.
-
-**Fix:** make the primary action the thing that gates the side effect. Do
-`acceptOrder` / `rejectOrder` / `removeOrderItem` **first**; only on its
-success run the stock writes; then keep T3's existing
-`stockUpdateFailureNames` / `stockUpdateFailureMessage` reporting for stock
-writes that fail after the primary action succeeded (that part is correct
-today and must survive). Keep invalidating `['shop','menu']` either way so
-true state lands. If on inspection the current ordering turns out to be
-deliberate (marking out of stock first does narrow the window for new
-student orders on those items), the alternative is acceptable — but then a
-failed primary action **must** either un-flag what it flagged or tell the
-shopkeeper exactly which items were left out of stock. Silently leaving them
-flagged is the one outcome that isn't allowed.
-
-**Do not** change the all-unchecked-Accept behaviour — that's § 9.4-B14,
-deliberately deferred as a product-copy decision.
-
-**Test:** a test per call site where the stock call resolves and the primary
-mutation rejects — assert the stock endpoint was **not** called (reordered
-fix) or that the failure names the affected items (rollback/report fix).
-Verify it fails against today's code.
-
----
-
-#### U3 — [MEDIUM] An item that goes out of stock while sitting in the cart makes the whole order fail, with nothing in the cart saying so
-
-`lib/cart.ts` `deriveCartEntries` filters cart entries on *presence in the
-menu response* only:
-
-```ts
-const validIds = new Set(menuItems.map((i) => i.id));
-return Object.entries(cart)
-  .map(([id, qty]) => ({ menu_item_id: Number(id), qty }))
-  .filter((e) => e.qty > 0 && validIds.has(e.menu_item_id));
-```
-
-But `GET /api/menu` (`MenuService.ListAvailable` → `FindAll(ctx, true)`)
-filters on `is_available = true` **only** — an out-of-stock item is still in
-that response, carrying `out_of_stock: true`, `status: "out_of_stock"` and
-`orderable: false`. So `orderable` is fetched, is correct, and is simply
-never consulted on the cart/checkout path. `staleCartIds` has the same
-presence-only test, so the existing prune-and-toast self-heal doesn't cover
-this either — it only catches items the shopkeeper *hid or deleted*
-(`is_available = false`), never items they marked out of stock.
-
-Meanwhile the backend is strictly atomic: `pool.go` `CreateOrder` calls
-`itemOrderableNow` per line and returns
-`ErrUnorderable(mi.Name + " is not orderable right now")` for the **whole
-order** on the first unorderable line.
-
-**Failure scenario:** the single most common shopkeeper action during a rush
-is marking something out of stock. A student has Samosa ×2 and Chai ×1 in
-the cart; the shopkeeper marks Samosa out of stock; `menu_update` fans out
-and the student's menu refetches. Nothing prunes the cart. The cart bar
-still counts Samosa and still prices it into the total. The checkout Modal
-lists Samosa with no badge, no dimming, no warning — it renders only
-name/price/qty, so unlike `MenuItemCard` (which does dim and badge
-unorderable items) the Modal shows nothing at all. **"Place order" is
-enabled.** The student taps it, the backend refuses the entire order, and
-they get a red toast naming one item. Their cart is intact but unplaceable,
-and the only way out is to leave the Modal, hunt for Samosa in the list, and
-decrement it to zero — with no prompt telling them that's what's needed.
-The same thing happens to a time-windowed item whose `avail_to` passes while
-the cart sits open (a 375px phone in a lunch queue is exactly where a cart
-sits open for minutes).
-
-**Fix:** treat "no longer orderable" the way the codebase already treats "no
-longer on the menu". The existing `staleCartIds` → prune → toast effect in
-`Menu.tsx` is the established idiom and the honest place to extend: widen
-the staleness test to `!menuItem.orderable` (not just missing id) so an item
-that goes unorderable is removed from the cart with the toast the student
-already gets, or — if silently pruning a *paid-attention* choice feels too
-aggressive — keep it in the cart but mark it clearly in the Modal and
-exclude it from `cartEntries`/`cartTotal`, so "Place order" submits only
-what the backend will actually accept. Either is defensible; **what is not
-defensible is the current state, where the UI stays silent and the backend
-rejects everything.** Prefer reusing the existing toast copy over inventing
-a second explanation for the same situation. Keep the logic in `lib/cart.ts`
-so it stays unit-testable without rendering the page (the same reason
-`deriveCartEntries` lives there).
-
-**Test:** a `cart.test.ts` case with a menu item present but
-`orderable: false` — assert it is not returned as a placeable entry / is
-reported as stale. Verify it fails today (it will: presence is all that's
-checked).
-
----
-
-#### U4 — [LOW] "Order this again" blames the menu when the real problem is that the menu didn't load
-
-`pages/student/OrderStatus.tsx` renders as soon as the **active-order** and
-**history** queries settle:
-
-```ts
-if (activeOrderQuery.isLoading || historyQuery.isLoading) return <OrderStatusSkeleton />;
-```
-
-`menuQuery` is deliberately not in that gate — but `HistoryCard`'s reorder
-button depends on it, and `lib/cart.ts` `reorderIntoCart` treats an absent
-menu as "nothing matched":
-
-```ts
-if (!menuItems) {
-  return { cart, addedCount: 0, skippedNames: orderedItems.map((i) => i.name) };
-}
-```
-
-which `reorderToastMessage` turns into the flat assertion **"None of these
-items are on today's menu."**
-
-**Failure scenario:** a student refreshes or cold-opens the installed PWA
-straight onto `/order` to check their order — the normal way this page is
-reached — so there is no warm `['menu']` cache. `getMenu` then fails on the
-campus Wi-Fi this app is explicitly built for (§ 9.1.7: "the network is
-hostile"). History renders fine from its own response. The student taps
-"Order this again" and is told, confidently and falsely, that none of the
-food they ate last week is on the menu today. This is the exact rule the
-project already enforces everywhere else — R3 / § 9.1.7, *never present a
-network failure as a data conclusion*, and R25's "a failed refetch must not
-be dressed up as an answer". `reorderIntoCart`'s `!menuItems` branch is
-right to be conservative; the **caller's copy** is what lies.
-
-**Fix:** at the call site, distinguish "menu not loaded" from "menu loaded
-and nothing matched". Either disable the "Order this again" button while
-`menuQuery.data === undefined` with the same in-place hint idiom already
-used for `hasActiveOrder` ("Finish your current order first."), or keep it
-tappable and toast something true ("Couldn't check today's menu — try
-again."). Do not add the menu query to the page's loading gate — the page
-must keep rendering order status without it, which is why it was left out.
-
-**Fold in while you're in this file (same file, one line):**
-`historyStatusHint` hardcodes *"Expired — the 15-minute pickup window was
-missed."* The hold window is `HOLD_MINUTES`, a real config knob
-(`config.go`, default 15, validated `> 0`) — exactly the sort of value a
-canteen tunes after go-live, at which point this copy silently lies. The
-order's own `expires_at`/`ready_at` are already on the wire; simplest honest
-fix is to drop the number from the sentence rather than plumb the config to
-the client.
-
-**Test:** a test rendering a completed history order with `menuItems`
-undefined — assert the reorder affordance does not claim the items are off
-the menu. Verify it fails today.
-
----
-
-### Deployment (the remaining human-led milestone — needs real infra, not just code)
-
-**`deploy/RUNBOOK.md` is the expanded, step-by-step version of this table**
-(each D-item maps to a runbook section) — follow it, don't re-derive.
-Artifacts ready and committed: `deploy/Caddyfile` (tool-validated with
-`caddy validate`), `deploy/khaao-backend.service`, `deploy/RUNBOOK.md`.
-**Agent/human split:** almost everything below needs a human with
-domain/server/dashboard access. An agent's useful roles here are (a) pair
-on D-4/D-5 config and debugging once the human has access set up, (b)
-verify D-6 findings and fix anything they surface, (c) keep this table and
-the runbook in sync with reality as steps complete.
+### Deployment (human-led — needs real infra, not more code)
+
+**`deploy/RUNBOOK.md` is the expanded, step-by-step version of this table.**
+Artifacts ready and committed: `deploy/Caddyfile` (validated with `caddy
+validate`), `deploy/khaao-backend.service`, `deploy/RUNBOOK.md`.
+**Agent/human split:** almost everything needs a human with domain/server access.
+An agent's useful roles are (a) pair on D-4/D-5 config and debugging once access
+exists, (b) verify D-6 findings and fix what they surface, (c) keep this table
+and the runbook in sync as steps complete.
 
 | # | What | Notes |
 |---|---|---|
-| D-1 | **Provision managed Postgres** | Runbook § 1. Supabase/Neon/Railway. Daily backups on from day one, test a restore *before* go-live. Confirm `citext` available. `?sslmode=require`. |
-| D-2 | **Firebase setup** | Runbook § 2. Enable Google sign-in → **add authorized domains** (the #1 launch gotcha — sign-in silently fails on an unauthorized domain, and R4's redirect flow depends on it too). |
-| ~~D-3~~ | ~~Cloudinary account check~~ | **Done.** Live-verified via a direct signed-upload test against Cloudinary's API. Current `backend/.env` (cloud `r2avfle3`) is a working Programmable Media account. **Never regenerate the credentials** (§ 5). |
-| D-4 | **Deploy backend** | Runbook § 4 + § 6. ONE instance (replicas=1 enforced). Raise `ulimit -n` (the systemd unit's `LimitNOFILE` covers it). Caddy in front: `proxy_buffering off` on `/api/stream`, long SSE read timeout — the committed Caddyfile already encodes this. `APP_ENV=production` (fail-closed config validates the rest). |
-| D-5 | **Deploy frontend** | Runbook § 5. Static host (Netlify/Vercel/Cloudflare Pages), `VITE_FIREBASE_*` set at build time. |
-| D-6 | **End-to-end production verification** | Runbook § 7. One real student + one real shopkeeper complete a full order lifecycle on production. **Must include the real-device checks:** (R4) Google sign-in *inside* the installed PWA on iOS and Android — not just in a browser tab; (R5) the "ready" moment on a locked/backgrounded phone — push arrives, SW notification shows, chime plays after first-touch unlock; CSP console check per § 11.5 (no "Refused to …" errors during real Firebase login or Cloudinary photo upload — the CSP has never been exercised against the real providers). |
-| D-7 | **Runbook for ongoing ops** | **Written** — Runbook § 8 covers rotate `JWT_SECRET`, add/remove a shopkeeper, check logs, restore a backup. Remaining: validate the steps against the real deployment during/after D-6. |
+| D-1 | **Provision managed Postgres** | Runbook § 1. Daily backups from day one, test a restore *before* go-live. Confirm `citext`. `?sslmode=require`. |
+| D-2 | **Firebase setup** | Runbook § 2. Enable Google sign-in → **add authorized domains** (the #1 launch gotcha — sign-in silently fails otherwise, and the redirect flow depends on it). |
+| ~~D-3~~ | ~~Cloudinary account check~~ | **Done.** Live-verified. **Never regenerate the credentials** (§ 5). |
+| D-4 | **Deploy backend** | Runbook § 4 + § 6. ONE instance (replicas=1). Raise `ulimit -n`. Caddy in front: `proxy_buffering off` on `/api/stream`, long SSE read timeout. `APP_ENV=production`. |
+| D-5 | **Deploy frontend** | Runbook § 5. Static host, `VITE_FIREBASE_*` set at build time. |
+| D-6 | **End-to-end production verification** | Runbook § 7. One real student + one real shopkeeper complete a full lifecycle on production. **Must include:** Google sign-in *inside* the installed PWA on iOS and Android (not just a browser tab); the "ready" moment on a locked phone (push arrives, SW notification shows, chime plays after first-touch unlock); a CSP console check per § 11.5. |
+| D-7 | **Runbook for ongoing ops** | **Written** — § 8 covers rotating `JWT_SECRET`, adding/removing a shopkeeper, checking logs, restoring a backup. Remaining: validate against the real deployment during D-6. |
 
 ---
 
 ## 10. Operational lessons (worth 30 seconds before you repeat one)
 
-- **Commit incrementally** once review is done — a prior multi-session
-  stretch where nothing was committed led to a `git checkout --` wiping real
-  work, because with nothing committed "undo my last edit" and "wipe this
-  file's entire uncommitted history" are the same command.
+- **Commit incrementally** once review is done — a prior multi-session stretch
+  where nothing was committed led to a `git checkout --` wiping real work.
 - **Never batch-`mv` files with duplicate basenames into one destination** —
-  silent overwrite, no warning. Move one at a time to distinct paths, or use
-  `git stash push --keep-index --include-untracked` if you need to isolate
-  changes.
+  silent overwrite, no warning.
 - **Never regenerate the VAPID key pair or Cloudinary credentials** —
-  invalidates every existing push subscription / breaks uploads.
-- **A `fixed`-positioned overlay must never be a literal DOM child of an
-  element with `backdrop-filter`/`filter`/`transform`** — that ancestor
-  becomes the fixed element's containing block instead of the viewport.
-  Portal it to `document.body` (see `Modal.tsx`).
-- **A hardcoded base class merged with a caller `className` can silently
-  lose the Tailwind cascade tie** — utilities are emitted in source-file
-  order, not JSX/component-nesting order. Bit `MenuSkeleton`'s `Bone` (a
-  `/50` default beat every lighter caller override) and `RatingPrompt`'s
-  `Card` (a `border-brand-dark` override lost to `Card`'s own baked-in
-  `border-edge`) independently, in the same session. A `ring-*` (box-shadow)
-  sidesteps the collision when an override specifically needs to win.
-  Verify against the actual *compiled* CSS, not assumed source order.
-- **Native `date`/`time` inputs are user-clearable to `""`** (an "×"
-  affordance or Backspace) — always guard the `onChange` handler, not just
-  the arithmetic downstream of it. An empty value cascading into date/time
-  math produces `NaN`/`Invalid Date`, and if that then becomes a *new*,
-  never-before-cached query key, an `isError`-with-no-cached-data guard can
-  end up replacing the entire section (including the input that would let
-  the user recover) with an error screen. Found independently in both
-  `History.tsx`'s date stepper and `ShopStatusControl.tsx`'s reopen-time
-  picker in the same session (2026-07-21) — same root cause, same fix
-  shape: fall back to a sane default at the input boundary.
-- **The menu mistouch-guard's ~3s auto-disarm can look like a missing
-  feature** if you click-then-check across two separate tool round-trips (the
-  timer expires in between) — test click+check inside one script. Also:
-  the guard's timer keeps running while a sibling UI state (e.g. the Edit
-  form) is open, since the row component isn't unmounted — a quick
-  open-then-cancel within the window can return to a card that's still
-  armed but not showing why (fixed 2026-07-21: entering Edit now disarms).
+  invalidates every push subscription / breaks uploads.
+- **A `fixed`-positioned overlay must never be a literal DOM child of an element
+  with `backdrop-filter`/`filter`/`transform`** — that ancestor becomes the
+  containing block instead of the viewport. Portal it to `document.body`.
+- **A hardcoded base class merged with a caller `className` can silently lose
+  the Tailwind cascade tie** — utilities are emitted in source-file order, not
+  JSX order. Bit `MenuSkeleton`'s `Bone` and `RatingPrompt`'s `Card`
+  independently in one session. A `ring-*` box-shadow sidesteps the collision.
+  Verify against the *compiled* CSS, not assumed source order.
+- **Native `date`/`time` inputs are user-clearable to `""`** — guard the
+  `onChange` handler, not just the arithmetic downstream. An empty value
+  cascading into date math produces `NaN`, and if that becomes a new query key,
+  an `isError` guard can replace the whole section including the input that
+  would let the user recover. Found in both `History.tsx` and
+  `ShopStatusControl.tsx` in one session — same root cause, same fix shape.
+- **The menu mistouch-guard's ~3s auto-disarm can look like a missing feature**
+  if you click-then-check across two tool round-trips — test click+check inside
+  one script.
 - **A long-lived browser tab in a scratch PWA setup can serve a stale
-  service-worker precache** even though Vite is serving current source — if
-  live behavior contradicts what's plainly in the code, check
+  service-worker precache** — if live behavior contradicts the code, check
   `navigator.serviceWorker.getRegistrations()` / `caches.keys()` first.
-- **`Playwright fullPage: true` screenshots can visually misplace
-  `position: fixed` elements** — capture artifact, not a rendering bug;
-  verify with a real scrolled-viewport screenshot or `getBoundingClientRect()`.
-- **Don't touch the shared `frontend/vite.config.ts` proxy target for a
-  scratch/QA check if a real dev server might be running** — it hot-reloads
-  the live session onto the scratch backend. Use an isolated
-  `vite.<name>.config.ts` + distinct port, and remember it still needs the
-  same `VitePWA` plugin as the real one (`main.tsx` imports
-  `virtual:pwa-register`, which only exists if the plugin is present).
-- **Orphaned scratch server processes can silently hold a Postgres
-  connection open for a full day**, blocking `scripts/smoke.sh`'s own
-  `dropdb`. Cross-reference `psql -c "SELECT pid,datname,client_port FROM
-  pg_stat_activity"` against `ps aux`/`lsof` before assuming the script is
-  broken.
-- **When a third-party integration fails (e.g. a 403 from Cloudinary),
-  reproduce it directly against the provider's API with curl** — bypasses
-  the app entirely and gives an unambiguous status code + body in ~10
-  seconds instead of guessing from a vague browser console error.
+- **Playwright `fullPage: true` screenshots can visually misplace `position:
+  fixed` elements** — capture artifact, not a rendering bug.
+- **Don't touch the shared `frontend/vite.config.ts` proxy target for a scratch
+  check if a real dev server might be running** — it hot-reloads the live
+  session onto the scratch backend. Use an isolated config + distinct port, and
+  remember it still needs the `VitePWA` plugin.
+- **Orphaned scratch server processes can hold a Postgres connection open for a
+  full day**, blocking `scripts/smoke.sh`'s `dropdb`. Cross-reference
+  `pg_stat_activity` against `ps aux`/`lsof` before assuming the script is broken.
+- **When a third-party integration fails, reproduce it directly against the
+  provider's API with curl** — unambiguous status code in ~10 seconds.
 - **The auto-mode permission classifier can deny `agy
-  --dangerously-skip-permissions` case-by-case based on what a specific
-  prompt touches**, even within one session with no settings change in
-  between — don't assume one approved invocation means the next one will
-  be; doing the work directly is a legitimate fallback when denied.
-- **A GitHub Actions step can be silently broken from the moment it's added
-  and nobody notices until a human checks the Actions tab** — `git push`
-  succeeding is not the same as CI passing. Check `gh run list` /
-  `api.github.com/repos/<owner>/<repo>/actions/runs` yourself rather than
-  assuming green, especially after adding/bumping a CI-only action.
-- **Local tool verification and CI-green are two different claims** — a
-  script/workflow that isn't part of routine verification (e.g.
-  `scripts/loadtest.js`) can drift silently as the code it exercises
-  changes underneath it. The fix isn't "trust it more," it's "actually run
-  it periodically."
+  --dangerously-skip-permissions` case-by-case** based on what a specific prompt
+  touches, with no settings change in between — doing the work directly is a
+  legitimate fallback when denied.
+- **A GitHub Actions step can be silently broken from the moment it's added** —
+  `git push` succeeding is not CI passing. Check `gh run list` yourself.
+- **Local tool verification and CI-green are two different claims** — a script
+  that isn't part of routine verification (e.g. `scripts/loadtest.js`) drifts
+  silently. The fix isn't "trust it more," it's "actually run it periodically."
 
 ---
 
 ## 11. Known security gaps (tracked)
 
-1. ~~SSE token in the query string~~ — **fixed**: SSE now authenticates via a
+1. ~~SSE token in the query string~~ — **fixed**: SSE authenticates via a
    short-lived one-use ticket (`services/sse_ticket.go`), never the raw JWT.
-2. `localStorage` JWT — still XSS-exfiltratable. Left as-is deliberately —
-   fixing this properly means full cookie-based sessions (httpOnly +
-   SameSite), a bigger architectural change than a hardening pass (§ 9.4-B9).
-   **Partially mitigated** by the CSP (`script-src 'self'`, no
-   `unsafe-inline`/`unsafe-eval`) — the standard primary defense against the
-   script-injection XSS that would actually be needed to read `localStorage`
-   in the first place.
-3. ~~No rate limiting~~ — **fixed**: per-user token-bucket limiter on mutations
-   plus a per-user SSE connection cap (`middleware/ratelimit.go`), live-verified.
-4. Photo URLs are restricted to `http(s)://` only at the API layer
-   (`services/menu.go` `validateAndNormalize`). **Tightened further** via
-   the CSP's `img-src`, which only allows `'self'`, `blob:` (local
-   pre-upload preview), and `https://res.cloudinary.com` — an arbitrary
-   external image URL set by hand (bypassing the UI) won't actually load in
-   the browser even though the API itself still accepts any http(s) URL as
-   a value.
-5. ~~No CSP set~~ — **fixed**: `Content-Security-Policy` set in both
-   `middleware/security.go` (Gin, defense in depth) and `deploy/Caddyfile`
-   (the one that matters in production). Scoped to what the code actually
-   calls (Firebase, Cloudinary, Google profile photos). **NOT YET
-   live-verified against a real Firebase Google sign-in + Cloudinary
-   upload** — check the browser console for "Refused to ..." errors the
-   first time this runs against real Firebase/Cloudinary (D-6).
-6. **An already-open SSE stream survives shopkeeper de-provisioning.** REST
-   auth re-reads the role from the DB on every request, and (since
-   2026-07-21) `GetUser` also re-verifies a shopkeeper's email is still on
-   the live allowlist, so a removed shopkeeper is locked out of all
-   *actions* immediately. Their existing `/api/shop/stream` connection,
-   though, was authorized at connect time and keeps delivering read-only
-   shop events until it next drops and fails to re-mint a ticket. Accepted
-   as-is: exposure is read-only event metadata, the population is a
-   hand-picked allowlist, and any reconnect ends it.
-7. ~~`POST /api/push/subscribe` accepted any client-supplied `endpoint` URL
-   with no validation~~ — **fixed (2026-07-21)**: `services/push.go`
-   `Subscribe` now validates `endpoint` against a hostname allowlist of the
-   real Web Push vendors (`fcm.googleapis.com`,
-   `updates.push.services.mozilla.com`, `web.push.apple.com`) before saving
-   it. This was a genuine SSRF, reachable by any authenticated student (the
-   route is `requireAuth` only, no role gate): the backend later makes a
-   real outbound HTTPS POST to `sub.Endpoint` (via `webpush-go`) whenever a
-   push fires for that user, and a self-generated-but-valid P-256 keypair —
-   trivial to produce, no real browser needed — was enough to get a
-   malicious/internal `endpoint` past the only check that existed
-   (`binding:"required"`, i.e. non-empty). See "Current state" above for
-   the full writeup and `push_test.go` for the regression coverage.
+2. `localStorage` JWT — still XSS-exfiltratable. Left as-is deliberately; fixing
+   it properly means full cookie-based sessions (§ 9.6-B9). **Partially
+   mitigated** by the CSP (`script-src 'self'`, no `unsafe-inline`/`unsafe-eval`).
+3. ~~No rate limiting~~ — **fixed**: per-user token bucket on mutations plus a
+   per-user SSE connection cap (`middleware/ratelimit.go`), live-verified.
+4. Photo URLs are restricted to `http(s)://` only at the API layer. **Tightened**
+   via the CSP's `img-src` (`'self'`, `blob:`, `https://res.cloudinary.com`).
+5. ~~No CSP~~ — **fixed**, in both `middleware/security.go` and
+   `deploy/Caddyfile`. **NOT YET live-verified** against a real Firebase sign-in
+   + Cloudinary upload — check the console for "Refused to …" errors at D-6.
+6. **An already-open SSE stream survives shopkeeper de-provisioning.** REST auth
+   re-reads role and allowlist on every request, so a removed shopkeeper is
+   locked out of all *actions* immediately. Their existing `/api/shop/stream`
+   connection was authorized at connect time and keeps delivering read-only shop
+   events until it drops. Accepted: read-only metadata, hand-picked allowlist,
+   any reconnect ends it.
+7. ~~`POST /api/push/subscribe` accepted any client-supplied `endpoint`~~ —
+   **fixed**: validated against a hostname allowlist of the real Web Push
+   vendors. This was a genuine SSRF reachable by any authenticated student.
+   **See § 9.3-V9** — the `p256dh`/`auth` fields on the same endpoint are still
+   unvalidated (much lower severity, no outbound request depends on them).
 
 Also: Gin runs in `ReleaseMode` when `APP_ENV=production`; `SetTrustedProxies(nil)`
-is set explicitly (`internal/routes/routes.go`) — harmless since no code path
-reads client IP (rate limiting is per-authenticated-user), but makes that
-non-use explicit rather than accidental.
+is explicit — harmless since no code path reads client IP.
 
-Already correct, do not change: Firebase token verification pinned to RS256
-(`authn/firebase.go` checks the signing method explicitly); CORS pinned to
-`FRONTEND_ORIGIN` (no wildcard); the app JWT's `ParseToken` uses
+Already correct, do not change: Firebase token verification pinned to RS256;
+CORS pinned to `FRONTEND_ORIGIN` (no wildcard); `ParseToken` uses
 `jwt.WithValidMethods` (alg-pinned).
+
+---
+
+## 12. Working protocol for the next agent
+
+**Read § 9.1 and § 9.2 before any frontend change. Read the task's own section
+before starting it — the "Fix shape" and "Test first" lines are the spec.**
+
+1. **One task at a time.** Every V/H/Q task lists the files it owns. Do not
+   touch files another task owns; where two tasks share a file (V8/V10 share
+   `repository/gorm.go`; V5/V9 share `push.go`), either sequence them or give
+   both to one agent.
+2. **Test first, and prove it fails.** Write the regression test, run it against
+   the *unfixed* code, and confirm it fails for the right reason (`git stash` on
+   just the implementation file is the established technique here). A test that
+   was never seen red is not a regression test.
+3. **Run the full gate before committing** — both stacks, § 6. Do not report
+   partial gates as green. If something fails, say so with the output.
+4. **Commit split by stack**, one commit per stack per round — the standing
+   convention. Descriptive messages; `git log` is the history of record.
+5. **Update this file as you land work.** Move the task from its backlog into a
+   one-line record, and update the bundle number in § 9.1.8 whenever `npm run
+   build` changes it. If a task turns out to be a non-defect (V8 may), record
+   that verdict here rather than deleting the entry.
+6. **Do not start anything in § 9.6.** It is a decision list, not a queue.
+7. **If a task's premise turns out to be wrong,** say so and stop rather than
+   inventing adjacent work. The audit that produced these was thorough but not
+   infallible.
+
+**Parallelization guidance:** V1–V7 are independent of the H-series and can run
+concurrently with it. Within § 9.4, **H2 must land before H1**. **V3 must land
+before H3.** Q1 and Q2 are independent of everything and are the best first
+tasks for an agent with no prior context on this codebase.
