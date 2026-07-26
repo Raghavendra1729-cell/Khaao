@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
@@ -7,14 +7,20 @@ import { LanguageProvider, useLanguage } from '../../context/LanguageContext';
 import { getActiveOrder } from '../../api/orders';
 import { getPrep, getShopOrders } from '../../api/shop';
 import { StudentRealtime } from '../student/StudentRealtime';
-import { ShopRealtime } from '../shop/ShopRealtime';
-import { ShopStatusControl } from '../shop/ShopStatusControl';
 import { useShopNotification, clearShopNotification } from '../../lib/shopNotifications';
 import { InstallPrompt } from './InstallPrompt';
 import { PushNotificationSetup } from './PushNotificationSetup';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { FullPageSpinner } from '../ui/Spinner';
 import { useLiveAnnouncement } from '../../lib/liveAnnouncer';
+
+// Shop-only components: a student's first load never needs to fetch these
+// (a student will never execute this code), so they're split out of the
+// shared Layout chunk the same way App.tsx splits shop route pages (R24).
+const ShopRealtime = lazy(() => import('../shop/ShopRealtime').then((m) => ({ default: m.ShopRealtime })));
+const ShopStatusControl = lazy(() =>
+  import('../shop/ShopStatusControl').then((m) => ({ default: m.ShopStatusControl })),
+);
 
 function Icon({ d }: { d: string }) {
   return (
@@ -309,7 +315,11 @@ function LayoutInner() {
     <div className="flex min-h-screen flex-col bg-steel">
       <LiveRegion />
       {!isShop && <StudentRealtime />}
-      {isShop && <ShopRealtime />}
+      {isShop && (
+        <Suspense fallback={null}>
+          <ShopRealtime />
+        </Suspense>
+      )}
 
       <header className="sticky top-0 z-20 border-b border-edge bg-steel/95 pt-safe backdrop-blur">
         <div className={`mx-auto flex h-14 ${contentMaxWidth} items-center justify-between px-4`}>
@@ -329,7 +339,11 @@ function LayoutInner() {
             {/* Hindi/English toggle — shopkeeper only */}
             {isShop && <LanguageToggle />}
             {/* Shop status pill — highest-stakes control, always visible for shopkeepers */}
-            {isShop && <ShopStatusControl />}
+            {isShop && (
+              <Suspense fallback={null}>
+                <ShopStatusControl />
+              </Suspense>
+            )}
             {/* Notification bell — always visible for shopkeepers */}
             {isShop && (
               <span className="flex items-center px-0.5">
