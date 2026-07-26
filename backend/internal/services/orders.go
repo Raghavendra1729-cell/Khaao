@@ -39,6 +39,21 @@ type OrderResponse struct {
 	StudentName  string              `json:"student_name,omitempty"`
 	StudentEmail string              `json:"student_email,omitempty"`
 	Items        []OrderItemResponse `json:"items"`
+	// PriceChanged is set only by CreateOrder, only when the caller supplied
+	// an expected_total that didn't match the server-computed price (V3) —
+	// nil (omitted) for every other response, and for CreateOrder itself
+	// whenever expected_total was absent or matched, so old clients see
+	// identical behavior to before this field existed.
+	PriceChanged *PriceChange `json:"price_changed,omitempty"`
+}
+
+// PriceChange reports a mismatch between what the client's (possibly stale)
+// cart expected an order to cost and what the server actually charged. The
+// order is always created at Charged (the live, server-computed price) —
+// this field is informational only, never a refusal or a re-price.
+type PriceChange struct {
+	Expected int `json:"expected"`
+	Charged  int `json:"charged"`
 }
 
 // normalizeDate trims a Postgres `date` column back down to "YYYY-MM-DD".

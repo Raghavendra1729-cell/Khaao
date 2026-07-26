@@ -45,6 +45,12 @@ type OrderRepo interface {
 	FindActiveByUserIDForUpdate(ctx context.Context, userID uint) (*models.Order, error)
 	FindHistoryByUserID(ctx context.Context, userID uint) ([]models.Order, error)
 	FindIncoming(ctx context.Context) ([]models.Order, error)
+	// FindIncomingForUpdate is FindIncoming with a SELECT ... FOR UPDATE row
+	// lock, for callers that load these rows in order to mutate and Save
+	// them (e.g. RejectAllSubmitted) — mirrors every other …ForUpdate
+	// variant in this interface. FindIncoming itself stays unlocked for the
+	// read-only ShopOrders display path.
+	FindIncomingForUpdate(ctx context.Context) ([]models.Order, error)
 	FindInProgress(ctx context.Context) ([]models.Order, error)
 	FindAwaitingPayment(ctx context.Context) ([]models.Order, error)
 	FindTerminalByDate(ctx context.Context, date string) ([]models.Order, error)

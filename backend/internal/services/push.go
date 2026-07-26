@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -47,6 +48,35 @@ func validatePushEndpoint(endpoint string) error {
 	return nil
 }
 
+// base64URLPattern is the RFC 4648 §5 base64url alphabet, lenient on
+// trailing '=' padding since real subscriptions are seen both padded and
+// unpadded depending on the browser/library that generated them.
+var base64URLPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+=*$`)
+
+// A real Web Push p256dh is a 65-byte uncompressed P-256 point, base64url
+// encoded; auth is 16 bytes. Both ranges below are generous around the
+// unpadded/padded encoded lengths (87/88 and 22/24 chars respectively) to
+// tolerate minor encoder differences without accepting arbitrary junk —
+// V9: p256dh/auth were previously stored verbatim at any length/charset, so
+// a malformed value fails only later, per row, per send, forever, inside
+// webpush-go's encryption step.
+const (
+	minP256dhLen = 80
+	maxP256dhLen = 92
+	minAuthLen   = 18
+	maxAuthLen   = 26
+)
+
+func validatePushKey(fieldName, value string, minLen, maxLen int) error {
+	if len(value) < minLen || len(value) > maxLen {
+		return ErrBadRequest(fmt.Sprintf("invalid push subscription %s", fieldName))
+	}
+	if !base64URLPattern.MatchString(value) {
+		return ErrBadRequest(fmt.Sprintf("invalid push subscription %s", fieldName))
+	}
+	return nil
+}
+
 // pushHTTPClient replaces webpush-go's default *http.Client, which has no
 // timeout — a hung push endpoint would otherwise strand goroutines forever
 // (send() is fired via `go` per-subscription, so nothing else waits on it,
@@ -67,6 +97,12 @@ func NewPushService(cfg *config.Config, repo repository.PushRepo) *PushService {
 // instead of violating the endpoint's unique index.
 func (s *PushService) Subscribe(ctx context.Context, userID uint, endpoint, p256dh, auth string) error {
 	if err := validatePushEndpoint(endpoint); err != nil {
+		return err
+	}
+	if err := validatePushKey("p256dh", p256dh, minP256dhLen, maxP256dhLen); err != nil {
+		return err
+	}
+	if err := validatePushKey("auth", auth, minAuthLen, maxAuthLen); err != nil {
 		return err
 	}
 	existing, err := s.repo.FindByEndpoint(ctx, endpoint)
@@ -118,6 +154,28 @@ func orderReadyPayload(orderNo int) ([]byte, error) {
 	})
 }
 
+// rejectedPayload and expiredPayload are the V5 counterparts to
+// orderReadyPayload: nothing previously told a student when the shopkeeper
+// rejected their order or it timed out unclaimed in the hold window — the
+// two outcomes decided by someone else while their phone is in their
+// pocket. Copy states what happened and what to do next, with no apology or
+// blame.
+func rejectedPayload(orderNo int) ([]byte, error) {
+	return json.Marshal(pushPayload{
+		Title: "Order couldn't be prepared",
+		Body:  fmt.Sprintf("Order #%d couldn't be prepared. Nothing to pay — order again when you're ready.", orderNo),
+		URL:   "/order",
+	})
+}
+
+func expiredPayload(orderNo int) ([]byte, error) {
+	return json.Marshal(pushPayload{
+		Title: "Order expired",
+		Body:  fmt.Sprintf("Order #%d wasn't collected in time and has expired. Nothing to pay — order again when you're ready.", orderNo),
+		URL:   "/order",
+	})
+}
+
 // NotifyNewOrder fires a best-effort push to every shopkeeper subscription so
 // a new order is noticed even with the app/tab closed, not just the in-tab
 // SSE sound. Each subscription is sent on its own goroutine so one
@@ -162,6 +220,58 @@ func (s *PushService) NotifyOrderReady(ctx context.Context, userID uint, orderNo
 		return
 	}
 	payload, err := orderReadyPayload(orderNo)
+	if err != nil {
+		slog.Error("khaao: push: could not marshal payload", "error", err)
+		return
+	}
+	for _, sub := range subs {
+		go s.send(sub, payload)
+	}
+}
+
+// NotifyOrderRejected fires a best-effort push to the ordering student when
+// the shopkeeper rejects their order (submitted-through-accepted). reason is
+// accepted for future logging/telemetry use but is deliberately not included
+// in the push body — see rejectedPayload's doc comment on the copy choice.
+// Same fire-and-forget-per-subscription shape as NotifyOrderReady.
+func (s *PushService) NotifyOrderRejected(ctx context.Context, userID uint, orderNo int, reason string) {
+	_ = reason
+	if s.cfg.VapidPublicKey == "" || s.cfg.VapidPrivateKey == "" {
+		return
+	}
+	subs, err := s.repo.FindByUserID(ctx, userID)
+	if err != nil {
+		slog.Error("khaao: push: could not load student subscriptions", "user_id", userID, "error", err)
+		return
+	}
+	if len(subs) == 0 {
+		return
+	}
+	payload, err := rejectedPayload(orderNo)
+	if err != nil {
+		slog.Error("khaao: push: could not marshal payload", "error", err)
+		return
+	}
+	for _, sub := range subs {
+		go s.send(sub, payload)
+	}
+}
+
+// NotifyOrderExpired fires a best-effort push to the ordering student when
+// their ready order times out unclaimed past its hold window.
+func (s *PushService) NotifyOrderExpired(ctx context.Context, userID uint, orderNo int) {
+	if s.cfg.VapidPublicKey == "" || s.cfg.VapidPrivateKey == "" {
+		return
+	}
+	subs, err := s.repo.FindByUserID(ctx, userID)
+	if err != nil {
+		slog.Error("khaao: push: could not load student subscriptions", "user_id", userID, "error", err)
+		return
+	}
+	if len(subs) == 0 {
+		return
+	}
+	payload, err := expiredPayload(orderNo)
 	if err != nil {
 		slog.Error("khaao: push: could not marshal payload", "error", err)
 		return

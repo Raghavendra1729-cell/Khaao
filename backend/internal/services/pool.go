@@ -25,6 +25,29 @@ import (
 type orderNotifier interface {
 	NotifyNewOrder(ctx context.Context, orderNo, itemCount int)
 	NotifyOrderReady(ctx context.Context, userID uint, orderNo int)
+	NotifyOrderRejected(ctx context.Context, userID uint, orderNo int, reason string)
+	NotifyOrderExpired(ctx context.Context, userID uint, orderNo int)
+}
+
+// readyNotification, rejectedNotification and expiredNotification are queued
+// during a WithTx callback (by recomputeStatus / Reject / ExpiryTick) and
+// flushed only after that transaction commits — see V1 in STATUS.md § 9.3.
+// Sending immediately from inside the callback would fire a push for a state
+// change that a later step in the same transaction could still roll back.
+type readyNotification struct {
+	userID  uint
+	orderNo int
+}
+
+type rejectedNotification struct {
+	userID  uint
+	orderNo int
+	reason  string
+}
+
+type expiredNotification struct {
+	userID  uint
+	orderNo int
 }
 
 type PoolEngine struct {
@@ -39,6 +62,17 @@ type PoolEngine struct {
 	alloc          AllocationStrategy
 	mu             sync.Mutex
 	pushSvc        orderNotifier
+
+	// pending* accumulate notifications raised inside the current call's
+	// WithTx callback. Safe as plain fields (not per-call locals threaded
+	// through every function) because e.mu serializes every public method on
+	// PoolEngine — no two calls are ever accumulating into these at once.
+	// Each public entrypoint that can raise one of these resets the relevant
+	// slice to nil right after taking e.mu, and flushes it only after WithTx
+	// returns nil.
+	pendingReady    []readyNotification
+	pendingRejected []rejectedNotification
+	pendingExpired  []expiredNotification
 }
 
 func NewPoolEngine(
@@ -139,7 +173,7 @@ func (e *PoolEngine) recomputeStatus(order *models.Order) {
 			order.ReadyAt = &now
 			exp := now.Add(time.Duration(e.cfg.HoldMinutes) * time.Minute)
 			order.ExpiresAt = &exp
-			e.notifyOrderReady(order)
+			e.pendingReady = append(e.pendingReady, readyNotification{userID: order.UserID, orderNo: order.OrderNo})
 		}
 	case anyProgress:
 		order.Status = models.OrderPartiallyReady
@@ -148,19 +182,50 @@ func (e *PoolEngine) recomputeStatus(order *models.Order) {
 	}
 }
 
-// notifyOrderReady fires a best-effort push to the ordering student the
-// moment their order becomes fully allocated (recomputeStatus's "ready"
-// transition). Detached from the caller's transaction/context on purpose —
-// this fires from deep inside WithTx callbacks and must not add a
-// synchronous DB round-trip to the critical section, nor block on a
-// transaction that might still be rolled back by a later step. The push
-// itself is already best-effort (see PushService.NotifyOrderReady).
-func (e *PoolEngine) notifyOrderReady(order *models.Order) {
+// flushPendingReady, flushPendingRejected and flushPendingExpired send every
+// notification queued by the just-committed transaction (see the pending*
+// fields' doc comment on PoolEngine). Each public entrypoint calls the
+// relevant flush only after its WithTx has returned nil — never on the error
+// path, so a rolled-back transaction never produces a push for a state
+// change that didn't actually happen (this is the V1 fix). Synchronous,
+// unlike the old pre-fix notifyOrderReady: these run after the DB
+// transaction has already committed and released its locks, so there is no
+// critical section left to protect by detaching onto a goroutine, and
+// keeping them synchronous makes call ordering deterministic for callers and
+// tests. PushService itself still fans each subscription out onto its own
+// goroutine (see PushService.send), so a slow push endpoint still can't
+// block the caller here.
+func (e *PoolEngine) flushPendingReady() {
+	pending := e.pendingReady
+	e.pendingReady = nil
 	if e.pushSvc == nil {
 		return
 	}
-	userID, orderNo := order.UserID, order.OrderNo
-	go e.pushSvc.NotifyOrderReady(context.Background(), userID, orderNo)
+	for _, n := range pending {
+		e.pushSvc.NotifyOrderReady(context.Background(), n.userID, n.orderNo)
+	}
+}
+
+func (e *PoolEngine) flushPendingRejected() {
+	pending := e.pendingRejected
+	e.pendingRejected = nil
+	if e.pushSvc == nil {
+		return
+	}
+	for _, n := range pending {
+		e.pushSvc.NotifyOrderRejected(context.Background(), n.userID, n.orderNo, n.reason)
+	}
+}
+
+func (e *PoolEngine) flushPendingExpired() {
+	pending := e.pendingExpired
+	e.pendingExpired = nil
+	if e.pushSvc == nil {
+		return
+	}
+	for _, n := range pending {
+		e.pushSvc.NotifyOrderExpired(context.Background(), n.userID, n.orderNo)
+	}
 }
 
 // reallocate re-runs FCFS allocation for a menu item whose pool just grew
@@ -218,10 +283,14 @@ func (e *PoolEngine) broadcast(orderID uint) {
 	}
 }
 
-func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []OrderItemInput) (OrderResponse, error) {
-	if err := e.ensureShopOpen(ctx); err != nil {
-		return OrderResponse{}, err
-	}
+// CreateOrder places a new order. expectedTotal is optional (variadic so
+// every pre-existing call site keeps compiling unchanged): when the caller
+// passes one and the server-computed total differs from it — the caller's
+// cart was priced against a menu that has since changed — the order is still
+// created at the live, server-computed price (never refused, never re-priced
+// to the stale value), and the discrepancy is surfaced on the response via
+// PriceChanged (V3). Only the first variadic value is used.
+func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []OrderItemInput, expectedTotal ...int) (OrderResponse, error) {
 	if len(inputs) == 0 {
 		return OrderResponse{}, ErrBadRequest("order must contain at least one item")
 	}
@@ -255,6 +324,18 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 		order = nil
 		itemCount = 0
 		err = e.uow.WithTx(ctx, func(txCtx context.Context) error {
+			// ensureShopOpen used to run unlocked, before this transaction
+			// (and even before e.mu.Lock()) — a student could submit into a
+			// shop that closes in the gap between that check and this
+			// transaction, landing a submitted order into a closed shop
+			// after ShopStatusService.Set's RejectAllSubmitted sweep had
+			// already run, with nothing left to ever reject it (V2). Reading
+			// it here, inside the transaction and ahead of the locking read
+			// below, serializes it against ShopStatusService.Set's own
+			// transaction via the advisory lock every WithTx takes.
+			if err := e.ensureShopOpen(txCtx); err != nil {
+				return err
+			}
 			active, err := e.orderRepo.FindActiveByUserIDForUpdate(txCtx, userID)
 			if err != nil {
 				return err
@@ -324,7 +405,11 @@ func (e *PoolEngine) CreateOrder(ctx context.Context, userID uint, inputs []Orde
 	if stored == nil {
 		return OrderResponse{}, ErrInternal("created order could not be reloaded")
 	}
-	return ToOrderResponse(*stored, false), nil
+	resp := ToOrderResponse(*stored, false)
+	if len(expectedTotal) > 0 && expectedTotal[0] != stored.TotalPrice {
+		resp.PriceChanged = &PriceChange{Expected: expectedTotal[0], Charged: stored.TotalPrice}
+	}
+	return resp, nil
 }
 
 func isOrderNumberConflict(err error) bool { return postgresConstraint(err, "idx_orders_date_no") }
@@ -340,6 +425,7 @@ func postgresConstraint(err error, constraint string) bool {
 func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs []uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
 
 	rejectedSet := make(map[uint]struct{})
 	for _, id := range rejectedItemIDs {
@@ -358,6 +444,26 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 		}
 		if order.Status != models.OrderSubmitted {
 			return ErrConflict("order is not in submitted state")
+		}
+
+		// Validate before mutating anything (V4): rejectedItemIDs is
+		// caller-supplied and previously was only ever consulted while
+		// looping over order.Items, so an ID belonging to a different order
+		// (or no order at all) was silently discarded — a stale or
+		// misdirected accept call could partially apply with no error
+		// signal. Fail the whole call instead.
+		ownItemIDs := make(map[uint]struct{}, len(order.Items))
+		for _, it := range order.Items {
+			ownItemIDs[it.ID] = struct{}{}
+		}
+		foreignCount := 0
+		for id := range rejectedSet {
+			if _, ok := ownItemIDs[id]; !ok {
+				foreignCount++
+			}
+		}
+		if foreignCount > 0 {
+			return ErrBadRequest(fmt.Sprintf("%d of the items sent aren't part of this order", foreignCount))
 		}
 
 		allRejected := true
@@ -417,6 +523,7 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 	if err != nil {
 		return OrderResponse{}, err
 	}
+	e.flushPendingReady()
 
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
@@ -440,6 +547,8 @@ func (e *PoolEngine) Accept(ctx context.Context, orderID uint, rejectedItemIDs [
 func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
+	e.pendingRejected = nil
 
 	var order *models.Order
 	returnedByMenuItem := make(map[uint]int)
@@ -491,6 +600,11 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 		if err := e.logEvent(txCtx, order.ID, models.EventRejected, map[string]any{}); err != nil {
 			return err
 		}
+		// Queued for post-commit delivery — see the pending* fields' doc
+		// comment. Nothing tells the student their order was rejected today
+		// (V5); this is the one moment they need to notice with their phone
+		// in their pocket.
+		e.pendingRejected = append(e.pendingRejected, rejectedNotification{userID: order.UserID, orderNo: order.OrderNo})
 
 		// Re-assign any freed pool units to the next FCFS order(s).
 		for menuItemID, returned := range returnedByMenuItem {
@@ -513,6 +627,8 @@ func (e *PoolEngine) Reject(ctx context.Context, orderID uint) (OrderResponse, e
 	if err != nil {
 		return OrderResponse{}, err
 	}
+	e.flushPendingRejected()
+	e.flushPendingReady()
 
 	e.broadcast(orderID)
 	for _, id := range touchedOrderIDs {
@@ -547,7 +663,13 @@ func (e *PoolEngine) RejectAllSubmitted(ctx context.Context) (int, error) {
 
 	var rejectedIDs []uint
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
-		orders, err := e.orderRepo.FindIncoming(txCtx)
+		// FindIncomingForUpdate (not FindIncoming): every other engine
+		// mutation loads its target through a …ForUpdate variant before
+		// Save-ing it; this used to be the one unlocked-read-then-Save
+		// exception (V10) — harmless today only because the advisory lock
+		// WithTx takes already serializes the whole callback, but that's an
+		// idiom gap, not a guarantee this code should rely on staying true.
+		orders, err := e.orderRepo.FindIncomingForUpdate(txCtx)
 		if err != nil {
 			return err
 		}
@@ -636,6 +758,7 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
 
 	var order *models.Order
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
@@ -685,6 +808,7 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 	if err != nil {
 		return OrderResponse{}, err
 	}
+	e.flushPendingReady()
 
 	e.broadcast(orderID)
 	e.hub.NotifyShopOrdersUpdate()
@@ -707,6 +831,7 @@ func (e *PoolEngine) Handover(ctx context.Context, orderID, itemID uint, qty int
 func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (OrderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
 
 	var order *models.Order
 	var menuItemID uint
@@ -798,6 +923,7 @@ func (e *PoolEngine) RemoveItem(ctx context.Context, orderID, itemID uint) (Orde
 	if err != nil {
 		return OrderResponse{}, err
 	}
+	e.flushPendingReady()
 
 	e.broadcast(orderID)
 	// reallocation may have advanced other waiting orders
@@ -878,6 +1004,7 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
 
 	var touchedOrderIDs []uint
 	err := e.uow.WithTx(ctx, func(txCtx context.Context) error {
@@ -922,6 +1049,7 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 	if err != nil {
 		return err
 	}
+	e.flushPendingReady()
 
 	e.hub.NotifyShopPrepUpdate()
 	e.hub.NotifyShopOrdersUpdate()
@@ -935,6 +1063,8 @@ func (e *PoolEngine) MarkDone(ctx context.Context, menuItemID uint, qty int) err
 func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.pendingReady = nil
+	e.pendingExpired = nil
 
 	touchedMenuItems := make(map[uint]struct{})
 	touchedOrders := make([]uint, 0)
@@ -962,21 +1092,30 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 				return err
 			}
 			touchedOrders = append(touchedOrders, order.ID)
+			// Queued for post-commit delivery (V5) — nothing told a student
+			// their order timed out in the hold window before this.
+			e.pendingExpired = append(e.pendingExpired, expiredNotification{userID: order.UserID, orderNo: order.OrderNo})
 
+			// Every non-rejected item on an expiring order must itself become
+			// terminal (V6): the order becomes 'expired', but leaving an
+			// allocated item's status walked back to 'queued' claims it's
+			// still waiting to be cooked — 'rejected' is the correct terminal
+			// item status, mirroring what Cancel/Reject both already use.
 			for j := range order.Items {
 				it := &order.Items[j]
+				if it.Status == models.ItemRejected {
+					continue
+				}
 				if it.AllocatedQty > 0 {
 					if err := e.poolRepo.Add(txCtx, it.MenuItemID, it.AllocatedQty); err != nil {
 						return err
 					}
 					touchedMenuItems[it.MenuItemID] = struct{}{}
 					it.AllocatedQty = 0
-					if it.Status == models.ItemAllocated {
-						it.Status = models.ItemQueued
-					}
-					if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
-						return err
-					}
+				}
+				it.Status = models.ItemRejected
+				if err := e.orderRepo.SaveItem(txCtx, it); err != nil {
+					return err
 				}
 			}
 		}
@@ -994,6 +1133,8 @@ func (e *PoolEngine) ExpiryTick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	e.flushPendingExpired()
+	e.flushPendingReady()
 
 	for _, id := range touchedOrders {
 		e.broadcast(id)

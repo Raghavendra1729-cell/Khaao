@@ -25,6 +25,10 @@ func NewOrderController(os *services.OrderService, pe *services.PoolEngine, rs *
 
 type createOrderRequest struct {
 	Items []services.OrderItemInput `json:"items"`
+	// ExpectedTotal is optional — the client's (possibly stale) cart total.
+	// The server always prices from the live menu; when this doesn't match,
+	// the response's order.price_changed reports the discrepancy (V3).
+	ExpectedTotal *int `json:"expected_total"`
 }
 
 func (oc *OrderController) Create(c *gin.Context) {
@@ -33,7 +37,13 @@ func (oc *OrderController) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	order, err := oc.poolEngine.CreateOrder(c.Request.Context(), middleware.UserID(c), req.Items)
+	var order services.OrderResponse
+	var err error
+	if req.ExpectedTotal != nil {
+		order, err = oc.poolEngine.CreateOrder(c.Request.Context(), middleware.UserID(c), req.Items, *req.ExpectedTotal)
+	} else {
+		order, err = oc.poolEngine.CreateOrder(c.Request.Context(), middleware.UserID(c), req.Items)
+	}
 	if err != nil {
 		respondError(c, err)
 		return

@@ -21,7 +21,18 @@ func NewRatingsService(ratingRepo repository.RatingRepo, orderRepo repository.Or
 	return &RatingsService{ratingRepo: ratingRepo, orderRepo: orderRepo}
 }
 
+// maxRatingsPerRequest bounds SubmitRatings' input slice at the most lines an
+// order can ever have (CreateOrder itself caps at 30). Without this, only the
+// 1 MiB request body cap limited a request — roughly 30k entries — so a
+// single call could carry thousands of rows for an order that has at most 30
+// (V7).
+const maxRatingsPerRequest = 30
+
 func (s *RatingsService) SubmitRatings(ctx context.Context, orderID uint, userID uint, inputs []RatingInput) error {
+	if len(inputs) > maxRatingsPerRequest {
+		return ErrBadRequest(fmt.Sprintf("cannot submit more than %d ratings at once", maxRatingsPerRequest))
+	}
+
 	order, err := s.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
 		return err
@@ -41,8 +52,25 @@ func (s *RatingsService) SubmitRatings(ctx context.Context, orderID uint, userID
 		itemMap[order.Items[i].ID] = &order.Items[i]
 	}
 
-	var ratings []models.ItemRating
+	// De-duplicate by OrderItemID before validating/building rows — a client
+	// resubmitting the same line within one request (double-tap, retry)
+	// should produce exactly one row, not two attempted inserts for the same
+	// order_item_id. Last value wins; dedupIndex tracks each id's position in
+	// deduped so a later duplicate overwrites in place instead of appending,
+	// which keeps request order otherwise stable (V7).
+	deduped := make([]RatingInput, 0, len(inputs))
+	dedupIndex := make(map[uint]int, len(inputs))
 	for _, in := range inputs {
+		if idx, ok := dedupIndex[in.OrderItemID]; ok {
+			deduped[idx] = in
+			continue
+		}
+		dedupIndex[in.OrderItemID] = len(deduped)
+		deduped = append(deduped, in)
+	}
+
+	var ratings []models.ItemRating
+	for _, in := range deduped {
 		item, ok := itemMap[in.OrderItemID]
 		if !ok {
 			return ErrBadRequest(fmt.Sprintf("order_item_id %d does not belong to this order", in.OrderItemID))

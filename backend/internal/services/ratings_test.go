@@ -140,6 +140,66 @@ func TestRatingsService(t *testing.T) {
 	})
 }
 
+// TestSubmitRatingsCapsRequestSize guards V7: an order can carry at most 30
+// items (CreateOrder enforces that cap), but SubmitRatings previously bounded
+// its input slice only by the 1 MiB request body — around 30k entries.
+func TestSubmitRatingsCapsRequestSize(t *testing.T) {
+	ctx := context.Background()
+	orderRepo := &mockOrderRepo{
+		orders: map[uint]*models.Order{
+			7: {ID: 7, UserID: 10, Status: models.OrderCompleted},
+		},
+	}
+	ratingRepo := &mockRatingRepo{}
+	svc := services.NewRatingsService(ratingRepo, orderRepo)
+
+	inputs := make([]services.RatingInput, 31)
+	for i := range inputs {
+		inputs[i] = services.RatingInput{OrderItemID: uint(i + 1), Stars: 5}
+	}
+
+	err := svc.SubmitRatings(ctx, 7, 10, inputs)
+	appErr := asAppError(t, err)
+	if appErr == nil || appErr.Status != 400 {
+		t.Fatalf("expected 400 bad request for 31 inputs, got %v", err)
+	}
+	if len(ratingRepo.ratings) != 0 {
+		t.Errorf("expected no ratings saved, got %d", len(ratingRepo.ratings))
+	}
+}
+
+// TestSubmitRatingsDeduplicatesByOrderItemID guards V7's second half: a
+// client resubmitting the same order_item_id twice in one request (retry,
+// double-tap) must only ever produce one row reaching the repo, not two
+// attempted inserts for the same line.
+func TestSubmitRatingsDeduplicatesByOrderItemID(t *testing.T) {
+	ctx := context.Background()
+	orderRepo := &mockOrderRepo{
+		orders: map[uint]*models.Order{
+			8: {
+				ID: 8, UserID: 10, Status: models.OrderCompleted,
+				Items: []models.OrderItem{{ID: 101, MenuItemID: 5}},
+			},
+		},
+	}
+	ratingRepo := &mockRatingRepo{}
+	svc := services.NewRatingsService(ratingRepo, orderRepo)
+
+	err := svc.SubmitRatings(ctx, 8, 10, []services.RatingInput{
+		{OrderItemID: 101, Stars: 3},
+		{OrderItemID: 101, Stars: 5}, // last value wins
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if len(ratingRepo.ratings) != 1 {
+		t.Fatalf("expected exactly 1 row to reach the repo for a duplicated order_item_id, got %d: %+v", len(ratingRepo.ratings), ratingRepo.ratings)
+	}
+	if ratingRepo.ratings[0].Stars != 5 {
+		t.Errorf("expected last-value-wins (Stars=5), got %d", ratingRepo.ratings[0].Stars)
+	}
+}
+
 func TestMenuAggregatesQuery(t *testing.T) {
 	// Let's test the aggregates inside MenuService instead,
 	// because the SQL query for GetMenuAggregates is tested in integration tests,

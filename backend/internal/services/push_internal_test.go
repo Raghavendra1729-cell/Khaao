@@ -55,3 +55,52 @@ func TestOrderReadyPayloadIncludesOrderURL(t *testing.T) {
 		t.Errorf("expected non-empty title/body, got %+v", got)
 	}
 }
+
+// TestRejectedPayloadIncludesOrderURL and TestExpiredPayloadIncludesOrderURL
+// guard V5: nothing previously told a student their order was rejected or
+// expired. Both land on /order — same destination as the ready alert — since
+// that's where the student can see the terminal state and re-order.
+func TestRejectedPayloadIncludesOrderURL(t *testing.T) {
+	raw, err := rejectedPayload(14)
+	if err != nil {
+		t.Fatalf("rejectedPayload: %v", err)
+	}
+
+	var got pushPayload
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if got.URL != "/order" {
+		t.Errorf("URL = %q, want /order", got.URL)
+	}
+	if got.Title == "" {
+		t.Errorf("expected non-empty title, got %+v", got)
+	}
+	wantBody := "Order #14 couldn't be prepared. Nothing to pay — order again when you're ready."
+	if got.Body != wantBody {
+		t.Errorf("Body = %q, want %q", got.Body, wantBody)
+	}
+}
+
+func TestExpiredPayloadIncludesOrderURL(t *testing.T) {
+	raw, err := expiredPayload(21)
+	if err != nil {
+		t.Fatalf("expiredPayload: %v", err)
+	}
+
+	var got pushPayload
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if got.URL != "/order" {
+		t.Errorf("URL = %q, want /order", got.URL)
+	}
+	if got.Title == "" {
+		t.Errorf("expected non-empty title, got %+v", got)
+	}
+	if !strings.Contains(got.Body, "#21") {
+		t.Errorf("Body = %q, want it to reference order #21", got.Body)
+	}
+}

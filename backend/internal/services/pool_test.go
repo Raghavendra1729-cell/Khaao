@@ -2,8 +2,10 @@ package services_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"khaao/internal/config"
 	"khaao/internal/models"
@@ -13,8 +15,31 @@ import (
 
 type mockUoW struct{}
 
+// txMarkerKey lets a test assert a repo call happened from inside a WithTx
+// callback (e.g. TestCreateOrderChecksShopStatusInsideTransaction, V2) —
+// mirrors the real GormUnitOfWork's txKey pattern (repository/gorm.go)
+// closely enough for that purpose without pulling GORM into these tests.
+type txMarkerKey struct{}
+
 func (m *mockUoW) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	return fn(ctx)
+	return fn(context.WithValue(ctx, txMarkerKey{}, true))
+}
+
+// failingCommitUoW simulates a transaction whose callback runs to completion
+// (so every mutation inside it "happened" from the callback's point of view)
+// but whose commit itself then fails — e.g. a serialization failure or a
+// dropped connection at COMMIT time. Used by TestReadyPushNotSentOnCommitFailure
+// (V1) to prove a caller's post-commit push flush only fires when WithTx
+// actually returns nil, not just because the callback returned nil.
+type failingCommitUoW struct {
+	commitErr error
+}
+
+func (m *failingCommitUoW) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	return m.commitErr
 }
 
 type mockOrderRepo struct {
@@ -80,6 +105,9 @@ func (m *mockOrderRepo) FindIncoming(ctx context.Context) ([]models.Order, error
 	}
 	return res, nil
 }
+func (m *mockOrderRepo) FindIncomingForUpdate(ctx context.Context) ([]models.Order, error) {
+	return m.FindIncoming(ctx)
+}
 func (m *mockOrderRepo) FindInProgress(ctx context.Context) ([]models.Order, error) {
 	var res []models.Order
 	for _, o := range m.orders {
@@ -112,7 +140,13 @@ func (m *mockOrderRepo) FindPreparingOldestForUpdate(ctx context.Context) ([]mod
 	return m.FindPreparingOldest(ctx)
 }
 func (m *mockOrderRepo) FindReadyExpired(ctx context.Context) ([]models.Order, error) {
-	return nil, nil
+	var res []models.Order
+	for _, o := range m.orders {
+		if o.Status == models.OrderReady {
+			res = append(res, *o)
+		}
+	}
+	return res, nil
 }
 func (m *mockOrderRepo) FindNonTerminal(ctx context.Context) ([]models.Order, error) { return nil, nil }
 func (m *mockOrderRepo) FindReadyExpiredForUpdate(ctx context.Context) ([]models.Order, error) {
@@ -251,9 +285,18 @@ func (m *mockEventRepo) Log(ctx context.Context, ev *models.OrderEvent) error { 
 
 type mockShopStatusRepo struct {
 	status *models.ShopStatus
+	// getCalls / getCalledInTx let a test assert exactly how many times Get
+	// was called and whether at least one of those calls happened inside a
+	// WithTx callback (via txMarkerKey) — see TestCreateOrderChecksShopStatusInsideTransaction (V2).
+	getCalls      int
+	getCalledInTx bool
 }
 
-func (m *mockShopStatusRepo) Get(_ context.Context) (*models.ShopStatus, error) {
+func (m *mockShopStatusRepo) Get(ctx context.Context) (*models.ShopStatus, error) {
+	m.getCalls++
+	if ctx.Value(txMarkerKey{}) != nil {
+		m.getCalledInTx = true
+	}
 	return m.status, nil
 }
 func (m *mockShopStatusRepo) Save(_ context.Context, s *models.ShopStatus) error {
@@ -981,13 +1024,46 @@ func TestMenuDeleteRemovesStrandedPoolRow(t *testing.T) {
 // accepts.
 type fakeOrderNotifier struct {
 	newOrderCalls []struct{ orderNo, itemCount int }
+	readyCalls    []struct {
+		userID  uint
+		orderNo int
+	}
+	rejectedCalls []struct {
+		userID  uint
+		orderNo int
+		reason  string
+	}
+	expiredCalls []struct {
+		userID  uint
+		orderNo int
+	}
 }
 
 func (f *fakeOrderNotifier) NotifyNewOrder(ctx context.Context, orderNo, itemCount int) {
 	f.newOrderCalls = append(f.newOrderCalls, struct{ orderNo, itemCount int }{orderNo, itemCount})
 }
 
-func (f *fakeOrderNotifier) NotifyOrderReady(ctx context.Context, userID uint, orderNo int) {}
+func (f *fakeOrderNotifier) NotifyOrderReady(ctx context.Context, userID uint, orderNo int) {
+	f.readyCalls = append(f.readyCalls, struct {
+		userID  uint
+		orderNo int
+	}{userID, orderNo})
+}
+
+func (f *fakeOrderNotifier) NotifyOrderRejected(ctx context.Context, userID uint, orderNo int, reason string) {
+	f.rejectedCalls = append(f.rejectedCalls, struct {
+		userID  uint
+		orderNo int
+		reason  string
+	}{userID, orderNo, reason})
+}
+
+func (f *fakeOrderNotifier) NotifyOrderExpired(ctx context.Context, userID uint, orderNo int) {
+	f.expiredCalls = append(f.expiredCalls, struct {
+		userID  uint
+		orderNo int
+	}{userID, orderNo})
+}
 
 // TestCreateOrderNotifiesPushWithCorrectItemCount guards STATUS.md § 9.6-U1:
 // candidate.Items is never populated inside CreateOrder's transaction (items
@@ -1019,5 +1095,355 @@ func TestCreateOrderNotifiesPushWithCorrectItemCount(t *testing.T) {
 	}
 	if call.itemCount != 2 {
 		t.Errorf("itemCount = %d, want 2 (two distinct menu item lines)", call.itemCount)
+	}
+}
+
+// ---- V1: ready push must only fire after the transaction actually commits ----
+
+// TestReadyPushNotSentOnCommitFailure guards V1: recomputeStatus used to fire
+// the "order ready" push from deep inside the WithTx callback, the instant it
+// flipped an order to ready — before the transaction had actually committed.
+// A rollback after that point (simulated here by failingCommitUoW, whose
+// callback runs to completion but whose "commit" then fails) used to still
+// leave the push sent, even though the DB never actually reached 'ready'.
+func TestReadyPushNotSentOnCommitFailure(t *testing.T) {
+	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	menuRepo := &mockMenuRepo{}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
+	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	hub := realtime.NewHub()
+	cfg := &config.Config{HoldMinutes: 10}
+	alloc := &services.FCFSAllocation{}
+	uow := &failingCommitUoW{commitErr: errors.New("simulated commit failure")}
+
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued},
+		},
+	}
+	_ = orderRepo.Create(context.Background(), order)
+
+	// MarkDone's callback fully allocates the item (order -> ready) before
+	// the simulated commit failure kicks in.
+	err := engine.MarkDone(context.Background(), 10, 1)
+	if err == nil {
+		t.Fatal("expected MarkDone to surface the simulated commit failure")
+	}
+	if len(fake.readyCalls) != 0 {
+		t.Errorf("expected NO NotifyOrderReady call when the commit fails, got %d: %+v", len(fake.readyCalls), fake.readyCalls)
+	}
+}
+
+// TestReadyPushSentExactlyOnceOnSuccessfulCommit is the success-path mirror:
+// a successful commit must still notify exactly once.
+func TestReadyPushSentExactlyOnceOnSuccessfulCommit(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderPreparing,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued},
+		},
+	}
+	_ = repo.Create(context.Background(), order)
+
+	if err := engine.MarkDone(context.Background(), 10, 1); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+
+	if len(fake.readyCalls) != 1 {
+		t.Fatalf("expected exactly 1 NotifyOrderReady call, got %d: %+v", len(fake.readyCalls), fake.readyCalls)
+	}
+	if fake.readyCalls[0].userID != 42 || fake.readyCalls[0].orderNo != order.OrderNo {
+		t.Errorf("unexpected ready call: %+v", fake.readyCalls[0])
+	}
+}
+
+// ---- V2: the shop-open check must run inside CreateOrder's transaction ----
+
+// TestCreateOrderChecksShopStatusInsideTransaction guards V2: ensureShopOpen
+// used to run unlocked, before e.mu.Lock() and entirely outside WithTx — a
+// student could submit into a shop that closes in the gap between that check
+// and the transaction. Asserts the shop-status read happens from inside the
+// WithTx callback (via txMarkerKey, mirroring the real GormUnitOfWork's
+// context-value pattern).
+func TestCreateOrderChecksShopStatusInsideTransaction(t *testing.T) {
+	uow := &mockUoW{}
+	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	menuRepo := &mockMenuRepo{}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
+	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	hub := realtime.NewHub()
+	cfg := &config.Config{HoldMinutes: 10}
+	alloc := &services.FCFSAllocation{}
+
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
+
+	if _, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{{MenuItemID: 10, Qty: 1}}); err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	if statusRepo.getCalls == 0 {
+		t.Fatal("expected ShopStatusRepo.Get to be called at all")
+	}
+	if !statusRepo.getCalledInTx {
+		t.Error("expected the shop-status read to happen inside CreateOrder's transaction, but it never observed the tx marker")
+	}
+}
+
+// ---- V3: expected_total mismatch must surface as price_changed, never refuse/re-price ----
+
+func TestCreateOrderReportsPriceChangedOnMismatch(t *testing.T) {
+	engine, _, _ := setupEngine()
+	// mockMenuRepo.FindByID always prices at 1000 regardless of ID.
+	resp, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{{MenuItemID: 10, Qty: 1}}, 500)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	if resp.TotalPrice != 1000 {
+		t.Fatalf("expected order charged at the live price (1000), got %d", resp.TotalPrice)
+	}
+	if resp.PriceChanged == nil {
+		t.Fatal("expected price_changed to be set on a mismatch")
+	}
+	if resp.PriceChanged.Expected != 500 || resp.PriceChanged.Charged != 1000 {
+		t.Errorf("unexpected PriceChanged: %+v", resp.PriceChanged)
+	}
+}
+
+func TestCreateOrderNoPriceChangedWhenExpectedMatches(t *testing.T) {
+	engine, _, _ := setupEngine()
+	resp, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{{MenuItemID: 10, Qty: 1}}, 1000)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	if resp.PriceChanged != nil {
+		t.Errorf("expected no price_changed when expected_total matches, got %+v", resp.PriceChanged)
+	}
+}
+
+func TestCreateOrderNoPriceChangedWhenExpectedOmitted(t *testing.T) {
+	engine, _, _ := setupEngine()
+	resp, err := engine.CreateOrder(context.Background(), 1, []services.OrderItemInput{{MenuItemID: 10, Qty: 1}})
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	if resp.PriceChanged != nil {
+		t.Errorf("expected identical old behavior (no price_changed) when expected_total is omitted, got %+v", resp.PriceChanged)
+	}
+}
+
+// ---- V4: Accept must validate rejectedItemIDs belong to this order before mutating ----
+
+// TestAcceptRejectsForeignItemID guards V4: rejectedItemIDs is caller-supplied
+// and used to be only ever consulted (not validated) while looping over
+// order.Items — an ID belonging to a different order (or none at all) was
+// silently discarded. Accept must now fail the whole call and leave every
+// item's status untouched.
+func TestAcceptRejectsForeignItemID(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	order := &models.Order{
+		ID:     1,
+		Status: models.OrderSubmitted,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemPending},
+			{ID: 2, MenuItemID: 11, Qty: 1, PriceEach: 1000, Status: models.ItemPending},
+		},
+	}
+	_ = repo.Create(context.Background(), order)
+
+	// item ID 2 is valid; 999 belongs to no order.
+	_, err := engine.Accept(context.Background(), 1, []uint{2, 999})
+	appErr := asAppError(t, err)
+	if appErr == nil || appErr.Status != 400 {
+		t.Fatalf("expected 400 bad request for a foreign item id, got %v", err)
+	}
+
+	o, _ := repo.FindByID(context.Background(), 1)
+	if o.Status != models.OrderSubmitted {
+		t.Errorf("expected order status untouched (still submitted), got %v", o.Status)
+	}
+	for _, it := range o.Items {
+		if it.Status != models.ItemPending {
+			t.Errorf("expected item %d status untouched (still pending), got %v", it.ID, it.Status)
+		}
+	}
+}
+
+// ---- V6: ExpiryTick must mark every non-rejected item on an expiring order as rejected ----
+
+// TestExpiryTickRejectsAllItems guards V6: item status used to walk
+// backwards to 'queued' for an allocated-but-unclaimed item on an expiring
+// order, even though the order itself became terminal ('expired') — claiming
+// the item was still waiting to be cooked. 'rejected' is the correct
+// terminal item status, mirroring what Cancel/Reject already use.
+func TestExpiryTickRejectsAllItems(t *testing.T) {
+	engine, repo, pool := setupEngine()
+	order := &models.Order{
+		ID:        1,
+		UserID:    42,
+		Status:    models.OrderReady,
+		ExpiresAt: timePtr(time.Now().Add(-time.Minute)),
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 2, AllocatedQty: 2, Status: models.ItemAllocated, PriceEach: 1000},
+			{ID: 2, MenuItemID: 11, Qty: 1, AllocatedQty: 0, Status: models.ItemQueued, PriceEach: 1000},
+		},
+	}
+	_ = repo.Create(context.Background(), order)
+
+	if err := engine.ExpiryTick(context.Background()); err != nil {
+		t.Fatalf("ExpiryTick: %v", err)
+	}
+
+	o, _ := repo.FindByID(context.Background(), 1)
+	if o.Status != models.OrderExpired {
+		t.Fatalf("expected order expired, got %v", o.Status)
+	}
+	for _, it := range o.Items {
+		if it.Status != models.ItemRejected {
+			t.Errorf("item %d: expected status rejected after expiry, got %v", it.ID, it.Status)
+		}
+	}
+	if pool.pool[10] != 2 {
+		t.Errorf("expected the allocated item's 2 units returned to the pool, got %d", pool.pool[10])
+	}
+}
+
+func timePtr(t time.Time) *time.Time { return &t }
+
+// ---- V5: student must be notified on Reject and on ExpiryTick, post-commit only ----
+
+func TestRejectNotifiesStudentExactlyOnce(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderSubmitted,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemPending},
+		},
+	}
+	_ = repo.Create(context.Background(), order)
+
+	if _, err := engine.Reject(context.Background(), 1); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+
+	if len(fake.rejectedCalls) != 1 {
+		t.Fatalf("expected exactly 1 NotifyOrderRejected call, got %d: %+v", len(fake.rejectedCalls), fake.rejectedCalls)
+	}
+	if fake.rejectedCalls[0].userID != 42 || fake.rejectedCalls[0].orderNo != order.OrderNo {
+		t.Errorf("unexpected rejected call: %+v", fake.rejectedCalls[0])
+	}
+}
+
+func TestRejectDoesNotNotifyOnCommitFailure(t *testing.T) {
+	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	menuRepo := &mockMenuRepo{}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
+	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	hub := realtime.NewHub()
+	cfg := &config.Config{HoldMinutes: 10}
+	alloc := &services.FCFSAllocation{}
+	uow := &failingCommitUoW{commitErr: errors.New("simulated commit failure")}
+
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:     1,
+		UserID: 42,
+		Status: models.OrderSubmitted,
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, PriceEach: 1000, Status: models.ItemPending},
+		},
+	}
+	_ = orderRepo.Create(context.Background(), order)
+
+	if _, err := engine.Reject(context.Background(), 1); err == nil {
+		t.Fatal("expected Reject to surface the simulated commit failure")
+	}
+	if len(fake.rejectedCalls) != 0 {
+		t.Errorf("expected NO NotifyOrderRejected call when the commit fails, got %d: %+v", len(fake.rejectedCalls), fake.rejectedCalls)
+	}
+}
+
+func TestExpiryTickNotifiesStudentExactlyOnce(t *testing.T) {
+	engine, repo, _ := setupEngine()
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:        1,
+		UserID:    42,
+		Status:    models.OrderReady,
+		ExpiresAt: timePtr(time.Now().Add(-time.Minute)),
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, AllocatedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	_ = repo.Create(context.Background(), order)
+
+	if err := engine.ExpiryTick(context.Background()); err != nil {
+		t.Fatalf("ExpiryTick: %v", err)
+	}
+
+	if len(fake.expiredCalls) != 1 {
+		t.Fatalf("expected exactly 1 NotifyOrderExpired call, got %d: %+v", len(fake.expiredCalls), fake.expiredCalls)
+	}
+	if fake.expiredCalls[0].userID != 42 || fake.expiredCalls[0].orderNo != order.OrderNo {
+		t.Errorf("unexpected expired call: %+v", fake.expiredCalls[0])
+	}
+}
+
+func TestExpiryTickDoesNotNotifyOnCommitFailure(t *testing.T) {
+	orderRepo := &mockOrderRepo{orders: make(map[uint]*models.Order)}
+	menuRepo := &mockMenuRepo{}
+	poolRepo := &mockPoolRepo{pool: make(map[uint]int)}
+	eventRepo := &mockEventRepo{}
+	statusRepo := &mockShopStatusRepo{status: &models.ShopStatus{ID: 1, State: string(models.ShopOpen)}}
+	hub := realtime.NewHub()
+	cfg := &config.Config{HoldMinutes: 10}
+	alloc := &services.FCFSAllocation{}
+	uow := &failingCommitUoW{commitErr: errors.New("simulated commit failure")}
+
+	engine := services.NewPoolEngine(uow, orderRepo, menuRepo, poolRepo, eventRepo, statusRepo, hub, cfg, alloc)
+	fake := &fakeOrderNotifier{}
+	engine.SetPushService(fake)
+
+	order := &models.Order{
+		ID:        1,
+		UserID:    42,
+		Status:    models.OrderReady,
+		ExpiresAt: timePtr(time.Now().Add(-time.Minute)),
+		Items: []models.OrderItem{
+			{ID: 1, MenuItemID: 10, Qty: 1, AllocatedQty: 1, Status: models.ItemAllocated, PriceEach: 1000},
+		},
+	}
+	_ = orderRepo.Create(context.Background(), order)
+
+	if err := engine.ExpiryTick(context.Background()); err == nil {
+		t.Fatal("expected ExpiryTick to surface the simulated commit failure")
+	}
+	if len(fake.expiredCalls) != 0 {
+		t.Errorf("expected NO NotifyOrderExpired call when the commit fails, got %d: %+v", len(fake.expiredCalls), fake.expiredCalls)
 	}
 }

@@ -179,8 +179,19 @@ func (r *GormOrderRepo) Create(ctx context.Context, order *models.Order) error {
 	return getDB(ctx, r.db).Create(order).Error
 }
 
+// Save persists only the order row itself. Every real caller loads order via
+// FindByIDForUpdate/FindByID, which populates order.Items — GORM's default
+// Save() cascades to a populated has-many association like that, emitting an
+// extra `INSERT ... ON CONFLICT (id) DO UPDATE SET order_id = excluded.order_id`
+// statement per item on every single order-status write, inside the
+// advisory-locked critical section on the hottest path in the app (V8,
+// confirmed empirically against real Postgres — see
+// TestIntegration_OrderSave_DoesNotEmitOrderItemAssociationStatements).
+// Omit(clause.Associations) restricts this call to the orders table only;
+// item mutations always go through the explicit SaveItem calls callers
+// already make alongside this one.
 func (r *GormOrderRepo) Save(ctx context.Context, order *models.Order) error {
-	return getDB(ctx, r.db).Save(order).Error
+	return getDB(ctx, r.db).Omit(clause.Associations).Save(order).Error
 }
 
 func (r *GormOrderRepo) SaveItem(ctx context.Context, item *models.OrderItem) error {
@@ -269,6 +280,14 @@ func (r *GormOrderRepo) FindIncoming(ctx context.Context) ([]models.Order, error
 		Where("status = ?", models.OrderSubmitted).
 		Order("created_at asc").Find(&orders).Error
 	return orders, err
+}
+
+// FindIncomingForUpdate mirrors findOrdersForUpdate's locking-read shape
+// (used by every other mutation path) rather than FindIncoming's plain read.
+// It does not Preload("User") — same as the other …ForUpdate variants —
+// since RejectAllSubmitted, its only caller, never reads order.User.
+func (r *GormOrderRepo) FindIncomingForUpdate(ctx context.Context) ([]models.Order, error) {
+	return r.findOrdersForUpdate(ctx, "status = ?", "created_at asc, id asc", models.OrderSubmitted)
 }
 
 func (r *GormOrderRepo) FindInProgress(ctx context.Context) ([]models.Order, error) {

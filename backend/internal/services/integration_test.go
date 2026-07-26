@@ -593,6 +593,107 @@ func TestIntegration_ConcurrentAcceptAndSetPaused_CheckNeverMissesConcurrentAcce
 	}
 }
 
+// TestIntegration_ConcurrentCreateOrderAndShopClose_NeverLeavesASubmittedOrderInAClosedShop
+// is the V2 integration exercise. ensureShopOpen used to run unlocked,
+// entirely outside CreateOrder's transaction — a student could submit into a
+// shop that closes in the gap between that check and the transaction,
+// landing a 'submitted' order into a closed shop after
+// ShopStatusService.Set's RejectAllSubmitted sweep had already run, with
+// nothing left to ever reject it. Races CreateOrder against Set("closed") for
+// the same student/shop many times; the outcome must always be either no
+// order at all, or an order that is NOT left sitting in 'submitted' once the
+// shop is closed.
+//
+// Caveat, confirmed empirically: this is a best-effort exercise, not a
+// reliable regression guard on its own. Reverting the V2 fix (moving
+// ensureShopOpen back outside WithTx) did NOT make this test fail across
+// repeated runs here — the unsynchronized wall-clock gap between the
+// pre-fix check and the transaction's advisory-lock acquisition is too
+// narrow to land reliably from Go's scheduler without deliberate
+// instrumentation to force the interleaving. The real, deterministic
+// regression guard for V2 is the unit test
+// TestCreateOrderChecksShopStatusInsideTransaction (pool_test.go), which
+// asserts directly (via a tx-context marker) that the shop-status read
+// happens inside the transaction, and does reliably fail against the
+// pre-fix code. This integration test is kept because it still exercises
+// the real DB/advisory-lock path end to end and has never observed a bad
+// outcome against the fixed code, but it should not be read as proof the
+// fix works — TestCreateOrderChecksShopStatusInsideTransaction is that
+// proof.
+func TestIntegration_ConcurrentCreateOrderAndShopClose_NeverLeavesASubmittedOrderInAClosedShop(t *testing.T) {
+	db := openIntegrationDB(t)
+	repos := newIntegrationRepos(db)
+	cfg := &config.Config{HoldMinutes: 15, BusinessTimezone: "Asia/Kolkata"}
+	hub := realtime.NewHub()
+
+	engine := newIntegrationEngine(repos, cfg)
+	statusSvc := services.NewShopStatusService(repos.statusRepo, repos.orderRepo, repos.uow, hub)
+	statusSvc.SetPool(engine)
+
+	mi := seedIntegrationMenuItem(t, db, "Race Idli", 1000)
+	ctx := context.Background()
+
+	const trials = 15
+	for i := 0; i < trials; i++ {
+		// Reset the shop to open before each trial.
+		if err := db.Exec(`INSERT INTO shop_statuses (id, state, reopen_at, updated_at)
+			VALUES (1, 'open', NULL, now())
+			ON CONFLICT (id) DO UPDATE SET state = 'open', reopen_at = NULL`).Error; err != nil {
+			t.Fatalf("trial %d: reset shop status: %v", i, err)
+		}
+
+		student := seedIntegrationUser(t, db, fmt.Sprintf("close-race-%d@sst.scaler.com", i))
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		var createErr, setErr error
+		var created services.OrderResponse
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			created, createErr = engine.CreateOrder(ctx, student.ID, []services.OrderItemInput{{MenuItemID: mi.ID, Qty: 1}})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_, setErr = statusSvc.Set(ctx, "closed", nil)
+		}()
+		close(start)
+		wg.Wait()
+
+		if setErr != nil {
+			// Set(closed) is never blocked by a merely-submitted order — only
+			// an accepted one — so it should not fail here regardless of how
+			// the race lands.
+			t.Fatalf("trial %d: unexpected Set(closed) error: %v", i, setErr)
+		}
+
+		if createErr != nil {
+			// CreateOrder is allowed to lose the race and be refused outright
+			// (ensureShopOpen now runs inside the transaction, so it can see
+			// the shop already closed) — that is exactly the fix working.
+			if appErr, ok := createErr.(*services.AppError); !ok || appErr.Status != 409 {
+				t.Fatalf("trial %d: unexpected CreateOrder error: %v", i, createErr)
+			}
+			continue
+		}
+
+		// CreateOrder won the race and created an order. Whatever its final
+		// status, it must NEVER be sitting in 'submitted' once we observe the
+		// shop as closed — RejectAllSubmitted (serialized against CreateOrder
+		// by the same advisory lock) must have already caught it.
+		reloaded, err := repos.orderRepo.FindByID(ctx, created.ID)
+		if err != nil || reloaded == nil {
+			t.Fatalf("trial %d: reload created order: %v", i, err)
+		}
+		if reloaded.Status == models.OrderSubmitted {
+			t.Fatalf("trial %d: order %d is still 'submitted' in a closed shop — V2 regression", i, reloaded.ID)
+		}
+	}
+}
+
 // TestIntegration_MutationResponsesIncludeStudentName exercises Reject,
 // Handover, and Paid against a real DB and checks their *returned*
 // OrderResponse — not just the order's final state — carries the student's
