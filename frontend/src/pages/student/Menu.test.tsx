@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Menu } from './Menu';
@@ -19,13 +19,19 @@ vi.mock('../../api/menu', () => ({
   getMenu: () => getMenuMock(),
 }));
 
+const createOrderMock = vi.fn();
 vi.mock('../../api/orders', () => ({
   getActiveOrder: () => Promise.resolve(null),
-  createOrder: vi.fn(),
+  createOrder: (...args: unknown[]) => createOrderMock(...args),
 }));
 
 vi.mock('../../api/shop', () => ({
   getShopStatus: () => Promise.resolve({ state: 'open', reopen_at: null }),
+}));
+
+const requestNotificationPermissionAndSubscribeMock = vi.fn();
+vi.mock('../../lib/push', () => ({
+  requestNotificationPermissionAndSubscribe: () => requestNotificationPermissionAndSubscribeMock(),
 }));
 
 function menuItem(overrides: Partial<MenuItem> = {}): MenuItem {
@@ -100,5 +106,54 @@ describe('Menu — isError does not hide cached data (R25)', () => {
     renderMenu(queryClient);
 
     await waitFor(() => expect(screen.getByText("Couldn't load the menu")).toBeInTheDocument());
+  });
+});
+
+// Guards STATUS.md § 9.11-X2: the F10 timing (ask for notification
+// permission only after the order exists) was right, but the result of
+// `Notification.requestPermission()` was thrown away — a student who taps
+// Allow got the OS permission granted with no push subscription ever posted
+// to the server, silently killing the product's only screen-off signal on
+// the happy path.
+describe('Placing an order subscribes to push when permission is freshly granted (STATUS.md § 9.11-X2)', () => {
+  beforeEach(() => {
+    createOrderMock.mockReset();
+    requestNotificationPermissionAndSubscribeMock.mockReset();
+  });
+
+  async function placeOrder(queryClient: QueryClient) {
+    getMenuMock.mockResolvedValue([menuItem()]);
+    createOrderMock.mockResolvedValue(undefined);
+    renderMenu(queryClient);
+
+    await waitFor(() => expect(screen.getAllByText('Chai').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByLabelText('Increase quantity')[0]);
+    fireEvent.click(await screen.findByText('View cart'));
+    fireEvent.click(await screen.findByText('Place order'));
+    await waitFor(() => expect(createOrderMock).toHaveBeenCalled());
+  }
+
+  it('calls the shared subscribe flow when permission is default', async () => {
+    vi.stubGlobal('Notification', { permission: 'default' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await placeOrder(queryClient);
+
+    await waitFor(() => expect(requestNotificationPermissionAndSubscribeMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not re-prompt when permission is already granted', async () => {
+    vi.stubGlobal('Notification', { permission: 'granted' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await placeOrder(queryClient);
+
+    expect(requestNotificationPermissionAndSubscribeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not re-prompt when permission is denied', async () => {
+    vi.stubGlobal('Notification', { permission: 'denied' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await placeOrder(queryClient);
+
+    expect(requestNotificationPermissionAndSubscribeMock).not.toHaveBeenCalled();
   });
 });

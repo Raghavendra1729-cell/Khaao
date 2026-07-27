@@ -358,8 +358,19 @@ function ItemStatusDots({ order }: { order: Order }) {
             }`}
           >
             {handedOver ? (
-              <span className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-brand text-[7px] font-bold text-white">
-                ✓
+              <span className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-brand text-white">
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                  className="h-[7px] w-[7px]"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
               </span>
             ) : (
               <span
@@ -416,8 +427,20 @@ function InProgressOrderCard({ order, onOpenModal }: { order: Order; onOpenModal
 
       <ItemStatusDots order={order} />
 
-      <p className="mt-2 text-xs font-medium text-brand-dark/70">
-        {language === 'hi' ? 'प्रबंधित करने के लिए टैप करें →' : 'Tap to manage →'}
+      <p className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-dark/70">
+        <span>{language === 'hi' ? 'प्रबंधित करने के लिए टैप करें' : 'Tap to manage'}</span>
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
       </p>
     </button>
   );
@@ -663,17 +686,46 @@ export function ShopOrdersPage() {
       </div>
 
       {/* Order modal — rendered outside the subpage so it survives subpage switches */}
-      {modalOrder && (
-        <OrderModal
-          order={
-            // Keep the modal's order data live: prefer the freshest copy from
-            // the query (which re-fetches on every SSE orders_update) so the
-            // modal reflects handover / payment state in real time.
-            allInProgress.find((o) => o.id === modalOrder.id) ?? modalOrder
+      {modalOrder &&
+        (() => {
+          const liveOrder = allInProgress.find((o) => o.id === modalOrder.id);
+          // STATUS.md § 9.11-X3: the modal used to fall back to the last-seen
+          // `modalOrder` copy once the order left the query result (paid,
+          // rejected, or removed on another device — Q5's "two devices, one
+          // shopkeeper" scenario). That fallback kept live-looking
+          // Handover/Collect buttons on screen that could only 409. Don't
+          // flicker into this state during an in-flight refetch — only
+          // decide the order is really gone once the query has settled.
+          if (!liveOrder && !ordersQuery.isFetching) {
+            return (
+              <Modal
+                open
+                onClose={() => setModalOrder(null)}
+                title={`#${modalOrder.order_no}`}
+                footer={
+                  <Button size="lg" fullWidth onClick={() => setModalOrder(null)}>
+                    <span>{language === 'hi' ? 'बंद करें' : 'Close'}</span>
+                  </Button>
+                }
+              >
+                <p className="text-sm text-ink/70">
+                  {language === 'hi'
+                    ? 'यह ऑर्डर अब इस सूची में नहीं है — इसे किसी अन्य डिवाइस पर अपडेट किया गया।'
+                    : "This order isn't in your list anymore — it was updated on another device."}
+                </p>
+              </Modal>
+            );
           }
-          onClose={() => setModalOrder(null)}
-        />
-      )}
+          return (
+            <OrderModal
+              // Keep the modal's order data live: prefer the freshest copy
+              // from the query (which re-fetches on every SSE orders_update)
+              // so the modal reflects handover / payment state in real time.
+              order={liveOrder ?? modalOrder}
+              onClose={() => setModalOrder(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

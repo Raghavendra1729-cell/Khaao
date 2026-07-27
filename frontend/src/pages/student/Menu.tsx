@@ -8,6 +8,7 @@ import { ApiError } from '../../api/client';
 import type { MenuItem } from '../../api/types';
 import { formatPrice, formatTime } from '../../lib/format';
 import { deriveCartEntries, loadStoredCart, saveStoredCart, staleCartIds } from '../../lib/cart';
+import { requestNotificationPermissionAndSubscribe } from '../../lib/push';
 import { Button } from '../../components/ui/Button';
 import { QtyStepper } from '../../components/ui/QtyStepper';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -167,9 +168,14 @@ export function Menu() {
       // F10: was inside the Place-order click, landing the native permission
       // dialog at the same instant as submit + navigation. Ask only once the
       // order actually exists, after the student has already landed on
-      // Order status.
+      // Order status. STATUS.md § 9.11-X2: this used to call the bare
+      // Notification.requestPermission() and discard the result — a granted
+      // permission never actually subscribed the device, silently killing
+      // the product's only screen-off signal on the happy path. Use the
+      // shared flow (opportunistic repair, not a surface that should ever
+      // toast an error over the order-placed celebration).
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        void Notification.requestPermission();
+        void requestNotificationPermissionAndSubscribe().catch(() => {});
       }
     },
     onError: (err) => {
@@ -369,7 +375,18 @@ export function Menu() {
           className="mb-5 flex items-center justify-between rounded-2xl border border-brand bg-brand text-white px-4 py-3 text-sm font-semibold shadow-card hover:bg-brand-dark transition"
         >
           <span>You have an order in progress — token #{activeOrder.order_no}</span>
-          <span aria-hidden>→</span>
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden
+            className="h-4 w-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
         </Link>
       )}
 
@@ -621,9 +638,14 @@ export function Menu() {
           }
           footer={
             <>
+              {/* STATUS.md § 9.11-X6: checkout is the moment the cart becomes
+                  a chit — the total gets the mono display voice at real
+                  size, matching the scale discipline every other money
+                  moment in the app already uses (ReadyBanner's countdown,
+                  the pay-at-counter banner). */}
               <div className="mb-4 flex items-center justify-between">
                 <span className="text-lg font-bold text-ink">Total</span>
-                <span className="font-display text-2xl font-bold text-brand-dark">
+                <span className="tabular font-display text-3xl font-bold text-brand-dark">
                   {formatPrice(cartTotal)}
                 </span>
               </div>
@@ -636,34 +658,45 @@ export function Menu() {
               >
                 Place order
               </Button>
+              <p className="mt-2.5 text-center text-xs text-ink/50">
+                You'll get a token number — pay at the counter when you pick up.
+              </p>
             </>
           }
         >
-          <div className="divide-y divide-edge">
-            {cartEntries.map((entry) => {
-              const item = items.find((i) => i.id === entry.menu_item_id);
-              if (!item) return null;
-              return (
-                <div key={item.id} className="flex items-center justify-between py-3">
-                  <div className="flex flex-col">
-                    <span className="font-semibold text-ink">{item.name}</span>
-                    <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
+          {/* The dashed-border/paper-card frame Login.tsx already uses for
+              the sign-in ticket — the same object language, here holding the
+              chit this checkout is about to print. (The punch-hole circles
+              that idiom normally carries are left out: they render via
+              negative-offset pseudo-elements that Modal's own
+              `overflow-hidden` sheet would clip.) */}
+          <div className="rounded-2xl border-2 border-dashed border-ink/25 bg-steel/15 p-3">
+            <div className="divide-y divide-edge">
+              {cartEntries.map((entry) => {
+                const item = items.find((i) => i.id === entry.menu_item_id);
+                if (!item) return null;
+                return (
+                  <div key={item.id} className="flex items-center justify-between py-3">
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-ink">{item.name}</span>
+                      <span className="text-xs text-ink/60">{formatPrice(item.price)} each</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="tabular font-display text-sm font-bold text-brand-dark">
+                        {formatPrice(item.price * entry.qty)}
+                      </span>
+                      <QtyStepper
+                        value={entry.qty}
+                        onChange={(next) => {
+                          setQty(item.id, next);
+                          if (cartCount - entry.qty + next === 0) setShowCheckout(false);
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="tabular font-display text-sm font-bold text-brand-dark">
-                      {formatPrice(item.price * entry.qty)}
-                    </span>
-                    <QtyStepper
-                      value={entry.qty}
-                      onChange={(next) => {
-                        setQty(item.id, next);
-                        if (cartCount - entry.qty + next === 0) setShowCheckout(false);
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </Modal>
       )}

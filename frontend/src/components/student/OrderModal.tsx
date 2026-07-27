@@ -115,8 +115,20 @@ function OrderModalItem({ order, item }: { order: Order; item: OrderItem }) {
       </div>
 
       {fullyHanded ? (
-        <p className="mt-2 text-sm font-semibold text-brand-dark">
-          {language === 'hi' ? '✓ सौंप दिया गया' : '✓ Handed over'}
+        <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-brand-dark">
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden
+            className="h-3.5 w-3.5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+          <span>{language === 'hi' ? 'सौंप दिया गया' : 'Handed over'}</span>
         </p>
       ) : (
         <div className="mt-3 flex flex-col gap-2.5">

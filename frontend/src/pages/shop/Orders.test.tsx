@@ -5,7 +5,17 @@ import { MemoryRouter } from 'react-router-dom';
 import { ShopOrdersPage } from './Orders';
 import { ToastProvider } from '../../components/ui/Toast';
 import { LanguageProvider } from '../../context/LanguageContext';
-import type { Order } from '../../api/types';
+import { AuthProvider } from '../../context/AuthContext';
+import { setAuthStorage } from '../../api/client';
+import type { Order, User } from '../../api/types';
+
+const shopkeeper: User = {
+  id: 2,
+  name: 'Bob',
+  email: 'bob@sst.scaler.com',
+  role: 'shopkeeper',
+  photo_url: '',
+};
 
 const getShopOrdersMock = vi.fn();
 const acceptOrderMock = vi.fn();
@@ -51,15 +61,18 @@ function baseOrder(overrides: Partial<Order> = {}): Order {
 }
 
 function renderPage(queryClient: QueryClient) {
+  setAuthStorage('tok', shopkeeper);
   return render(
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <LanguageProvider>
-          <MemoryRouter>
-            <ShopOrdersPage />
-          </MemoryRouter>
-        </LanguageProvider>
-      </ToastProvider>
+      <MemoryRouter>
+        <AuthProvider>
+          <ToastProvider>
+            <LanguageProvider>
+              <ShopOrdersPage />
+            </LanguageProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -152,5 +165,57 @@ describe('Shop Accept/Reject do not flag stock when the primary action itself fa
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
 
     expect(setMenuItemStockMock).not.toHaveBeenCalled();
+  });
+});
+
+// Guards STATUS.md § 9.11-X3: the order modal fell back to the last-seen
+// order copy once the real order left the query result (paid/rejected/
+// removed on another device — Q5's "two devices, one shopkeeper" scenario).
+// The fallback kept live-looking Handover/Collect buttons on screen that
+// could only 409, with nothing telling the shopkeeper the order was already
+// resolved elsewhere.
+describe('The order modal does not go stale when the order leaves the list (STATUS.md § 9.11-X3)', () => {
+  beforeEach(() => {
+    getShopOrdersMock.mockReset();
+    acceptOrderMock.mockReset();
+    rejectOrderMock.mockReset();
+    setMenuItemStockMock.mockReset();
+  });
+
+  function inProgressOrder(): Order {
+    return baseOrder({
+      status: 'preparing',
+      items: [
+        {
+          id: 1,
+          menu_item_id: 10,
+          name: 'Samosa',
+          photo_url: null,
+          qty: 2,
+          allocated_qty: 2,
+          handed_qty: 0,
+          status: 'allocated',
+          price_each: 1000,
+        },
+      ],
+    });
+  }
+
+  it('replaces the Handover control with a terminal notice once the order is gone from the query result', async () => {
+    const order = inProgressOrder();
+    getShopOrdersMock.mockResolvedValue({ incoming: [], in_progress: [order], awaiting_payment: [] });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    fireEvent.click(await screen.findByText('Tap to manage'));
+    await screen.findByText('Handover 1');
+
+    // Simulate an SSE-driven refetch (another device resolved the order)
+    // landing while the modal is still open.
+    queryClient.setQueryData(['shop', 'orders'], { incoming: [], in_progress: [], awaiting_payment: [] });
+
+    await waitFor(() => expect(screen.queryByText('Handover 1')).not.toBeInTheDocument());
+    expect(screen.getByText(/updated on another device/)).toBeInTheDocument();
   });
 });

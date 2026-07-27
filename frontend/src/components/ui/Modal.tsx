@@ -113,9 +113,23 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="-mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-ink/50 transition hover:bg-ink/5 hover:text-ink"
+              className="-mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink/50 transition hover:bg-ink/5 hover:text-ink"
             >
-              ✕
+              {/* STATUS.md § 9.11-X5: was a text ✕ glyph — the same
+                  platform-inconsistent-icon problem Toast's own dismiss
+                  button had, on the one dialog chrome every overlay in the
+                  app shares. */}
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
             </button>
           </div>
         )}

@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { OrderStatusPage } from './OrderStatus';
 import { ToastProvider } from '../../components/ui/Toast';
-import type { Order } from '../../api/types';
+import { AuthProvider } from '../../context/AuthContext';
+import { LanguageProvider } from '../../context/LanguageContext';
+import { setAuthStorage } from '../../api/client';
+import type { Order, User } from '../../api/types';
+
+const student: User = { id: 1, name: 'Alice', email: 'alice@sst.scaler.com', role: 'student', photo_url: '' };
 
 const getActiveOrderMock = vi.fn();
 const getOrderHistoryMock = vi.fn();
@@ -54,13 +59,18 @@ function completedOrder(): Order {
 }
 
 function renderPage(queryClient: QueryClient) {
+  setAuthStorage('tok', student);
   return render(
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <MemoryRouter>
-          <OrderStatusPage />
-        </MemoryRouter>
-      </ToastProvider>
+      <MemoryRouter>
+        <AuthProvider>
+          <LanguageProvider>
+            <ToastProvider>
+              <OrderStatusPage />
+            </ToastProvider>
+          </LanguageProvider>
+        </AuthProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -100,6 +110,55 @@ describe("'Order this again' does not blame the menu when the menu query itself 
     reorderButton.closest('button')!.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+// Guards STATUS.md § 9.11-X1: a failed history fetch used to fall through to
+// `history = historyQuery.data ?? []`, which renders identically to "this
+// student has genuinely never ordered" — a network failure presented as a
+// confident factual claim, the exact thing § 9.1.7 / R25 already bans
+// everywhere else on this page.
+describe('History fetch failure does not render as "No past orders yet" (STATUS.md § 9.11-X1)', () => {
+  beforeEach(() => {
+    getActiveOrderMock.mockReset();
+    getOrderHistoryMock.mockReset();
+    cancelOrderMock.mockReset();
+    submitRatingsMock.mockReset();
+    getMenuMock.mockReset();
+  });
+
+  it('shows an honest error with a retry control instead of the empty-history state, and never claims first-time-user', async () => {
+    getActiveOrderMock.mockResolvedValue(null);
+    getOrderHistoryMock.mockRejectedValue(new Error('network error'));
+    getMenuMock.mockResolvedValue([]);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await screen.findByText("Couldn't load your past orders.");
+    expect(screen.queryByText('No past orders yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Place your first order')).not.toBeInTheDocument();
+
+    expect(getOrderHistoryMock).toHaveBeenCalledTimes(1);
+    screen.getByText('Try again').click();
+    await waitFor(() => expect(getOrderHistoryMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('still renders a healthy active order while history has failed', async () => {
+    getActiveOrderMock.mockResolvedValue({
+      ...completedOrder(),
+      status: 'submitted',
+      paid: false,
+      paid_at: null,
+    });
+    getOrderHistoryMock.mockRejectedValue(new Error('network error'));
+    getMenuMock.mockResolvedValue([]);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await screen.findByText('Cancel order');
+    expect(screen.getByText("Couldn't load your past orders.")).toBeInTheDocument();
   });
 });
 

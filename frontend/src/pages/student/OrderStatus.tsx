@@ -79,9 +79,15 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
     <Card className="p-5">
       {order.status === 'ready' && <ReadyBanner order={order} />}
       {order.status === 'awaiting_payment' && (
-        <div className="mb-5 flex w-full flex-col items-center gap-1 rounded-2xl bg-turmeric px-4 py-5 text-center text-white shadow-ticket">
-          <p className="text-xl font-bold tracking-tight">
-            Pay {formatPrice(order.total_price)} at the counter
+        // STATUS.md § 9.11-X7: this is the student's half of the cash
+        // moment (H1 is the shopkeeper's) — the amount is the payload the
+        // student is about to hand over at the counter, so it gets the same
+        // mono display scale discipline as ReadyBanner's countdown, not
+        // body-size type.
+        <div className="mb-5 flex w-full flex-col items-center gap-1.5 rounded-2xl bg-turmeric px-4 py-5 text-center text-white shadow-ticket">
+          <p className="text-sm font-semibold uppercase tracking-wide text-white/80">Pay at the counter</p>
+          <p className="tabular font-display text-4xl font-bold leading-none">
+            {formatPrice(order.total_price)}
           </p>
           <p className="text-sm font-semibold text-white/90">All items are ready.</p>
         </div>
@@ -212,18 +218,38 @@ function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => voi
           <div key={item.id} className="flex flex-col gap-1">
             <span className="text-sm font-semibold text-ink">{item.name}</span>
             <div className="flex gap-1">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  type="button"
-                  onClick={() => setRatings((prev) => ({ ...prev, [item.id]: star }))}
-                  aria-label={`Rate ${item.name} ${star} out of 5 stars`}
-                  aria-pressed={(ratings[item.id] || 0) >= star}
-                  className={`flex min-h-[44px] min-w-[44px] items-center justify-center text-2xl transition-colors ${(ratings[item.id] || 0) >= star ? 'text-turmeric-deep' : 'text-edge'}`}
-                >
-                  ★
-                </button>
-              ))}
+              {[1, 2, 3, 4, 5].map((star) => {
+                const filled = (ratings[item.id] || 0) >= star;
+                return (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => setRatings((prev) => ({ ...prev, [item.id]: star }))}
+                    aria-label={`Rate ${item.name} ${star} out of 5 stars`}
+                    aria-pressed={filled}
+                    className={`flex min-h-[44px] min-w-[44px] items-center justify-center transition-colors ${filled ? 'text-turmeric-deep' : 'text-edge'}`}
+                  >
+                    {/* STATUS.md § 9.11-X5: this is the interactive rating
+                        *control* (a real 44px tap target), not a running-
+                        prose rating display — drawn in the app's own stroke
+                        language rather than a text ★ glyph. The read-only
+                        "★ 4.5 (12)" display on menu cards is the deliberate
+                        exception this task carves out and stays text. */}
+                    <svg
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                      className="h-6 w-6"
+                      fill={filled ? 'currentColor' : 'none'}
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.8L12 3.5z" />
+                    </svg>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -503,6 +529,10 @@ export function OrderStatusPage() {
   const activeOrder = activeOrderQuery.data ?? null;
   const history = historyQuery.data ?? [];
   const hasPastOrders = history.some((o) => o.id !== activeOrder?.id);
+  // STATUS.md § 9.11-X1: a failed history fetch used to fall through to `[]`,
+  // which renders identically to a genuine "never ordered" student — a
+  // network failure presented as a confident factual claim (§ 9.1.7 / R25).
+  const historyFailed = historyQuery.isError && historyQuery.data === undefined;
 
   const pastOrders = history.filter((o) => o.id !== activeOrder?.id);
   const mostRecentCompleted = pastOrders.find((o) => o.status === 'completed');
@@ -510,7 +540,9 @@ export function OrderStatusPage() {
 
   // A student who has never ordered has neither an active order nor any
   // history — show one welcoming prompt instead of two stacked empty states.
-  if (!activeOrder && !hasPastOrders) {
+  // Never shown while the history fetch itself has failed — a regular whose
+  // history just didn't load must not be told they're a first-time user.
+  if (!activeOrder && !hasPastOrders && !historyFailed) {
     return (
       <div className="flex flex-col gap-8">
         <h1 className="mb-4 font-display text-2xl font-bold tracking-tight text-ink">Order status</h1>
@@ -548,15 +580,32 @@ export function OrderStatusPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-bold text-ink">History</h2>
-        {showRatingPrompt && mostRecentCompleted && (
-          <RatingPrompt order={mostRecentCompleted} onDismiss={() => markAsRated(mostRecentCompleted.id)} />
+        {historyFailed ? (
+          <EmptyState
+            title="Couldn't load your past orders."
+            hint={historyQuery.error instanceof ApiError ? historyQuery.error.message : 'Please try again.'}
+            action={
+              <Button variant="secondary" onClick={() => historyQuery.refetch()}>
+                Try again
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            {showRatingPrompt && mostRecentCompleted && (
+              <RatingPrompt
+                order={mostRecentCompleted}
+                onDismiss={() => markAsRated(mostRecentCompleted.id)}
+              />
+            )}
+            <HistoryList
+              orders={history}
+              activeOrderId={activeOrder?.id ?? null}
+              menuItems={menuQuery.data}
+              hasActiveOrder={activeOrder !== null}
+            />
+          </>
         )}
-        <HistoryList
-          orders={history}
-          activeOrderId={activeOrder?.id ?? null}
-          menuItems={menuQuery.data}
-          hasActiveOrder={activeOrder !== null}
-        />
       </section>
     </div>
   );
