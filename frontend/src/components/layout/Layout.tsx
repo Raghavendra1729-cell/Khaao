@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageProvider, useLanguage } from '../../context/LanguageContext';
@@ -176,6 +176,7 @@ function AvatarMenu({ name, onLogout, isShop }: { name: string; onLogout: () => 
   const initial = name.trim().charAt(0).toUpperCase() || '?';
   const { language } = useLanguage();
   const showHindi = isShop && language === 'hi';
+  const navigate = useNavigate();
 
   // Close on outside click
   useEffect(() => {
@@ -220,7 +221,22 @@ function AvatarMenu({ name, onLogout, isShop }: { name: string; onLogout: () => 
             <p className="text-[11px] font-semibold uppercase tracking-wide text-ink/40">Signed in as</p>
             <p className="mt-0.5 truncate text-sm font-semibold text-ink">{name}</p>
           </div>
-          {/* Logout action */}
+          {/* Settings — the only entry point into /settings (§ 9.7 P1); no
+              bottom-nav tab, since the thumb zone belongs to the 2-4 tabs
+              students/shopkeepers use constantly, not a rare destination. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              navigate('/settings');
+            }}
+            className="flex w-full min-h-[44px] items-center px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink/5"
+          >
+            <span>{showHindi ? 'सेटिंग्स' : 'Settings'}</span>
+          </button>
+          {/* Logout action — also available from Settings' Account section;
+              kept here too so it stays reachable in one tap. */}
           <button
             type="button"
             role="menuitem"

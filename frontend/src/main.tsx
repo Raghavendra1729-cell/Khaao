@@ -16,6 +16,14 @@ import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './components/ui/Toast.tsx';
 import { ErrorBoundary } from './components/layout/ErrorBoundary.tsx';
 import { unlockAudioOnFirstTouch } from './lib/sound.ts';
+// Side-effecting import: registers the `beforeinstallprompt`/`appinstalled`
+// listeners at MODULE SCOPE, before React mounts (STATUS.md § 9.7 P2/P6).
+// `beforeinstallprompt` can fire before any component ever mounts — a
+// listener registered inside a component (the old InstallPrompt.tsx shape)
+// misses it on every render after the first with nothing listening, which is
+// why the old install card was one-shot. Importing here, ahead of
+// `createRoot(...).render(...)`, is what makes the capture reliable.
+import './lib/install.ts';
 
 unlockAudioOnFirstTouch();
 
