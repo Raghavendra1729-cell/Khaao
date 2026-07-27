@@ -101,20 +101,87 @@ khaao.example.com {
 	handle {
 		root * /var/www/khaao/frontend/dist
 		encode gzip zstd
+
+		# ------------------------------------------------------------------
+		# Cache-Control (§ 9.8-W2 / § 9.7-P7). Vite content-hashes every file
+		# under /assets/* — the filename itself changes whenever the content
+		# does — so those are safe to cache forever. Everything else this
+		# block can serve (index.html itself, and the SPA fallback below that
+		# serves index.html for any client-side route with no matching file
+		# on disk, e.g. /orders or /shop/prep) must always revalidate: a
+		# stale index.html can reference asset URLs a newer deploy deleted,
+		# which is an unrecoverable white screen inside an installed PWA (no
+		# reload button). `no-cache`, not `no-store` — it still allows a
+		# cheap ETag/Last-Modified 304, so the app stays fast to launch on a
+		# slow connection. This is also what un-hides sw.js from discovery:
+		# a heuristically-cached stale sw.js is the failure mode the W1 fix
+		# (service-worker update path, landed separately) depends on this
+		# not happening. See RUNBOOK.md § 5 for the full path table and the
+		# D-6 `curl -I` verification step.
+		#
+		# The two matchers below are deliberately each other's complement
+		# (path /assets/* vs not path /assets/*) rather than "an override
+		# plus an unconditional default". An unconditional `header
+		# Cache-Control "no-cache"` alongside the /assets/* override was
+		# tried first and is wrong: Caddy compiles repeated `header`
+		# instances so the unconditional one runs last regardless of
+		# source-file order, and since it always matches, it re-sets
+		# Cache-Control on every response — including /assets/* — clobbering
+		# the immutable value that was just set. Verified locally with
+		# `caddy start`/`curl -I` against a throwaway site before landing
+		# this; do not "simplify" this back to an unconditional default.
+		# ------------------------------------------------------------------
+		@hashed_assets path /assets/*
+		header @hashed_assets Cache-Control "public, max-age=31536000, immutable"
+
+		@revalidate {
+			not path /assets/*
+		}
+		header @revalidate Cache-Control "no-cache"
+
+		# manifest.webmanifest must be served as application/manifest+json or
+		# the browser silently treats the app as non-installable (no console
+		# error). Go's stdlib mime package has no built-in mapping for the
+		# .webmanifest extension, so don't rely on Caddy's default MIME
+		# detection for it — force it explicitly (§ 9.7-P7).
+		@manifest path /manifest.webmanifest
+		header @manifest Content-Type "application/manifest+json"
+
 		try_files {path} /index.html
 		file_server
 	}
 
 	# Basic security headers at the edge. The Go backend also sets its own
-	# (including an identical copy of the CSP below) via
-	# middleware.SecurityHeaders() — this is defense in depth for the
+	# via middleware.SecurityHeaders() — this is defense in depth for the
 	# static-file responses Caddy serves directly, not a replacement. THIS
 	# header block is the one that actually protects the browser-rendered
 	# app in production (the frontend's HTML/JS is served here by Caddy,
-	# not by the Go backend) — the two copies being identical means a
-	# browser that sees both (frontend page load through Caddy, API
-	# response also passing through this same site block) just intersects
-	# two equal policies, which is a no-op, not a bug.
+	# not by the Go backend).
+	#
+	# CORRECTION (2026-07-27, § 9.10-S1): this comment used to claim the two
+	# header sets were identical. That was checked and was FALSE — Caddy was
+	# missing X-Frame-Options and Permissions-Policy, both of which
+	# middleware.SecurityHeaders() already sets on the API side, and neither
+	# copy's CSP set frame-ancestors, so nothing was actually stopping the
+	# real app (served here, by Caddy, not by Go) from being framed by
+	# another site. Fixed below: X-Frame-Options DENY and the same
+	# Permissions-Policy value as backend/internal/middleware/security.go
+	# are now set here too, and frame-ancestors 'none' is added to the CSP.
+	# frame-ancestors is a response-header-only directive — it is ignored if
+	# ever set via a <meta> tag — so it has to live here or in the Go
+	# middleware, and this file confirmed it is set via `header` below, not
+	# a meta tag (the built `frontend/index.html` has no CSP meta tag).
+	# Both X-Frame-Options and frame-ancestors are sent together because
+	# only frame-ancestors is expressive enough for future multi-origin
+	# needs, but X-Frame-Options is what older browsers still honor.
+	# The two header sets are still not byte-identical after this fix —
+	# deliberately: HSTS (below) is only meaningful once, at the edge that
+	# terminates TLS, which is Caddy, not the Go process behind it (see
+	# middleware/security.go's own comment on this); and frame-ancestors
+	# only matters for a response a browser might render as a top-level
+	# document or frame, which in production is only ever this Caddy-served
+	# static bundle, not the Go backend's JSON API. Both differences are
+	# intentional, not drift.
 	#
 	# CSP allows: Firebase Google sign-in (a signInWithPopup flow — the
 	# opened popup itself isn't governed by frame-src, but the Firebase SDK
@@ -125,6 +192,18 @@ khaao.example.com {
 	# APIs the JS SDK calls (*.googleapis.com). style-src needs
 	# 'unsafe-inline' for a handful of React inline `style` props; nothing
 	# needs script-src 'unsafe-inline' since this is a compiled Vite bundle.
+	# frame-ancestors 'none' means this app can never be iframed, by this
+	# site or any other — there is no legitimate case where Khaao is meant
+	# to run inside someone else's frame.
+	#
+	# HSTS (§ 9.10-S2): the Go backend intentionally does not set this (its
+	# own comment says HSTS is left to the proxy, since the proxy owns the
+	# TLS/HTTPS decision). Caddy doesn't add it automatically either, so
+	# nothing was setting it until now. Deliberately NOT using `preload`:
+	# submitting to the HSTS preload list is a practically irreversible,
+	# whole-domain commitment, and this may be deployed to a subdomain of a
+	# college domain Khaao's operators don't own outright — see RUNBOOK.md
+	# § 5 for the same note.
 	#
 	# NOT YET LIVE-VERIFIED against a real Google sign-in + Cloudinary
 	# upload (see middleware/security.go's contentSecurityPolicy comment) —
@@ -134,8 +213,11 @@ khaao.example.com {
 	# "Refused to ..." errors on first deploy.
 	header {
 		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://res.cloudinary.com https://*.googleusercontent.com; connect-src 'self' https://api.cloudinary.com https://*.googleapis.com; frame-src https://*.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self'"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://res.cloudinary.com https://*.googleusercontent.com; connect-src 'self' https://api.cloudinary.com https://*.googleapis.com; frame-src https://*.firebaseapp.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
 	}
 
 	log {
