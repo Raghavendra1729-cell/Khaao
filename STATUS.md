@@ -8,21 +8,27 @@
 >
 > **§ 12 is the working protocol.** Read it before you pick up a task.
 
-## Current state (2026-07-26)
+## Current state (2026-07-27, updated same day — third pass)
 
-**The working tree is clean and everything previously planned is committed.**
-R1–R31, F1–F24, the G-series, the T-series (2026-07-22 audit) and the U-series
-(2026-07-25 audit) all landed. Verified baseline as of this rewrite:
+**The working tree is clean and everything landed so far is committed.**
+R1–R31, F1–F24, the G-series, the T-series (2026-07-22 audit), the U-series
+(2026-07-25 audit), V1–V10, H2, Q1/Q2, and — as of this update — **W1, W6, W9,
+W2, P7, S1, S2, P1, P2, P3, P6** all landed. Verified baseline as of this
+rewrite (frontend gate re-run on the merged tree; backend untouched by this
+pass so re-checked, not re-tested):
 
 | Gate | Result |
 |---|---|
 | `go build ./...` | clean |
 | `go vet ./...` | clean |
 | `gofmt -l .` | clean |
-| `go test ./...` | all packages ok |
+| `go test ./...` | all packages ok (unchanged this pass) |
 | `tsc -b --noEmit` | clean |
-| `vitest run` | **78/78 passing**, 13 test files |
-| `vite build` initial student JS | **239.57 KB raw — under the 250 KB hard stop, after H2 (§ 9.1.8)** |
+| `npm run lint` | 0 errors, 24 pre-existing warnings |
+| `vitest run` | **102/102 passing**, 18 test files |
+| `npm run format:check` | clean |
+| `vite build` initial student JS | **241.49 KB raw — under the 250 KB hard stop** (was 239.57 KB; +1.92 KB from the new lazy `Settings` chunk's shared imports; Settings/GetTheApp/NotificationSettings confirmed as a separate chunk, not in the student's `index-*.js`) |
+| `vite build` service-worker precache | **799.06 KiB, 49 entries** (was 1058 KB/73 entries — W6 cut ~244 KB of unreachable cyrillic/greek/vietnamese font subsets) |
 
 **This document was rewritten on 2026-07-26** after a fresh full-stack audit.
 The historical narrative of completed passes was removed (it lives in `git log`);
@@ -33,8 +39,17 @@ what replaces it is three new backlogs of open, unstarted work:
 | **§ 9.3 — V-series (V1–V10)** | Backend defects found in the 2026-07-26 audit | 10 tasks | **Done, gate green, uncommitted at time of writing** |
 | **§ 9.4 — H-series (H1–H8)** | Frontend design + UX work | 8 tasks | **H2 done; H1/H3–H8 open, unstarted, authorized** |
 | **§ 9.5 — Q-series (Q1–Q9)** | Testing, written as real student / real shopkeeper scenarios | 9 tasks | **Q1, Q2 done; Q3–Q9 open, unstarted, authorized** |
-| § 9.6 — B-series (B1–B15) | Deferred product decisions | 15 items | **NOT authorized — owner picks deliberately** |
+| § 9.6 — B-series (B1–B16) | Deferred product decisions | 16 items | **NOT authorized — owner picks deliberately** |
+| **§ 9.7 — P-series (P1–P7)** | Install & distribution — "download the app from the website," the Settings screen | 7 tasks | **P1/P2/P3/P6 done; P4/P5/P7 — P7 done, P4/P5 open, unstarted** |
+| **§ 9.8 — W-series (W1–W9)** | PWA / mobile defects found in the 2026-07-27 audit | 9 tasks | **W1/W2/W6/W9 fixed, W4 fixed (via P2/P6), W7 investigated (no change); W3/W5/W8 open, unstarted** |
+| **§ 9.9 — M-series (M1–M6)** | Mobile experience — how the app behaves *as a phone app* | 6 tasks | **Open, unstarted, authorized (2026-07-27)** |
+| **§ 9.10 — S-series (S1–S5)** | Trust & provenance — "make sure the app is not malicious" | 5 tasks | **S1/S2 done; S3/S4/S5 open, unstarted** |
 | Deployment D-1..D-7 | Human-led, needs real infra | 7 items | Open |
+
+> **Note the section order.** § 9.6 (deferred, *not* authorized) sits between the
+> authorized backlogs for historical reasons — § 9.7–§ 9.10 were appended after
+> it on 2026-07-27 rather than renumbering and breaking every existing
+> cross-reference. This table is the navigation aid, not the file order.
 
 > **Numbering note:** older commit messages reference "§ 9.5 (T-series)" and
 > "§ 9.6 (U-series)". Those backlogs are complete and were removed in this
@@ -51,16 +66,105 @@ four parallel agent passes, re-verified together afterward. **Uncommitted at
 the time of this note** — see the commits immediately following it in `git
 log` for the actual landing.
 
-Remaining, in priority order:
+**2026-07-27 update: a second audit ran, aimed at installability, mobile
+behavior and trustworthiness** (the owner's brief: make the app downloadable
+from the website with a button in Settings, improve the mobile experience, and
+confirm the app is not malicious). It produced four new backlogs — § 9.7 P-series,
+§ 9.8 W-series, § 9.9 M-series, § 9.10 S-series. Every finding in them was
+verified against the code or the built output; the numbers quoted are measured.
 
-1. **H1** (the counter's cash moment) is now unblocked — H2 landed, so H1 can
-   land behind its lazy boundary without touching the student bundle.
-2. **H3** (surface the V3 price-drift on the student's ticket) is unblocked —
-   V3's backend half (`expected_total` / `price_changed`) is in.
-3. **Q3/Q4** ("the rush", "shopkeeper runs out mid-cook") are the next-highest
-   value tests — they exercise the concurrency invariants V1/V2/V10 just
-   hardened.
-4. H4–H8 and Q5–Q9 remain open and authorized, unstarted.
+**2026-07-27, third pass (same day): the top of that priority list landed.**
+Three parallel agents, each in an isolated git worktree, each test-first per
+§ 12, each running its own full gate before merge; merged back to `main`
+sequentially (two auto-merged cleanly, one needed a trivial non-conflicting
+merge of `main.tsx` since two bundles both added imports to it), then the full
+frontend gate was re-run once on the merged tree (numbers above). **Landed:**
+
+- **W1 (§ 9.8) — FIXED.** `sw.ts` now calls `skipWaiting()`/`clientsClaim()`/
+  `cleanupOutdatedCaches()`. Live-verified in the built artifact (`dist/sw.js`
+  contains the calls; a stashed rebuild of the unfixed file confirmed they were
+  absent before). **Not** verified against a real device/deploy taking over a
+  live tab without closing it — that still needs D-6.
+- **W6 (§ 9.8) — FIXED.** Font imports narrowed to latin/latin-ext subsets only.
+  Precache 1058 KB → 799.06 KiB.
+- **W9 (§ 9.8) — FIXED.** `notificationclick` now rejects `//`-prefixed and
+  cross-origin payload URLs, falls back to `/`.
+- **W7 (§ 9.8) — investigated, not changed.** `@fontsource`'s per-subset CSS
+  bundles woff+woff2 in one `@font-face`; dropping `.woff` cleanly would need
+  hand-authored `@font-face` rules bypassing `@fontsource` (manual-sync risk on
+  future bumps). Left as-is per its own "don't contort the build" guidance;
+  shrank from 39→14 files per format as a side effect of W6 anyway.
+- **W2 (§ 9.8) / P7 (§ 9.7) — FIXED**, `deploy/Caddyfile`. `/assets/*` →
+  `public, max-age=31536000, immutable`; `/`, `/index.html`, `/sw.js`,
+  `/manifest.webmanifest`, and the SPA-fallback route → `no-cache`.
+  `manifest.webmanifest` gets an explicit `Content-Type: application/manifest+json`
+  override. **A real bug was caught in local testing**: an unconditional
+  `header Cache-Control no-cache` was clobbering the `/assets/*` override
+  regardless of source order (Caddy compiles repeated `header` directives so
+  the last one wins) — fixed by making the two matchers mutually exclusive
+  (`path /assets/*` vs `not path /assets/*`). Verified with `caddy validate`
+  and a local `caddy start` + `curl -I` against all six paths. **Not**
+  verified against the real production domain — that's D-6; a verification
+  table is now in `deploy/RUNBOOK.md` § 5 for whoever runs it.
+- **S1 (§ 9.10) / S2 (§ 9.10) — FIXED**, same Caddyfile `header` block.
+  `frame-ancestors 'none'` added to the CSP, `X-Frame-Options: DENY` and
+  `Permissions-Policy` added (mirroring `middleware/security.go`), and
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains` added
+  (deliberately no `preload`). The Caddyfile's old comment claiming the Go and
+  Caddy header sets were "identical" was checked and was **false** — fixed and
+  the comment corrected to say why the two are intentionally not identical.
+- **P1 (§ 9.7) — FIXED.** New `/settings` route, lazy-loaded, both roles, entry
+  point is a "Settings" item added to `AvatarMenu` above Log out (no new
+  bottom-nav tab, per spec). Sections: Get the app, Notifications, Account,
+  About Khaao (placeholder, S3's job), version footer (placeholder, S4's job) —
+  both placeholders are explicit TODOs, no fabricated content.
+- **P2 (§ 9.7) — FIXED.** New `lib/install.ts`, single source of truth for
+  install state, `beforeinstallprompt`/`appinstalled` listeners registered at
+  module scope in `main.tsx` before React mounts (fixes the one-shot-card root
+  cause). Fixed the pre-existing bug where `prompt()` was called without
+  awaiting `userChoice`, losing the deferred event on cancel. New
+  `components/settings/GetTheApp.tsx` renders all four install states.
+  **A real bug was caught and fixed mid-implementation**: the initial
+  `getInstallState()` returned a fresh object per call, breaking
+  `useSyncExternalStore`'s snapshot-stability contract ("Maximum update depth
+  exceeded" in every consumer) — fixed by caching one singleton object per
+  state kind.
+- **P3 (§ 9.7) — FIXED.** New `lib/push.ts` shares the subscribe flow between
+  `PushNotificationSetup` and the new `components/settings/NotificationSettings.tsx`,
+  which shows honest per-permission-state UI (`default`/`denied`/`granted`)
+  with a Reconnect action for W5's user-facing half. "Send a test notification"
+  intentionally not built (needs a backend endpoint, out of scope).
+- **P6 (§ 9.7) / W4 (§ 9.8) — FIXED.** `appinstalled` listener added to
+  `lib/install.ts`; both `InstallPrompt` and Settings self-correct. Dismissal
+  asymmetry fixed — both iOS and Android now use a 30-day time-boxed dismissal
+  instead of iOS-permanent/Android-per-load.
+
+**Still open, in priority order:**
+
+1. **W3/W8 (§ 9.8)** — both prompt cards still collide with the bottom nav on
+   notched iPhones (arithmetic bug, `bottom-20` vs the nav's real 90 px height).
+   Not touched by this pass.
+2. **W5 (§ 9.8)** — the backend half: re-posting a pruned subscription is still
+   not wired into `PushNotificationSetup`'s mount effect (P3 built the *manual*
+   Reconnect button; W5 also wants the *silent* automatic re-post). Verify
+   whether P3's Reconnect button alone is judged sufficient or whether the
+   silent auto-repost is still wanted, then close this out.
+3. **H1** (the counter's cash moment) — unblocked since H2 landed.
+4. **H3** (surface the V3 price-drift on the student's ticket) — unblocked
+   since V3 landed.
+5. **Q3/Q4** ("the rush", "shopkeeper runs out mid-cook") — exercise the
+   concurrency invariants V1/V2/V10 hardened.
+6. **P4/P5 (§ 9.7)** — richer manifest (screenshots/id/shortcuts), Login
+   install mention. Independent of this pass, unstarted.
+7. **S3/S4/S5 (§ 9.10)** — the two placeholders P1 left (About Khaao, version
+   footer) plus dependency-provenance verification. S3 needs real
+   operator/contact facts from the owner — do not fabricate them.
+8. **M1–M6 (§ 9.9)**, H4–H8, Q5–Q9, and the rest of § 9.8 remain open and
+   authorized, unstarted.
+
+**Do not promote the § 9.7 install push to real students until W3 is fixed** —
+the install card itself currently covers the bottom nav on notched iPhones,
+which is a bad first impression for the exact feature this pass just built.
 
 ---
 
@@ -351,10 +455,24 @@ phone or counter tablet. These are standing rules, not suggestions:
    (`isError` alone must never replace rendered data). Never treat a network
    failure as an auth failure. Every mutation shows a pending state and toasts
    on error.
-8. **Performance budget:** initial student JS ≤ ~250 KB raw. **Currently 250.24
-   KB — over.** New heavy dependencies must be lazy chunks (follow `App.tsx`'s
-   route-group `lazy()` pattern). Menu photos always render through
-   `cloudinaryThumb(url, 2×display-px)` — never a raw `secure_url`.
+8. **Performance budget — two numbers, both binding:**
+   - **Initial student JS ≤ ~250 KB raw.** Currently **241.49 KB** after H2 and
+     the § 9.7 Settings work (P1–P3/P6 landed as a separate lazy chunk, +1.92 KB
+     of shared-import cost to the student bundle) — under, with ~8.5 KB of
+     headroom. This is parse-and-execute on first paint.
+   - **Service-worker precache ≤ ~800 KB.** Currently **799.06 KiB — just under**
+     (was 1058 KB; see § 9.8-W6, fixed 2026-07-27: narrowed `@fontsource`
+     imports to latin/latin-ext subsets only, reclaiming ~244 KB of
+     cyrillic/greek/vietnamese font weight that could never render a glyph in
+     this app). This is what every phone actually downloads when it installs,
+     over campus Wi-Fi. Headroom here is thin — budget carefully before adding
+     more precached weight (M1's persisted-cache work is next in line and must
+     account for this).
+
+   New heavy dependencies must be lazy chunks (follow `App.tsx`'s route-group
+   `lazy()` pattern). Menu photos always render through `cloudinaryThumb(url,
+   2×display-px)` — never a raw `secure_url`. **Update both numbers here
+   whenever `npm run build` changes them** (§ 12.5).
 9. **iOS installed-PWA rules** (standalone mode is the real target, with storage
    separate from Safari):
    - No `new Notification(...)` — only `registration.showNotification` via the
@@ -1218,11 +1336,12 @@ promoted to § 9.4-H2 and is no longer deferred.**
 | B8 | Shopkeeper allowlist admin UI | Backend endpoints; today it's env-seeded, fine at this scale. |
 | B9 | httpOnly cookie sessions | § 11.2 — an architecture project, not a task. |
 | B10 | iOS splash screens | Pure asset generation; wait for D-6 to prove it's worth the asset set. |
-| B11 | SW update-prompt UX | `registerType` is `autoUpdate` today; switching to a prompt is a product decision. |
+| ~~B11~~ | ~~SW update-prompt UX~~ | **Superseded by § 9.8-W1.** This entry assumed `autoUpdate` *worked* and that a prompt was the alternative preference. It does not work — `injectManifest` mode never injects `skipWaiting`, so no update can ever activate. Fixing that is now a defect, not a preference. A prompt-based flow is still a legitimate choice, but it is one of W1's two possible fixes rather than a deferred nicety. |
 | B12 | Abandoned-order recovery | An order with *some* but not all items handed over, then abandoned, has no terminal path — `Reject` refuses once `handed_qty > 0`, and `ExpiryTick` skips any order with handover activity (matches § 3's documented state machine, not a bug). The order — and the student's one-active-order slot — stays stuck. A real fix needs an explicit shopkeeper "write off / abandon" action: endpoint + service + UI + copy + Hindi pairing, and a product decision on what it means (unpaid-completed? a new terminal status?). |
 | ~~B13~~ | ~~Lazy-split the shop shell~~ | **Promoted to § 9.4-H2** — the bundle is now over budget, so this is blocking rather than optional. |
 | B14 | "Accept" with every item unchecked silently rejects the order | Unchecking *all* pending items and pressing green **Accept** sends `rejectedItemIds = all`, which the backend turns into a full rejection. Defensible, but a green "Accept" producing a rejection is a UX trap. A fix would disable/relabel Accept when nothing is checked — cosmetic, and a copy decision + Hindi pairing. |
 | B15 | No business-day reset for `item_pool.qty` / `menu_items.out_of_stock` | `docs/SPEC.md` documents a `POST /api/shop/day/close` zeroing the pool and resetting stock, and `MenuRepo.ResetStock`/`PoolRepo.ZeroAll` still exist for it — but nothing calls either (no route, no service, no scheduler). Leftover pool units carry into the next business day and get instantly FCFS-allocated to the first new order: food from a previous day served without anyone cooking or acknowledging it. **Real and reachable.** The fix needs a product decision (automatic at local midnight vs. tied to the shop-status transition vs. an explicit shopkeeper action), not a targeted code change. **Note the interaction with V6** — fixing V6 makes any status-based day-reset implementation correct rather than subtly wrong. |
+| B16 | A real Android app (Play Store TWA) | § 9.7 recommends the PWA install path and **explicitly rejects a hosted `.apk` download** — it excludes every iPhone on campus and triggers Android's "this file may be harmful" + "install unknown apps" warnings, which is the opposite of the owner's trust goal. If a store presence is genuinely wanted later, the path is a Trusted Web Activity via Bubblewrap: Play Console account, signing keys, a hosted `.well-known/assetlinks.json`, and a per-release build. That is an ownership commitment, not a task. **iOS has no equivalent** — Safari's Add to Home Screen stays the only route there, so the PWA work in § 9.7 is required either way and is never wasted. |
 
 **Caveats worth knowing (recorded, not tasks):**
 
@@ -1238,6 +1357,943 @@ promoted to § 9.4-H2 and is no longer deferred.**
   and `onOpen` resyncs it. Deliberate self-heal, not data loss.
 - `MarkDone` caps qty at current unmet demand — a shopkeeper cannot cook ahead
   speculatively. Deliberate, enforced server-side so the API can't bypass it.
+
+---
+
+### 9.7 Install & distribution backlog (P-series) — P1/P2/P3/P6/P7 DONE, P4/P5 OPEN
+
+**Owner's ask (2026-07-27):** *"make sure our app is downloadable in their phone
+from the website directly — add a download button in Settings where people can
+download our app from."*
+
+#### The decision this rests on, stated plainly
+
+There are two ways to read "downloadable," and they are not equally good ideas:
+
+| | **PWA install** (recommended, and what this series builds) | **A real `.apk` download** |
+|---|---|---|
+| How | Browser's own "Add to home screen" / `beforeinstallprompt` | Wrap the site in a TWA (Bubblewrap), sign it, host the file |
+| Cost | UI work only — the app is already an installable PWA | Play Console account, signing keys, `assetlinks.json`, an update channel we own, per-release builds |
+| iPhone | Works (Safari "Add to Home Screen") | **Impossible.** No sideloading on iOS. Half the campus gets nothing. |
+| Trust | Installs from `khaao.<domain>` over HTTPS, no OS warnings | Android shows *"this file may be harmful"* + "install unknown apps" — the exact thing the owner asked us to avoid |
+| Updates | Ships with the next deploy | Every student must re-download, forever |
+
+**Recommendation: build the PWA install path (P1–P7). Do not ship an APK.**
+An APK download link is the single fastest way to make a legitimate app *look*
+malicious to a student, and it excludes every iPhone on campus. If the owner
+still wants a real store presence later, the path is a TWA in the Play Store,
+not a file on a webpage — recorded as **B16** in § 9.6, not authorized here.
+
+Everywhere below, **"Download the app" is the label students see; a PWA install
+is the mechanism.** Do not write "install PWA" in the UI — nobody knows what
+that means (§ 9.2 writing rules: name things by what the person controls).
+
+| # | Priority | One-line | Files owned | Status |
+|---|---|---|---|---|
+| P1 | **HIGH — do first** | There is no Settings screen at all — build it, it's the container for everything else here | new `pages/Settings.tsx`, `App.tsx`, `components/layout/Layout.tsx` | **DONE** |
+| P2 | **HIGH** | The "Get the app" section: a real, always-available download button per platform | new `components/settings/GetTheApp.tsx`, new `lib/install.ts` | **DONE** |
+| P3 | **HIGH** | Notification controls in Settings — today there is no way back from a dismissed or denied prompt | `pages/Settings.tsx`, `components/layout/PushNotificationSetup.tsx` | **DONE** |
+| P4 | **HIGH** | The manifest is too thin for a real install dialog — no `id`, no `screenshots` | `vite.config.ts`, new `public/screenshot-*.png` | Open |
+| P5 | MEDIUM | Login is the first screen every student sees and it never mentions the app is installable | `pages/Login.tsx` | Open |
+| P6 | MEDIUM | Nothing listens for `appinstalled` — the app can't tell installed from not-installed | `lib/install.ts`, `components/layout/InstallPrompt.tsx` | **DONE** |
+| P7 | MEDIUM | Deploy-side: the install can't work correctly without cache headers and MIME types | `deploy/Caddyfile`, `deploy/RUNBOOK.md` | **DONE** |
+
+**Sequencing:** P1 → P2 → (P3, P5, P6 in any order). P4 and P7 are independent
+of all of them and can run concurrently from the start.
+
+---
+
+#### P1 — [HIGH, DO FIRST] There is no Settings screen
+
+**Verified:** `src/pages/` contains `Login`, `student/{Menu,OrderStatus}` and
+`shop/{Orders,Prep,History,MenuManage}`. There is no Settings route in
+`App.tsx`, no settings entry in either tab set in `Layout.tsx`, and the only
+account surface in the whole app is `AvatarMenu` — a dropdown containing the
+user's name and a Log out button. Everything the owner asked for needs a home,
+and there isn't one.
+
+**What to build:** a `/settings` route, available to **both** roles, lazy-loaded
+as its own chunk (§ 9.1.8 — it must not land in the student's initial JS).
+
+**Entry point — deliberate:** add a **Settings** item to the existing
+`AvatarMenu`, above Log out. **Do not add a bottom-nav tab.** The student nav is
+2 tabs and the shop nav is 4; settings is a rare destination and the thumb zone
+belongs to Menu/Order (§ 9.1.3). `AvatarMenu` already handles outside-click and
+Escape — reuse it, don't rebuild it.
+
+**Structure** (each section is a `Card`; nothing here invents a new component):
+
+```
+Settings
+  ┌ Get the app ──────────────  ← P2. First section. This is the ask.
+  ┌ Notifications ────────────  ← P3
+  ┌ Account ──────────────────  name, email, role, Log out
+  ┌ About Khaao ──────────────  ← S3 (§ 9.10). Who runs this, what it stores.
+  └ version / build ──────────  ← S4 (§ 9.10)
+```
+
+**Rules to honor:** the shopkeeper sees the same screen, so every string needs a
+Hindi pair via `useLanguage()` **except** the student-only ones, which stay
+English by design (§ 9.1.11) — gate on `isShop` the way `AvatarMenu` already
+does, not on `language` alone, or a shared device leaks Hindi into a student
+session. 44 px targets. No horizontal scroll at 375 px. `pb-safe` on anything
+docked to the bottom.
+
+**Test:** a new `Settings.test.tsx` — the route renders for both roles; the
+student render contains no Hindi; the AvatarMenu item navigates to it.
+
+---
+
+#### P2 — [HIGH] "Get the app": a download button that is always there
+
+**The gap, verified:** `InstallPrompt.tsx` is the *only* install affordance in
+the app, and it is a one-shot card. It renders when `beforeinstallprompt` fires
+(once per page load) or, on iOS, when a `localStorage` flag is absent. Tap the
+X and:
+
+- **iOS:** `khaao_install_dismissed` is written to `localStorage` and the hint
+  never returns. `clearAuthStorage()` deliberately preserves this key across
+  logout (`api/client.ts:50`), so it survives even a re-login. **The student can
+  never be shown how to install the app again on that phone.**
+- **Android/Chrome:** the deferred event is discarded. `beforeinstallprompt` will
+  not fire again until a reload, and there is no button anywhere that could use
+  it if it did.
+
+A student who dismisses the card once — during the lunch rush, because it is
+covering the bottom nav (**see W3, § 9.8**) — has permanently lost the ability to
+install the app. That is the actual state of "downloadable from the website"
+today.
+
+**What to build:** a `Get the app` section in Settings that works from a cold
+start, on every platform, every time.
+
+Extract the platform detection out of `InstallPrompt.tsx` into a shared
+`lib/install.ts` so both surfaces read the same truth:
+
+```ts
+// lib/install.ts — one source of truth for install state.
+export type InstallState =
+  | { kind: 'installed' }                 // display-mode: standalone, or navigator.standalone
+  | { kind: 'promptable'; prompt(): Promise<void> }  // a live beforeinstallprompt is held
+  | { kind: 'ios-manual' }                // iOS Safari: Share → Add to Home Screen
+  | { kind: 'unsupported' };              // desktop Firefox, in-app webviews, etc.
+```
+
+The deferred `beforeinstallprompt` event must be **held at module scope, captured
+by a listener registered in `main.tsx` before React mounts** — not inside a
+component. The event fires early, often before the Settings screen has ever been
+mounted; a component-scoped listener is precisely why the current card is
+one-shot.
+
+Render per state, in the § 9.2 voice:
+
+| State | What the section shows |
+|---|---|
+| `promptable` | **Download Khaao** button → calls `prompt()`, then **awaits `userChoice`** and only clears the held event on `'accepted'`. The current code (`InstallPrompt.tsx:78`) drops the event without awaiting, so cancelling the OS dialog loses the install forever — do not repeat that. |
+| `ios-manual` | Numbered steps with the real Share glyph drawn inline as an SVG path (§ 9.2: **no emoji-as-icon**). "Tap Share, then Add to Home Screen." Not a button that does nothing. |
+| `installed` | A stamped confirmation, in the `StatusStamps` idiom — "Installed." No button. |
+| `unsupported` | Say what to do instead: open `khaao.<domain>` in Chrome or Safari on the phone. Never show a dead button. |
+
+**Copy:** the heading is **"Get the app"** and the button says **"Download
+Khaao."** No "PWA," no "install prompt," no jargon. One line underneath saying
+what it buys them — opens from the home screen, works on a bad connection,
+notifies when food is ready. Hindi pair for the shopkeeper.
+
+**Test:** a new `GetTheApp.test.tsx` — each of the four states renders its own
+affordance; `promptable` calls `prompt()` on tap; a `userChoice` of `dismissed`
+leaves the button still usable; `installed` renders no button.
+
+---
+
+#### P3 — [HIGH] Notifications have no controls and no way back
+
+**Verified:** `PushNotificationSetup.tsx` is the only notification surface.
+Dismissing it writes `khaao_push_dismissed` to `sessionStorage` (line 124), and
+the effect bails outright when `Notification.permission === 'denied'` (line 54).
+So: a student who taps "Block" in the browser dialog, or who dismisses the card,
+gets **no notification when their food is ready** and there is nothing anywhere
+in the app that says so or tells them how to fix it. For a product whose entire
+signature moment is the "ready" push, that is the highest-cost silent failure we
+have.
+
+**What to build**, in Settings:
+
+- The **current permission state**, named honestly: *"Notifications are off — you
+  won't know when your food is ready."*
+- `default` → an **Enable notifications** button that runs the existing
+  subscribe flow (reuse the logic in `PushNotificationSetup.handleEnable`; pull
+  it into a shared function rather than copying it).
+- `denied` → per-browser instructions to re-allow, since **the app cannot
+  re-prompt after a denial** — that is a browser rule, not our bug. Say that
+  plainly rather than showing a button that will silently no-op.
+- `granted` but **no subscription on the server** → a **Reconnect notifications**
+  button. This is the user-facing half of **W5 (§ 9.8)**; ship them together.
+- A **Send a test notification** action while debugging is tempting — it needs a
+  backend endpoint, so it is **out of scope**. Record it in § 9.6 if wanted.
+
+**Test:** extend `PushNotificationSetup.test.tsx` and add coverage in
+`Settings.test.tsx` — each permission state renders its own affordance; `denied`
+renders instructions and no button.
+
+---
+
+#### P4 — [HIGH] The manifest is too thin for a real install dialog
+
+**Verified** against the built `dist/manifest.webmanifest`:
+
+```json
+{"name":"Khaao — canteen pre-order","short_name":"Khaao","description":"…",
+ "start_url":"/","display":"standalone","background_color":"#dce4de",
+ "theme_color":"#DCE4DE","lang":"en","scope":"/","icons":[…3 icons…]}
+```
+
+Missing, and each one costs something concrete:
+
+| Field | What its absence costs |
+|---|---|
+| `screenshots` (with `form_factor`) | **The big one.** Without narrow-form-factor screenshots, Chrome on Android shows the cramped mini-infobar instead of the rich install dialog with app art. This is the difference between "some website wants to add an icon" and "this is an app." Directly undercuts the owner's ask. |
+| `id` | App identity defaults to `start_url`. If `start_url` ever changes, every existing install is orphaned and re-installs as a second app. Set `"id": "/"` now — it is free today and unfixable later. |
+| `display_override` | No `["standalone", "minimal-ui"]` fallback chain. |
+| `categories` | `["food", "productivity"]` — used by install surfaces and listings. |
+| `shortcuts` | A long-press on the home-screen icon offers nothing. Two entries — "My order" → `/order`, "Menu" → `/` — are a genuine daily-use win. Shop shortcuts are pointless (one device, always on `/shop`). |
+
+**Screenshots must be real.** Capture them from the running app at 1080×1920
+(`form_factor: "narrow"`): the student menu, and the ready-stamp moment — that
+second one is the product's emotional peak (§ 9.2) and is what should sell the
+install. Do not fabricate mockups. Save to `public/`, and note they are **not**
+covered by the current `injectManifest.globPatterns` PNG glob concern in **W6
+(§ 9.8)** — coordinate if W6 lands first, since screenshots must *not* be
+precached (they are install-dialog art, never rendered in-app).
+
+**Verify:** build, then load `dist/manifest.webmanifest` in Chrome DevTools →
+Application → Manifest and confirm zero warnings and that the install dialog
+preview shows the screenshots. Record the result here.
+
+---
+
+#### P5 — [MEDIUM] Login never mentions the app is installable
+
+`pages/Login.tsx` is the first screen every student ever sees, and the only one
+they see before signing in. It renders the K mark, "Order ahead · Skip the
+line," a Google button and the allowed-domain line. Nothing about the app being
+installable.
+
+Settings (P1/P2) is behind the login wall — so on the very screen where a
+student is deciding whether this thing is worth their Google account, the
+install path is invisible.
+
+**Fix shape:** one quiet line beneath the ticket card — "Add Khaao to your home
+screen" — that opens the same install flow as P2 via `lib/install.ts`. It is a
+footnote, not a second call to action: **Continue with Google stays the only
+primary button on this screen.** Hide it entirely when `install.ts` reports
+`installed` (a student opening the installed app is already there).
+
+Pairs naturally with **S3 (§ 9.10)**, which adds the provenance line to this
+same screen. Same file — **sequence them or give both to one agent** (§ 12.1).
+
+**Test:** `Login.test.tsx` (new) — the line renders when promptable, is absent
+when `installed`, and the Google button is unaffected in both.
+
+---
+
+#### P6 — [MEDIUM] Nothing listens for `appinstalled`
+
+**Verified:** `InstallPrompt.tsx` registers exactly one listener,
+`beforeinstallprompt` (line 59). There is no `appinstalled` listener anywhere in
+`src/`. Consequences:
+
+- A student who installs the app from Chrome's own menu (⋮ → Add to Home screen)
+  — bypassing our card entirely — keeps being shown the install card in the tab
+  they still have open.
+- `computeShowIosHint()` checks `display-mode: standalone`, which is correct but
+  only re-evaluated on mount, so the same staleness applies within a session.
+
+**Fix shape:** in `lib/install.ts` (P2), listen for `appinstalled`, flip the
+shared state to `{ kind: 'installed' }`, drop the held prompt, and clear
+`khaao_install_dismissed`. `InstallPrompt` and the Settings section both read
+that state, so both correct themselves without extra wiring.
+
+While in this file, **fix the dismissal asymmetry**: the iOS hint dismissal is
+permanent (`localStorage`) while the Android one is per-page-load. Once P2 gives
+Settings a permanent home for the install button, the card's job is only to be a
+polite one-time nudge — make both dismissals identical and time-boxed (store a
+timestamp, re-offer after ~30 days), and let Settings be the always-available
+path. Do not leave a permanent flag with no user-facing way to clear it.
+
+**Test:** extend the P2 test file — dispatching `appinstalled` moves the state
+to `installed` and clears the dismissal key.
+
+---
+
+#### P7 — [MEDIUM] The install cannot work correctly without deploy-side headers
+
+Owned by `deploy/Caddyfile`. This is the deployment half of **W1 and W2
+(§ 9.8)** — the app-side fix is necessary but not sufficient without it. See W2
+for the failure scenario and the exact header set; this entry exists so the
+Caddyfile work has an owner in this series and is not lost between the two.
+
+Additionally, confirm at D-6 that Caddy serves `manifest.webmanifest` as
+`application/manifest+json`. Caddy's MIME table generally covers it; if it falls
+back to `application/octet-stream`, the manifest is ignored and **the app
+silently stops being installable** with no console error. One `curl -I` proves
+it — do not assume.
+
+---
+
+### 9.8 PWA / mobile find-fix backlog (W-series) — W1/W2/W4/W6/W9 DONE, W3/W5/W8 OPEN, W7 INVESTIGATED (no change)
+
+Found in the **2026-07-27 install-and-mobile audit**. Every item below was
+verified against the code or the built output — the numbers quoted are measured,
+not estimated.
+
+| # | Severity | One-line | Files owned | Status |
+|---|---|---|---|---|
+| W1 | **CRITICAL** | The service worker can never activate an update — every installed phone is pinned to the build it first installed | `src/sw.ts` | **FIXED** — `skipWaiting()`/`clientsClaim()`/`cleanupOutdatedCaches()` added, live-verified present in `dist/sw.js`. Not verified on a real device/deploy (needs D-6). |
+| W2 | **HIGH** | No cache-control policy at the edge — a stale `index.html` serves asset URLs that no longer exist | `deploy/Caddyfile`, `deploy/RUNBOOK.md` | **FIXED** — verified with `caddy validate` + local `curl -I`. Not verified against the real production domain (needs D-6). |
+| W3 | **HIGH** | Both prompt cards collide with the bottom nav on notched iPhones | `components/layout/InstallPrompt.tsx`, `components/layout/PushNotificationSetup.tsx` | **Open, unstarted** — not touched by the 2026-07-27 third pass. Blocks promoting the install push to students (a bad first impression on the exact card being promoted). |
+| W4 | **HIGH** | Covered by **P2/P6** — the install prompt is one-shot and unrecoverable | — (see § 9.7) | **FIXED** — P2/P6 landed (see § 9.7 table). |
+| W5 | **HIGH** | A push subscription pruned by the backend is never re-created — notifications die silently and permanently | `components/layout/PushNotificationSetup.tsx` | **Open** — P3 (§ 9.7) built the *manual* Reconnect button in Settings, but the *silent automatic* re-post on mount is still not wired in. Decide whether the manual button alone closes this, or finish the silent path. |
+| W6 | MEDIUM | The service worker precaches 1058 KB, of which 244 KB is fonts the app can never render | `vite.config.ts`, `src/main.tsx` | **FIXED** — precache now 799.06 KiB / 49 entries. Font imports narrowed to latin/latin-ext subsets, same weight set kept (mono 500/600/700, sans 400/500/600/700). |
+| W7 | LOW | 39 legacy `.woff` files (~430 KB) ship to the server and are never fetched | `src/main.tsx` | **Investigated, not changed.** `@fontsource` bundles woff+woff2 in one `@font-face`; dropping `.woff` cleanly needs hand-authored `@font-face` rules (manual-sync risk against future `@fontsource` bumps). Shrank 39→14 files per format as a side effect of W6. |
+| W8 | LOW | Both prompt cards are hand-rolled `fixed` divs, against § 9.1.3 | same files as W3 — fold into W3 | **Open** — folds into W3, not started. |
+| W9 | LOW | `notificationclick` navigates to an unvalidated payload URL | `src/sw.ts` | **FIXED** — rejects `//`-prefixed/cross-origin URLs, falls back to `/`. Test-covered in `sw.test.ts`. |
+
+---
+
+#### W1 — [CRITICAL] The service worker can never activate an update
+
+**The defect:** `vite.config.ts` sets `strategies: 'injectManifest'` **and**
+`registerType: 'autoUpdate'`. In `generateSW` mode the plugin injects
+`skipWaiting`/`clientsClaim` into the generated worker. **In `injectManifest`
+mode it does not** — the hand-written `src/sw.ts` is shipped as-is, and it calls
+neither. Verified two ways:
+
+```
+$ grep -c "skipWaiting\|clientsClaim" dist/sw.js
+0
+```
+
+and in the plugin's own registration client
+(`node_modules/vite-plugin-pwa/dist/client/build/register.js`), where the
+`autoUpdate` path deliberately **never sends the skip-waiting message**:
+
+```js
+const updateServiceWorker = async (_reloadPage = true) => {
+  await registerPromise;
+  if (!auto) { sendSkipWaitingMessage?.(); }   // ← `auto` is true for us
+};
+```
+
+In `autoUpdate` mode the client only listens for `activated` and reloads. `sw.ts`
+registers no `message` listener either, so nothing can ever trigger the
+transition.
+
+**Failure scenario:** we deploy a fix. A student's installed PWA fetches the new
+`sw.js`, installs it, and it enters `waiting`. The old worker still controls the
+page, so `activated` never fires, so the reload never happens. A waiting worker
+only takes over when **every** window of the app is closed — and an installed
+PWA on a phone is backgrounded, not closed, for weeks. That student keeps
+running the old build, served from the old precache, **indefinitely**. When the
+backend contract moves under them, they get errors we cannot reproduce and
+cannot push a fix to. This gets worse with every additional install, which is
+exactly what § 9.7 is about to do.
+
+**Fix shape:** in `src/sw.ts`, alongside the existing `precacheAndRoute`:
+
+```ts
+import { clientsClaim } from 'workbox-core';
+self.skipWaiting();
+clientsClaim();
+```
+
+plus `cleanupOutdatedCaches()` from `workbox-precaching`, which is not called
+today either — old precache generations accumulate in Cache Storage across
+deploys and are never reclaimed.
+
+**Be deliberate about the tradeoff, and record the choice here.** `skipWaiting`
+swaps the controlling worker under a live page. For this app that is the right
+call — sessions are short, the shell is small, and `registerType: 'autoUpdate'`
+already reloads on activation, so the page is refreshing anyway. **This also
+resolves § 9.6-B11**, which recorded "switch to an update prompt" as an open
+product decision on the assumption that autoUpdate *worked*. It does not.
+Choosing a prompt instead is still legitimate, but it is now a fix, not a
+preference — and it needs the `message`/`SKIP_WAITING` listener that is likewise
+absent today.
+
+**Test:** this is § 9.5-Q9's territory (SW handlers, mocked global). Assert the
+module calls `skipWaiting()` on evaluation and registers `clientsClaim`. Then
+**live-verify**, which is what actually counts: build, serve, install, deploy a
+changed build, and confirm the new version takes over **without** closing every
+tab. Record the result here.
+
+**Sequence with W6** — both own `sw.ts`/`vite.config.ts`. W1 goes first; it is
+correctness and W6 is bytes.
+
+---
+
+#### W2 — [HIGH] No cache-control policy at the edge
+
+**Verified:** the static block in `deploy/Caddyfile` is `root` + `encode` +
+`try_files` + `file_server`, and the `header` block sets three security headers.
+**No `Cache-Control` is set on anything.** Caddy's `file_server` emits `Etag`
+and `Last-Modified` but no explicit freshness directive, which leaves every
+intermediary and the browser free to heuristically cache — typically ~10 % of
+the resource's age, which for a file that has been on disk a week is hours.
+
+**Failure scenario:** we deploy. `index.html` on disk now references
+`/assets/index-NEWHASH.js`. A student's browser or a campus/ISP proxy serves the
+*old* `index.html` from its heuristic cache, which references
+`/assets/index-OLDHASH.js` — a file the new build deleted. The request 404s and
+the student gets a white screen. They cannot fix it; a hard refresh is not a
+gesture most people know, and inside an installed PWA there is no reload button
+at all. Compounding: `sw.js` under the same heuristic caching means the new
+service worker isn't even discovered, so W1's fix cannot take effect either.
+
+**Fix shape** — Vite's asset hashing makes the split unambiguous:
+
+```
+@font-face never-changing, content-hashed:
+  handle /assets/*   → Cache-Control: public, max-age=31536000, immutable
+Identity documents, must always revalidate:
+  /, /index.html, /sw.js, /manifest.webmanifest
+                     → Cache-Control: no-cache
+```
+
+`no-cache` (revalidate every time) is correct here, **not** `no-store` — a 304
+is cheap and keeps the app launchable on a slow connection. Getting these two
+backwards is the classic version of this bug; `/assets/*` must be `immutable`
+and the four documents must not be.
+
+**Verify:** `curl -I` each of the six paths against a real deploy and paste the
+`Cache-Control` values into this file. Add the check to `deploy/RUNBOOK.md` § 5
+so a future frontend deploy cannot silently regress it. **This is P7's other
+half** — one agent should own both.
+
+---
+
+#### W3 — [HIGH] Both prompt cards collide with the bottom nav on notched iPhones
+
+**Verified by arithmetic against the source:**
+
+| Element | Position | Height |
+|---|---|---|
+| `<nav>` (`Layout.tsx:374`) | `fixed bottom-0`, `z-30` | `h-14` (56 px) **+ `pb-safe`** = `env(safe-area-inset-bottom)`, **34 px** on a notched iPhone → **90 px** |
+| `InstallPrompt` (`:97`) | `fixed bottom-20`, `z-40` | bottom edge sits at **80 px** |
+| `PushNotificationSetup` (`:133`) | `fixed bottom-20`, `z-40` | identical |
+
+80 px < 90 px, so on every iPhone with a home indicator the card's lower edge
+sits **inside** the nav bar. At `z-40` over the nav's `z-30`, the card wins: it
+covers the Menu/Order tab labels, and taps in that strip hit the card instead of
+the tab. This is a direct § 9.1.4 violation on the app's two most important
+one-time prompts — including the one asking students to install the app.
+
+**It gets worse on the Menu screen.** The cart bar (`pages/student/Menu.tsx:588`)
+is `z-50` and pinned at
+`bottom-[calc(env(safe-area-inset-bottom)+56px)]` — which is **the correct
+idiom, already in this codebase**, and it outranks the prompt cards. So during
+the one moment that matters (a student with items in their cart), the cart bar
+and an install card fight for the same strip.
+
+**Fix shape:** replace `bottom-20` on both cards with the Menu's proven
+expression, and add whatever additional offset keeps them clear of the cart bar
+when it is present. Do not invent a third number — take the one that already
+works.
+
+**Fold W8 in here.** Both cards are hand-rolled `fixed` divs, which § 9.1.3
+forbids ("every overlay goes through `Modal`/`ConfirmDialog`"). They are not
+modal — they must not trap focus or lock scroll — so the right outcome is a
+small shared `BottomSheetCard` in `components/ui/`, portalled to
+`document.body` like `Modal`, owning the safe-area math once. Two files stop
+duplicating it and § 10's `backdrop-filter` containing-block trap stops being
+reachable (the nav directly above them has `backdrop-blur`).
+
+**Test:** extend `PushNotificationSetup.test.tsx` and add an `InstallPrompt`
+test asserting both render through the portal and carry the safe-area class.
+Then screenshot at 375×667 **with a simulated safe-area inset** — the default
+test viewport has none, which is exactly why this survived to now.
+
+---
+
+#### W5 — [HIGH] A pruned push subscription is never re-created
+
+**Where:** `PushNotificationSetup.tsx:75–80`.
+
+```ts
+navigator.serviceWorker.ready.then((registration) => {
+  registration.pushManager.getSubscription().then((subscription) => {
+    if (subscription || installPromptShowingRef.current) return;   // ← here
+    setShowPrompt(true);
+  });
+});
+```
+
+The presence of a **browser-side** subscription is taken as proof that the
+**server** knows about it. Those are two different facts, and § 8 records that
+the backend deliberately self-cleans dead subscriptions ("best-effort,
+self-cleaning dead subscriptions").
+
+**Failure scenario:** a student's phone is off for the weekend. The push service
+returns `410 Gone` for their endpoint and the backend prunes the row — correct
+behavior. The browser, meanwhile, still holds a `PushSubscription` object.
+Monday, the student opens Khaao: `getSubscription()` returns non-null, the
+component returns early, and **nothing is ever sent to the server again**. They
+place orders all semester and never receive another ready notification. No
+error, no prompt, no way to notice — the one screen-off signal the product has
+(§ 9.1.9) is gone. Any backend restore-from-backup or a `push_subscriptions`
+migration reproduces this across the entire student body at once.
+
+**Fix shape:** when a local subscription exists, **re-post it** — call
+`subscribeToPush(endpoint, p256dh, auth)` idempotently rather than returning
+early. The endpoint already exists and re-subscribing an existing row must be a
+no-op server-side (**verify that** before relying on it; if it is not, that is a
+V-series item and must be recorded here). Do it once per session, not per
+render, and never show the prompt card for it — this is silent repair, not a
+user decision. Rate-limit awareness: it is one call per app open per student, on
+an endpoint already covered by `middleware/ratelimit.go`.
+
+Pairs with **P3 (§ 9.7)**, which gives the same repair a manual button for when
+the silent path fails. Ship them together.
+
+**Test:** extend `PushNotificationSetup.test.tsx` — an existing local
+subscription re-posts to the server exactly once and shows no prompt; a fresh
+`serviceWorker.ready` with no subscription still shows the prompt.
+
+---
+
+#### W6 — [MEDIUM] The precache is 1058 KB, and 244 KB of it can never render
+
+**Measured against the committed `dist/`** (73 precache entries, 1058.1 KB):
+
+| Type | Precached |
+|---|---|
+| **woff2** | **483.4 KB (46 %)** |
+| js | 496.7 KB |
+| css | 46.7 KB |
+| png / svg / html / webmanifest | 31.3 KB |
+
+`main.tsx` imports seven `@fontsource` CSS files (IBM Plex Mono 500/600/700 and
+Sans 400/500/600/700). Each pulls **every subset**: latin, latin-ext, cyrillic,
+cyrillic-ext, greek, vietnamese. Of 39 precached font files, **25 are
+cyrillic/greek/vietnamese — 243.7 KB**. Khaao's UI is English and Hindi. IBM
+Plex's Devanagari is a separate family that we do not ship (Hindi falls back to
+the system font), so **not one of those 25 files can ever render a glyph in this
+app.**
+
+Every student's phone downloads all of it on first visit, over campus Wi-Fi, the
+moment the service worker installs — and this series is about to increase how
+many phones do that.
+
+**Two things worth stating honestly:** first, this is a *precache* number, not
+the § 9.1.8 initial-JS number — H2's 239.57 KB is still correct for
+parse-and-execute on first paint. But 496.7 KB of JS *is* pulled down in the
+background, shop chunks included, so H2 bought first-paint time rather than
+bytes-over-the-wire. Second, that means § 9.1.8's single budget line has been
+measuring one of the two numbers that matter. **Both belong in the budget** —
+add the precache figure there when this lands.
+
+**Fix shape**, in order of value:
+
+1. Import only the `latin` and `latin-ext` subsets — `@fontsource/ibm-plex-sans/latin-400.css`
+   and friends. Reclaims ~244 KB, changes nothing visible. **Verify the rendered
+   result on the shop pages** — the Hindi strings must look exactly as they do
+   now (they are already falling back).
+2. Drop unused weights. Seven faces is a lot for a two-family system; audit which
+   are actually referenced in compiled CSS before removing any (§ 10: check the
+   *compiled* output, not assumed source).
+3. Consider excluding the shop route chunks from `globPatterns`. **Weigh this
+   carefully** — precaching is why the shopkeeper's tablet survives a Wi-Fi drop
+   mid-rush, which is a real operational property, not overhead. Probably keep
+   them; if so, write that decision down here so the next audit doesn't reopen it.
+
+Do **not** precache the P4 screenshots — they are install-dialog art and never
+render in-app. Check `globPatterns` after P4 lands.
+
+**Verify:** rebuild and re-run the measurement; record the new precache total and
+composition here.
+
+---
+
+#### W7 — [LOW] 39 legacy `.woff` files ship and are never fetched
+
+`dist/assets` contains 39 `.woff` files alongside 39 `.woff2`, ~430 KB of the
+1.7 MB `dist`. `injectManifest.globPatterns` does not list `woff`, so they are
+**not** precached — no user ever downloads them. They are pure deploy weight and
+noise. Every browser that can run a service worker has supported woff2 for a
+decade, so the `.woff` fallback in the `@fontsource` CSS is unreachable for this
+app's audience. Drop them if the fontsource import style makes it clean; if it
+does not, leave it and note that here — 430 KB of dead files on a server is not
+worth contorting the build for. Fold into W6, same agent.
+
+---
+
+#### W9 — [LOW] `notificationclick` navigates to an unvalidated payload URL
+
+`src/sw.ts:56` reads `event.notification.data.url` and passes it straight to
+`client.navigate()` / `clients.openWindow()`. **Not exploitable today** —
+verified that every URL in `services/push.go` is a server-side constant (`/order`,
+`/shop`), and VAPID signing means only our backend can send a push to these
+subscriptions. This is defense in depth against a future change that makes the
+URL data-derived.
+
+**Fix shape:** before navigating, require the value to start with `/` and not
+`//` (which is protocol-relative and would leave the origin), else fall back to
+`/`. Three lines. Do it while W1 is already in this file.
+
+**Test:** part of § 9.5-Q9 — a payload carrying `https://evil.example/` or
+`//evil.example` navigates to `/`.
+
+---
+
+### 9.9 Mobile experience backlog (M-series) — OPEN, AUTHORIZED, UNSTARTED
+
+**Owner's ask (2026-07-27):** *"frontend improvements we can make better for
+user experience — focus more on mobile things only, many people won't use it
+from laptop."*
+
+Read § 9.1 and § 9.2 first — these sharpen the existing direction and none of
+them is licence to restyle. Distinct from the § 9.4 H-series, which is about
+screens that exist; these are about how the app behaves **as a phone app**.
+
+| # | Priority | One-line | Files owned |
+|---|---|---|---|
+| M1 | **HIGH** | Launching the installed app with no network shows an error screen, not the app | `main.tsx`, `pages/student/Menu.tsx`, `pages/student/OrderStatus.tsx` |
+| M2 | **HIGH** | There is no way to retry — a student on bad campus Wi-Fi has no gesture that means "try again" | `pages/student/Menu.tsx`, `components/layout/Layout.tsx` |
+| M3 | MEDIUM | The offline banner reports the browser's opinion, not ours | `hooks/useOnlineStatus.ts`, `components/layout/Layout.tsx` |
+| M4 | MEDIUM | `theme-color` is a single light value — the status bar is wrong in dark mode and on the ink surfaces | `index.html`, `vite.config.ts` |
+| M5 | MEDIUM | Nothing is reachable one-handed on the tallest phones | `pages/student/Menu.tsx` |
+| M6 | LOW | No `apple-mobile-web-app-status-bar-style` tuning or splash for standalone iOS | `index.html` (see § 9.6-B10) |
+
+---
+
+#### M1 — [HIGH] The installed app is unusable on a cold offline launch
+
+**Verified.** `pages/student/Menu.tsx:330–335`:
+
+```ts
+if (menuQuery.isLoading || shopStatusQuery.isLoading) return <MenuSkeleton />;
+if (menuQuery.isError && menuQuery.data === undefined) { …error screen… }
+```
+
+`OrderStatus.tsx:488–493` is the same shape. The `data === undefined` guard is
+**correct and careful** — it is exactly what § 9.1.7 asks for, and it means a
+*background* refetch failure never replaces rendered data. But TanStack Query's
+cache is in-memory only. There is no persister configured in `main.tsx`. So
+`data` is `undefined` on every cold start, and § 9.1.7's promise — "every screen
+must stay usable on cached data" — holds **within a session and not across
+one.**
+
+**Failure scenario:** a student installs Khaao (which § 9.7 is about to make far
+more common). They open it from the home screen in the basement lab, or in the
+lift, or in the 12:45 crush when the campus AP is saturated. The service worker
+serves the shell instantly — that part works. Then every query fails, `data` is
+`undefined`, and they get an error screen. **The app they installed is more
+broken offline than the website was**, because at least a browser tab kept the
+last page. That is the opposite of what installing is supposed to buy.
+
+**Fix shape:** persist the query cache. `@tanstack/react-query-persist-client`
+with a `localStorage` persister is the intended mechanism.
+
+- **Budget first (§ 9.1.8).** The persist packages are small but not free —
+  measure the initial-chunk delta and record it. H2 left headroom (239.57 KB
+  against 250 KB); do not spend all of it here. If it does not fit, a
+  hand-rolled `localStorage` read/write on just the menu and active-order keys is
+  an acceptable smaller answer — say which you chose and why.
+- **Persist selectively.** The menu and the active order, yes. Anything derived
+  or shop-side, no.
+- **Say the data is stale.** A student must never mistake a cached menu for a
+  live one — prices and stock change. One line in the § 9.2 voice, near the
+  offline banner: *"Showing the menu from 11:42. Prices may have changed."*
+- **Never let stale data reach a mutation.** Placing an order from a cached menu
+  must still hit the network and still surface the 422 path (§ 9.4-H4). Cached
+  reads, live writes — no exceptions.
+
+**Test:** `Menu.test.tsx` — with a primed persisted cache and a failing query,
+the menu renders with the staleness line rather than the error screen; with no
+persisted cache the error screen still renders.
+
+---
+
+#### M2 — [HIGH] There is no retry gesture
+
+Once a student lands on the error screen from M1, or on stale data, the only
+recovery is closing and reopening the app. There is no pull-to-refresh, no retry
+button on the error state (**verify** what `Menu.tsx`'s error branch actually
+offers before writing the fix), and inside an installed PWA there is no browser
+reload button either — that chrome is gone by definition.
+
+**Fix shape:** the smallest thing that works, in this order:
+
+1. A **Try again** button on every error state, wired to the query's `refetch`.
+   This is the required minimum and is cheap.
+2. Refetch on regained connectivity — `useOnlineStatus` already knows; have the
+   transition to online invalidate the active queries.
+3. Pull-to-refresh only if 1 and 2 leave a real gap. Hand-rolled
+   pull-to-refresh on iOS fights the native overscroll and is a reliable source
+   of scroll bugs; **do not add a library for it** (§ 9.1.10).
+
+Not a spinner-and-hope: the button says what it does and shows a pending state
+(§ 9.1.7).
+
+**Test:** `Menu.test.tsx` — the error state renders a retry control that calls
+`refetch`; an offline→online transition triggers a refetch.
+
+---
+
+#### M3 — [MEDIUM] The offline banner reports the browser's opinion
+
+`Layout.tsx:359` renders "You're offline — reconnecting…" from
+`useOnlineStatus()`. `navigator.onLine` is famously weak: it reports whether an
+interface is *up*, not whether anything is reachable. Campus captive portals and
+a saturated AP both present as online.
+
+The app already knows better in two places: `apiFetch` throws `ApiError(0, …)`
+on network failure (`api/client.ts:95`), and `useSSE` tracks its own connection
+with jittered backoff. Either is far stronger evidence than `navigator.onLine`.
+
+**Fix shape:** keep `navigator.onLine` as the fast negative signal (when it says
+offline, we are), and add a positive one — treat a live SSE connection as
+"connected," and a run of `ApiError(0)` as "not." Show the banner on the union.
+Keep the copy honest about which state we are in; do not claim "reconnecting" if
+nothing is reconnecting.
+
+Small and self-contained. **Sequence with M2** — both touch the same connectivity
+signal.
+
+**Test:** extend `useSSE.test.ts` / add `useOnlineStatus` coverage — the banner
+appears on repeated network-class API errors while `navigator.onLine` is true.
+
+---
+
+#### M4 — [MEDIUM] `theme-color` is a single light value
+
+`index.html:8` sets `theme-color: #DCE4DE` (steel), and the manifest repeats it.
+One value, unconditional. In an installed PWA that color paints the status bar
+and the Android navigation bar. On the ink-background surfaces (the prep
+chalkboard, § 9.2) the status bar stays pale steel above a near-black screen,
+which reads as a rendering fault rather than a choice.
+
+**Fix shape:** add a `prefers-color-scheme: dark` variant `<meta>` and, if it
+proves worthwhile on a real device, drive it per-route for the ink surfaces.
+Stay inside the § 9.1.10 token set — this is picking the right existing token,
+not inventing a color. iOS behavior is only ever proven on a real device (§ 9.1.1,
+D-6) — record what actually happened, and do not claim the iOS half without one.
+
+Pairs with **M6** and § 9.6-B10 (splash screens); same file, same device session.
+
+---
+
+#### M5 — [MEDIUM] Nothing is reachable one-handed on tall phones
+
+The header (`Layout.tsx:324`) is `sticky top-0` and holds the account menu, and
+after P1 it holds the route into Settings. On a 6.7" phone the top of the screen
+is not reachable with a thumb while holding the phone one-handed — and a student
+in a lunch queue is holding a phone in one hand and, frequently, a bag in the
+other.
+
+The app already does the important half right: the cart bar and the nav are
+bottom-docked, and `Modal` is a bottom sheet on phones. The gap is the header
+cluster.
+
+**Fix shape:** audit what genuinely must live in the header versus what could be
+reached from the bottom. Resist adding a second bottom bar — the answer is
+probably that the header keeps identity and status (the K mark, the shop status
+pill) while *actions* migrate into the account sheet, which itself should open as
+a bottom sheet on phones rather than a top-anchored dropdown. `AvatarMenu` is
+currently `absolute right-0 top-full` — a dropdown hanging from the top-right
+corner, the least reachable point on the screen.
+
+**Do this after P1**, so the audit sees the final set of header entry points.
+Measure on a 430×932 viewport and record what moved and why.
+
+---
+
+#### M6 — [LOW] iOS standalone chrome is untuned
+
+`apple-mobile-web-app-status-bar-style` is `default` (`index.html:11`), and there
+are no iOS splash screens (§ 9.6-B10, deferred as pure asset generation). Both
+only matter in standalone mode and both can only be judged on a real device.
+**Bundle this with D-6** rather than guessing; an agent cannot verify it and must
+not claim to have.
+
+---
+
+### 9.10 Trust & provenance backlog (S-series) — S1/S2 DONE, S3/S4/S5 OPEN
+
+**Owner's ask (2026-07-27):** *"make sure the app is not malicious."*
+
+Two separate questions live inside that sentence, and both deserve a straight
+answer.
+
+**1. Is Khaao malicious? No.** That is a factual claim about this repository and
+it holds up:
+
+- No obfuscated or minified-by-hand source, no `eval`, no dynamic script
+  injection. CSP is `script-src 'self'` with no `unsafe-inline`/`unsafe-eval`
+  (§ 11.5), which structurally forbids the main injection vectors.
+- No analytics, no third-party trackers, no ad SDKs. Third-party network egress
+  is exactly three destinations, each doing one declared job: Firebase (Google
+  sign-in), Cloudinary (menu photos), and the browser's own push service. The
+  CSP `connect-src` pins that list.
+- Data collected is what the product needs and nothing more: name, college
+  email, role, orders. No location — `Permissions-Policy` explicitly disables
+  `geolocation`, `microphone`, `camera` (`middleware/security.go`).
+- No secrets in the repo. Verified: `git ls-files | grep .env` returns only
+  `.env.example` files; `.gitignore` covers `.env` and `keys.txt`.
+- The known gaps are *written down* in § 11 rather than hidden, which is the
+  actual difference between an app with weaknesses and a dishonest one.
+
+**2. Will it *look* trustworthy to a student on install day?** Less so, and
+that is what this series fixes. A page that asks for a Google account while
+telling you nothing about who runs it is indistinguishable from a phishing page
+to a careful person — and the § 9.7 install flow is about to ask students for
+more trust, not less.
+
+| # | Priority | One-line | Files owned |
+|---|---|---|---|
+| S1 | **HIGH** | The app HTML can be framed by any site — the anti-clickjacking header only covers the API | `deploy/Caddyfile`, `backend/internal/middleware/security.go` | **FIXED** — `frame-ancestors 'none'` + `X-Frame-Options: DENY` added to the Caddy `header` block. The Caddyfile's old "identical headers" comment was false; corrected. |
+| S2 | **HIGH** | Nobody sets HSTS — both layers document it as the other one's job | `deploy/Caddyfile` | **FIXED** — `Strict-Transport-Security: max-age=31536000; includeSubDomains`, deliberately no `preload` (documented why in RUNBOOK.md). |
+| S3 | MEDIUM | Login and Settings never say who runs Khaao or what it stores | `pages/Login.tsx`, `pages/Settings.tsx` | **Open** — P1 left an explicit "Coming soon." TODO placeholder in Settings' "About Khaao" section rather than fabricating operator/contact/data-handling facts. Needs real facts from the owner before writing. |
+| S4 | MEDIUM | No build identity — a student and a maintainer cannot agree on what version is running | `vite.config.ts`, `pages/Settings.tsx` | **Open** — P1 left the version/build footer out entirely with a TODO comment, no fabricated string. |
+| S5 | MEDIUM | Dependency and license provenance is unverified | `frontend/package.json`, `.github/workflows/` | Open, unstarted. |
+
+---
+
+#### S1 — [HIGH] The app HTML can be framed by any site
+
+**Verified.** `middleware.SecurityHeaders()` sets `X-Frame-Options: DENY` — but
+that middleware runs on the **Go backend**, which serves only `/api/*`. In
+production the browser-rendered app is served by Caddy's `file_server` from
+`/var/www/khaao/frontend/dist`, and Caddy's `header` block sets only
+`X-Content-Type-Options`, `Referrer-Policy` and the CSP. That CSP has **no
+`frame-ancestors` directive**.
+
+So the API — which cannot be usefully framed — is protected, and the actual UI,
+which can, is not. Khaao's login screen and order screens can be embedded in an
+iframe on any site on the internet. The Caddyfile's own comment asserts the two
+header sets are "identical"; they are not, and this is the difference.
+
+**Failure scenario:** a lookalike page frames the real Khaao login and overlays
+its own chrome. The student sees genuine Khaao UI at a URL they do not check,
+completes a real Google sign-in, and the framing page manipulates what they
+believe they are doing. Cheap to build, and it works precisely *because* the
+framed content is authentic.
+
+**Fix shape:** add `frame-ancestors 'none'` to the CSP string, and set
+`X-Frame-Options: DENY` and `Permissions-Policy` in the Caddy `header` block.
+Then make the two copies genuinely identical — or better, **reduce them to one
+source** so they cannot drift again. Note that `frame-ancestors` is ignored in a
+`<meta>` CSP and must come from the response header; it is also the only one of
+the two that CSP Level 3 respects, so ship both.
+
+**Verify:** `curl -I` the deployed root and paste the full header set here.
+Attempt to frame the deployed app from a scratch HTML file and confirm the
+browser refuses.
+
+---
+
+#### S2 — [HIGH] Nobody sets HSTS
+
+`middleware/security.go` says, in a comment: *"HSTS is intentionally left to the
+proxy (it owns the TLS/HTTPS decision)."* That is the correct division of
+responsibility. But the proxy does not set it — `deploy/Caddyfile`'s `header`
+block has no `Strict-Transport-Security`, and Caddy v2 does not add one
+automatically. Each layer documents the other as the owner and neither does it.
+
+Without HSTS the first request of every session is downgradeable on a hostile
+network — and campus Wi-Fi is exactly the threat model this app lives on
+(§ 9.1.7 already says the network is hostile). A student's Khaao JWT lives in
+`localStorage` (§ 11.2) and travels on that first request.
+
+**Fix shape:** `Strict-Transport-Security "max-age=31536000; includeSubDomains"`
+in the Caddy `header` block. **Do not add `preload` yet** — preload is a
+practically irreversible commitment for the whole domain, and this is a
+subdomain of a college domain we may not own. Say so in `deploy/RUNBOOK.md`.
+
+**Sequence with S1 and W2** — three tasks, one `header` block, one agent.
+
+---
+
+#### S3 — [MEDIUM] Nothing says who runs Khaao
+
+`pages/Login.tsx` renders the K mark, a tagline, a Google button and "Use your
+@sst.scaler.com account." A student's entirely reasonable question — *who is
+this, and what happens to my data?* — has no answer anywhere in the product.
+
+This is not a legal checkbox. It is the difference between an app that reads as
+official and one that reads as a scrape.
+
+**Fix shape:**
+
+- **Login:** one line under the card. Who operates it (the canteen / the college
+  club that built it), and that it uses Google sign-in only to confirm you are a
+  student. Quiet, small, in the § 9.2 voice — the sign-in button stays the only
+  primary element on the screen.
+- **Settings → About Khaao** (P1's fourth section) says it properly: what Khaao
+  stores (name, college email, your orders), what it does not (no location, no
+  payment details, no third-party trackers — **all three are true today; verify
+  each is still true before writing it**), who to contact, and that there are no
+  in-app payments and never will be (§ 1). That last one is worth stating
+  outright — "we will never ask you to pay in the app" is the single most useful
+  anti-phishing sentence this product can contain, because it makes any future
+  fake payment screen self-evidently fake.
+- Shopkeeper strings need Hindi pairs (§ 9.1.11).
+
+**Do not invent facts.** If the operator name or a contact address is not known,
+leave a clearly-marked placeholder and flag it here rather than writing something
+plausible. **This is the one task in this file where a fabricated detail causes
+real harm** — it would put a false claim about data handling in front of 2000
+students.
+
+**Sequence with P5** — same file, same screen.
+
+---
+
+#### S4 — [MEDIUM] No build identity
+
+Nothing in the UI, and nothing in the built output, identifies which build is
+running. Combined with **W1** (installed phones pinned to whatever they first
+installed), this means a student reporting a bug and a maintainer looking at
+`main` have no way to establish they are discussing the same code — and no way
+to discover that the student's app is three deploys behind, which after W1 is
+the *likely* case.
+
+**Fix shape:** inject the short git SHA and build timestamp at build time via
+Vite `define`, render them in Settings' footer as small mono text (§ 9.2:
+numbers are the mono voice), and have the backend `/api/health` return its own
+build identity so the two can be compared. Keep it factual and unlabelled-as-
+important: a version string is a debugging tool, not a feature.
+
+**Test:** `Settings.test.tsx` asserts the version string renders; it does not
+assert the value.
+
+---
+
+#### S5 — [MEDIUM] Dependency provenance is unverified
+
+`frontend/package.json` has 7 runtime dependencies and 24 dev dependencies —
+lean, and every runtime one is a recognizable, widely-audited package (React,
+react-router, TanStack Query, Firebase, fontsource). That is a good position to
+be in, but it is currently an *impression*, not a verified fact, and the
+`.github/workflows/` gate does not check it.
+
+**Fix shape:**
+
+- Run `npm audit --omit=dev` and `go list -m all | nancy` (or `govulncheck`, which
+  is the better fit for Go) once by hand and **record the output here**. That is
+  the deliverable — a snapshot with a date, not a vague assurance.
+- Add `govulncheck` to the backend CI job. It is fast, low-noise, and
+  reachability-aware, so it will not drown the gate in irrelevant advisories.
+- Decide on `npm audit` in CI deliberately: it is noisy on dev dependencies and a
+  failing gate that everyone learns to ignore is worse than no gate (§ 10 has
+  the matching lesson about `scripts/loadtest.js`). Scoping it to
+  `--omit=dev --audit-level=high` is the version worth having.
+- Confirm `package-lock.json` is committed and CI uses `npm ci`, not
+  `npm install`, so builds are reproducible. **Verify this rather than assuming
+  it** — check the workflow file.
+
+**Not in scope:** adding SBOM generation, signing, or a supply-chain scanner
+service. This is a college canteen app; the goal is knowing what we ship, not a
+compliance program.
 
 ---
 
@@ -1291,6 +2347,23 @@ and the runbook in sync as steps complete.
 - **A long-lived browser tab in a scratch PWA setup can serve a stale
   service-worker precache** — if live behavior contradicts the code, check
   `navigator.serviceWorker.getRegistrations()` / `caches.keys()` first.
+- **`vite-plugin-pwa`'s `registerType: 'autoUpdate'` does nothing on its own in
+  `injectManifest` mode.** The plugin injects `skipWaiting`/`clientsClaim` only
+  into a *generated* worker; a hand-written `src/sw.ts` must call them itself,
+  and its registration client deliberately skips the SKIP_WAITING message when
+  `autoUpdate` is set. Two config options that each look correct combine into a
+  worker that can never activate an update (§ 9.8-W1). **`grep skipWaiting
+  dist/sw.js` is the ten-second check** — do it after any PWA config change.
+  Generalizes: a plugin option named after a behavior is not evidence the
+  behavior is present in the built artifact. Check the artifact.
+- **Safe-area math has one correct expression in this codebase and two wrong
+  ones.** `Menu.tsx`'s cart bar uses
+  `bottom-[calc(env(safe-area-inset-bottom)+56px)]` — correct, because the nav is
+  `h-14` *plus* `pb-safe`. Both prompt cards use a flat `bottom-20` (80 px),
+  which is smaller than the nav's real 90 px height on a notched iPhone, so they
+  sit on top of it (§ 9.8-W3). A hardcoded offset next to a `pb-safe` element is
+  always a bug in waiting. **The default test viewport has no safe-area inset**,
+  which is why this survived a green suite.
 - **Playwright `fullPage: true` screenshots can visually misplace `position:
   fixed` elements** — capture artifact, not a rendering bug.
 - **Don't touch the shared `frontend/vite.config.ts` proxy target for a scratch
@@ -1340,6 +2413,29 @@ and the runbook in sync as steps complete.
    **See § 9.3-V9** — the `p256dh`/`auth` fields on the same endpoint are still
    unvalidated (much lower severity, no outbound request depends on them).
 
+8. **The app HTML is framable by any origin.** `X-Frame-Options: DENY` is set by
+   `middleware.SecurityHeaders()`, which only runs on the Go backend — i.e. on
+   `/api/*`, which cannot be usefully framed. The browser-rendered app is served
+   by Caddy's `file_server`, whose `header` block sets neither `X-Frame-Options`
+   nor a CSP `frame-ancestors`. The Caddyfile's comment claiming the two header
+   sets are identical is wrong on exactly this point. **See § 9.10-S1.**
+9. **No HSTS anywhere.** `middleware/security.go` documents it as the proxy's
+   job; `deploy/Caddyfile` does not set it, and Caddy v2 does not add it
+   automatically. Each layer names the other as owner. First-request downgrade is
+   live on a hostile network — which § 9.1.7 already assumes campus Wi-Fi is.
+   **See § 9.10-S2.**
+10. **A dead push subscription is never re-created** — not a vulnerability, but a
+    silent, permanent loss of the product's only screen-off signal. **See
+    § 9.8-W5.**
+
+**Not gaps — verified clean on 2026-07-27** (recorded so the next audit doesn't
+re-derive it): no `eval`/dynamic script injection; no analytics, trackers or ad
+SDKs; third-party egress is exactly Firebase + Cloudinary + the browser's push
+service, each pinned by CSP `connect-src`; `geolocation`/`microphone`/`camera`
+disabled via `Permissions-Policy`; no secrets tracked in git (`git ls-files |
+grep .env` returns only `.env.example` files). See § 9.10's preamble for the
+full statement.
+
 Also: Gin runs in `ReleaseMode` when `APP_ENV=production`; `SetTrustedProxies(nil)`
 is explicit — harmless since no code path reads client IP.
 
@@ -1375,7 +2471,38 @@ before starting it — the "Fix shape" and "Test first" lines are the spec.**
    inventing adjacent work. The audit that produced these was thorough but not
    infallible.
 
-**Parallelization guidance:** V1–V7 are independent of the H-series and can run
+8. **Do not claim a device-dependent result you did not observe.** Several tasks
+   below (M4, M6, P4's install dialog, W1's live update check) can only be
+   settled on a real phone or a real deploy. Write down what you actually ran. "I
+   expect this fixes it on iOS" is a fine sentence; "verified on iOS" is not,
+   unless you held the phone.
+
+**Parallelization guidance:**
+
+*Pre-existing backlogs.* V1–V7 are independent of the H-series and can run
 concurrently with it. Within § 9.4, **H2 must land before H1**. **V3 must land
 before H3.** Q1 and Q2 are independent of everything and are the best first
 tasks for an agent with no prior context on this codebase.
+
+*The 2026-07-27 backlogs (§ 9.7–§ 9.10).* Shared files make the grouping matter
+more than usual here — **give each bundle below to one agent**:
+
+| Bundle | Tasks | Why they group | Status |
+|---|---|---|---|
+| **A — service worker** | **W1** → W9, then W6/W7 | All own `src/sw.ts` / `vite.config.ts`. W1 is correctness and goes first; W6 is bytes. | **DONE (2026-07-27)** — W1/W6/W9 fixed, W7 investigated (no change, see § 9.8). |
+| **B — edge headers** | **W2** + P7 + **S1** + **S2** | One `header` block in `deploy/Caddyfile`. Four separate findings, one file, one `curl -I` verification pass. | **DONE (2026-07-27)** — all four fixed, local-verified (`caddy validate` + local `curl -I`); real-domain `curl -I` still needs D-6. |
+| **C — Settings & install** | **P1** → **P2** → P3, P6 | P1 builds the screen everything else mounts into. P2 creates `lib/install.ts`, which P6 extends and P5 consumes. | **DONE (2026-07-27)** for P1/P2/P3/P6. **P5 still open** — it consumes `lib/install.ts`, which now exists; pick it up any time. |
+| **D — login screen** | P5 + **S3** | Both edit `pages/Login.tsx`. § 12.1 — sequence or single-agent, no exceptions. | Open, unstarted. S3 needs real operator/contact facts from the owner before writing — do not fabricate. |
+| **E — manifest** | **P4** | Independent of everything; only conflict is `globPatterns`, and only if W6 (bundle A) lands first — **W6 has now landed**, so P4 must check `globPatterns` before adding screenshot patterns. | Open, unstarted. |
+| **F — connectivity** | **M1** → M2 → M3 | M1 establishes the persisted cache the others build recovery UI around. | Open, unstarted. **Mind the precache budget** — it's now 799.06 KiB against an ~800 KB ceiling, ~1 KB of headroom; M1's persist-client package must be measured before landing. |
+| **G — standalone chrome** | M4 + M6 + § 9.6-B10 | All `index.html`, all only verifiable on a real device — bundle with **D-6**. | Open, unstarted. |
+| **H — provenance** | S4 + S5 | CI and build-time config; touches nothing the others touch. | Open, unstarted. S4 has a natural home now — the version footer placeholder P1 left in `Settings.tsx`. |
+
+**Bundles A and B are done — W1 and W2 are live in the tree** (not yet
+live-verified against a real deploy; that's D-6). The install push (§ 9.7) can
+now be promoted to students from a correctness standpoint, **except**: fix
+**W3** first (§ 9.8) — the install/notification prompt cards still collide
+with the bottom nav on notched iPhones, which is a bad first impression on the
+exact feature bundle C just built. Bundles D–H can run concurrently with each
+other and with the remaining V/H/Q backlogs. **M5 depends on P1**, which is
+now done — M5 is unblocked.
