@@ -230,7 +230,53 @@ sudo rsync -a --delete frontend/dist/ /var/www/khaao/frontend/dist/
 Vercel / Cloudflare Pages, as `STATUS.md` § 9 item D-5 also allows — set the
 same `VITE_FIREBASE_*` vars in that host's build-time environment config, and
 skip the Caddy static-file block in § 6 below, pointing `FRONTEND_ORIGIN` in
-the backend's env at whatever domain that host gives you instead.)
+the backend's env at whatever domain that host gives you instead. Note that
+you'd then also need to reproduce the Cache-Control table below on that
+host, since it won't get Caddy's config for free.)
+
+### Cache-Control and header verification (§ 9.8-W2 / § 9.7-P7 / § 9.10-S1/S2)
+
+`deploy/Caddyfile`'s static-file block sets `Cache-Control` per path so a
+stale `index.html` can never reference asset URLs a newer deploy deleted
+(an unrecoverable white screen inside an installed PWA), and so a new
+`sw.js` is never hidden behind a heuristic cache. It also sets
+`X-Frame-Options`, `Permissions-Policy`, `Strict-Transport-Security`, and a
+CSP with `frame-ancestors 'none'` at the edge — this is the header set that
+actually protects the browser-rendered app (Caddy serves the frontend
+directly in production, not the Go backend). This was verified for syntax
+(`caddy validate`) and, locally, by running `caddy start`/`curl -I` against a
+throwaway site with the same header/matcher config as this file (not a
+substitute for checking it in production — do that below).
+
+**No agent has curled a live deployment** — there is no production instance
+yet. Once D-6 (real production deploy) happens, whoever runs it must
+`curl -I` each of the following paths against the real domain and paste the
+`Cache-Control` (and `Content-Type` for the manifest row) values into
+`STATUS.md`:
+
+| Path | Expected `Cache-Control` | Other expected header |
+|---|---|---|
+| `/assets/<any-hashed-file>` | `public, max-age=31536000, immutable` | — |
+| `/` | `no-cache` | — |
+| `/index.html` | `no-cache` | — |
+| `/sw.js` | `no-cache` | — |
+| `/manifest.webmanifest` | `no-cache` | `Content-Type: application/manifest+json` (not `application/octet-stream` — if it comes back as octet-stream the app silently stops being installable) |
+| any SPA client route with no matching file on disk, e.g. `/orders` or `/shop/prep` | `no-cache` | served content is `index.html` via the SPA fallback |
+
+While there, also confirm on the same real requests: `X-Frame-Options: DENY`,
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` (note: **no**
+`preload` — see below), and that the `Content-Security-Policy` header
+contains `frame-ancestors 'none'`.
+
+**Do not add `preload` to the HSTS header.** Submitting a domain to the
+browser HSTS preload list is a practically irreversible, whole-domain
+commitment (removal takes months and requires every browser vendor to ship
+the update). Khaao's production domain may end up being a subdomain of a
+college domain the app's operators don't own outright, so committing the
+*whole* domain to HTTPS-forever via preload is not this deploy's call to
+make. `max-age=31536000; includeSubDomains` without `preload` still gets the
+real protection (HSTS enforcement after the first successful HTTPS visit)
+without that irreversible step.
 
 ---
 
