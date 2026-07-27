@@ -1,12 +1,25 @@
 /// <reference lib="webworker" />
 declare let self: ServiceWorkerGlobalScope;
 
-import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
+import { precacheAndRoute, createHandlerBoundToURL, cleanupOutdatedCaches } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { NetworkOnly } from 'workbox-strategies';
+import { clientsClaim } from 'workbox-core';
 
-// Precache the manifest injected by vite-plugin-pwa
+// `injectManifest` mode (unlike `generateSW`) does NOT inject skipWaiting/
+// clientsClaim into this file automatically. Without them, an updated
+// worker sits in "waiting" until every tab/window running the old one
+// closes — which never happens on a backgrounded phone, so an installed
+// PWA is pinned to whatever build it first installed, forever. See
+// STATUS.md § 9.8-W1.
+self.skipWaiting();
+clientsClaim();
+
+// Precache the manifest injected by vite-plugin-pwa, and drop caches left
+// over from earlier precache generations (otherwise they accumulate across
+// deploys — nothing evicts them on its own in injectManifest mode).
 precacheAndRoute(self.__WB_MANIFEST || []);
+cleanupOutdatedCaches();
 
 // Serve index.html for all navigation requests, except those to /api/
 const handler = createHandlerBoundToURL('/index.html');
@@ -53,7 +66,12 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl: string = (event.notification.data && event.notification.data.url) || '/';
+  const rawUrl: string = (event.notification.data && event.notification.data.url) || '/';
+  // Defense in depth: the payload is server-controlled today, but never
+  // trust it to stay that way. Only ever navigate within this origin —
+  // reject anything that isn't an app-relative path (a protocol-relative
+  // "//host" would otherwise leave the origin just like an absolute URL).
+  const targetUrl = rawUrl.startsWith('/') && !rawUrl.startsWith('//') ? rawUrl : '/';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
