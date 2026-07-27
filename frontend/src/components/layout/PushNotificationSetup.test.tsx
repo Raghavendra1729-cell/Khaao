@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { PushNotificationSetup } from './PushNotificationSetup';
 import { LanguageProvider } from '../../context/LanguageContext';
 import { ToastProvider } from '../ui/Toast';
 import { setInstallPromptShowing } from '../../lib/promptCoordination';
+import { getVapidPublicKey, subscribeToPush } from '../../api/shop';
+
+vi.mock('../../api/shop', () => ({
+  getVapidPublicKey: vi.fn().mockResolvedValue({ public_key: 'AAAA' }),
+  subscribeToPush: vi.fn().mockResolvedValue(undefined),
+}));
 
 function renderPush() {
   return render(
@@ -89,5 +95,62 @@ describe('PushNotificationSetup vs InstallPrompt slot race', () => {
     });
 
     expect(screen.getByText('Enable Notifications')).toBeInTheDocument();
+  });
+});
+
+// STATUS.md § 9.7 P3 — handleEnable now calls the shared
+// requestNotificationPermissionAndSubscribe() in lib/push.ts instead of
+// duplicating the subscribe flow inline; Settings' NotificationSettings
+// calls the same function. This covers the extraction didn't change
+// observable behavior.
+describe('PushNotificationSetup enable flow (shared lib/push.ts)', () => {
+  beforeEach(() => {
+    setInstallPromptShowing(false);
+    vi.stubGlobal('PushManager', function PushManager() {});
+    vi.stubGlobal('Notification', {
+      permission: 'default',
+      requestPermission: vi.fn().mockResolvedValue('granted'),
+    });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: {
+        ready: Promise.resolve({
+          pushManager: {
+            getSubscription: () => Promise.resolve(null),
+            subscribe: vi.fn().mockResolvedValue({
+              toJSON: () => ({
+                endpoint: 'https://fcm.example/x',
+                keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+              }),
+            }),
+          },
+        }),
+      },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    setInstallPromptShowing(false);
+    vi.unstubAllGlobals();
+    // @ts-expect-error -- test-only cleanup of a property defined above
+    delete navigator.serviceWorker;
+  });
+
+  it('tapping Enable calls the shared subscribe flow and hides the prompt', async () => {
+    await act(async () => {
+      renderPush();
+      await flush();
+    });
+
+    const enableButton = await screen.findByRole('button', { name: 'Enable' });
+
+    await act(async () => {
+      fireEvent.click(enableButton);
+      await flush();
+    });
+
+    expect(getVapidPublicKey).toHaveBeenCalled();
+    expect(subscribeToPush).toHaveBeenCalledWith('https://fcm.example/x', 'p256dh-key', 'auth-key');
+    expect(screen.queryByText('Enable Notifications')).not.toBeInTheDocument();
   });
 });

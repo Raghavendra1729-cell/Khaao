@@ -20,6 +20,10 @@ const ShopMenuManagePage = lazy(() =>
 const ShopHistoryPage = lazy(() =>
   import('./pages/shop/History').then((m) => ({ default: m.ShopHistoryPage })),
 );
+// Reachable from AvatarMenu by both roles, but rare enough (and heavy enough
+// with its install/push helpers) that it doesn't belong in either role's
+// first-load chunk (STATUS.md § 9.7 P1).
+const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
 
 function RoleHome() {
   const { user } = useAuth();
@@ -54,6 +58,18 @@ export default function App() {
         <Route path="/shop/prep" element={<ShopPrepPage />} />
         <Route path="/shop/history" element={<ShopHistoryPage />} />
         <Route path="/shop/menu" element={<ShopMenuManagePage />} />
+      </Route>
+
+      {/* Both roles — Settings has no role prop for ProtectedRoute, so it
+          only enforces "signed in," not "signed in as X" (§ 9.7 P1). */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       <Route path="*" element={<RoleHome />} />

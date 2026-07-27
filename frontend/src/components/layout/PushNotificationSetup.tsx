@@ -1,22 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { getVapidPublicKey, subscribeToPush } from '../../api/shop';
 import { useLanguage } from '../../context/LanguageContext';
 import { Button } from '../ui/Button';
 import { useInstallPromptShowing } from '../../lib/promptCoordination';
+import { requestNotificationPermissionAndSubscribe } from '../../lib/push';
 import { useToast } from '../ui/Toast';
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
 
 interface PushNotificationSetupProps {
   /** Gates Hindi copy explicitly, matching Layout.tsx's AvatarMenu — a
@@ -83,28 +70,11 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
   const handleEnable = async () => {
     setLoading(true);
     try {
-      const permission = await Notification.requestPermission();
+      const permission = await requestNotificationPermissionAndSubscribe();
       if (permission !== 'granted') {
         setShowPrompt(false);
         return;
       }
-
-      const registration = await navigator.serviceWorker.ready;
-
-      const { public_key } = await getVapidPublicKey();
-      const applicationServerKey = urlBase64ToUint8Array(public_key);
-
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey,
-      });
-
-      const subData = subscription.toJSON();
-      if (!subData.endpoint || !subData.keys?.p256dh || !subData.keys?.auth) {
-        throw new Error('Invalid subscription format');
-      }
-
-      await subscribeToPush(subData.endpoint, subData.keys.p256dh, subData.keys.auth);
 
       setShowPrompt(false);
     } catch (err) {
