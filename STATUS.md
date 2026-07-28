@@ -22,31 +22,39 @@ each fix is in `git log`.
 against the built output, aimed at the owner's brief (*"find issues, any
 optimization needed; frontend improvements, visualizations for better UX/UI —
 I want it to look the best, best experience, smooth"*). **This pass landed
-nine of the sixteen**: Y1 (font reclaim), the `Modal.tsx` bundle (Y3/Y7/Y10),
-`StatusStamps.tsx` (Y2), `QtyStepper.tsx` + `MenuItemCard.tsx` (Y9→Y4), and
-`History.tsx`'s day-shape + revenue-per-item visualization (Y5/Y13). Each
-landed with a regression test confirmed red against the unfixed code first, in
-three parallel worktree-isolated agents (bundles M+N, O, P) merged back to
-`main` one at a time with the full gate re-run after each merge. **Y6, Y8,
-Y11, Y12, Y14, Y15, Y16 remain open.**
+twelve of the sixteen**: Y1 (font reclaim), the `Modal.tsx` bundle
+(Y3/Y7/Y10), `StatusStamps.tsx` (Y2), `QtyStepper.tsx` + `MenuItemCard.tsx`
+(Y9→Y4), `History.tsx`'s day-shape + revenue-per-item visualization
+(Y5/Y13), and the cross-file sweeps (Y8 keyboard-reachable rails, Y14
+skeleton status announcements, Y16 drops the trailing `.00`). Each landed
+with a regression test confirmed red against the unfixed code first, in four
+worktree-isolated agents (bundles M+N, O, P run in parallel; Q run after,
+since it sweeps files the first three had just edited) merged back to `main`
+one at a time with the full gate re-run after each merge. **Two of the four
+merges needed hand resolution** — the M+N/P agents' worktrees branched before
+Y1 landed, and the Q agent's worktree branched before M/N/O/P landed, so its
+`History.test.tsx` collided with Y5's and its `Menu.test.tsx` diff collided
+with Y4's; both were reconciled by hand, and one real fallout bug (Y5's test
+asserting the pre-Y16 `.00`-suffixed price strings) was caught and fixed in
+the process. **Y6, Y11, Y12, Y15 remain open.**
 
-Gate on the current tree, all Y-series work included:
+Gate on the current tree, all landed Y-series work included:
 
 | Gate | Result |
 |---|---|
 | `tsc -b --noEmit` | clean |
-| `npm run lint` | 0 errors, 24 pre-existing warnings |
-| `vitest run` | **140/140 passing**, 23 test files (was 111/19 before this pass) |
+| `npm run lint` | 0 errors, 26 pre-existing-style warnings (was 24; +2 non-null-assertion warnings in the new rail test, same pattern as elsewhere in the codebase) |
+| `vitest run` | **148/148 passing**, 24 test files (was 111/19 before this pass) |
 | `npm run format:check` | clean |
-| `vite build` initial student JS | **241.74 KB raw** — under the 250 KB hard stop, unchanged this pass (Y4/Y9 both landed in the already-lazy student route chunk, not the eager initial bundle) |
-| `vite build` service-worker precache | **702.03 KiB, 42 entries — under the ~800 KB soft ceiling**, ~98 KB headroom left |
+| `vite build` initial student JS | **241.78 KB raw** — under the 250 KB hard stop, +0.04 KB this pass (negligible, from Y8's rail attributes) |
+| `vite build` service-worker precache | **702.92 KiB, 42 entries — under the ~800 KB soft ceiling**, ~97 KB headroom left |
 | Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
 
 **Precache arc this pass:** 801.93 KiB/49 entries (start) → 696.51 KiB/42
-(after Y1's font reclaim alone) → 702.03 KiB/42 (final, after Y2's added CSS
-fill rules and Y5's new History chunk spent ~5.5 KB of Y1's headroom). Still
-comfortably under the ceiling; the remaining ~98 KB is what Y11 and Y15 (both
-still open) should be measured against.
+(after Y1's font reclaim alone) → 702.92 KiB/42 (final, after Y2/Y5/Y14 added
+back ~6.4 KB of CSS/markup). Still comfortably under the ceiling; the
+remaining ~97 KB is what Y11 and Y15 (both still open) should be measured
+against.
 
 ### The backlogs
 
@@ -61,7 +69,7 @@ still open) should be measured against.
 | **§ 9.9 — M-series (M1–M6)** | Mobile experience — the app *as a phone app* | 6 | **All open** |
 | **§ 9.10 — S-series (S1–S5)** | Trust & provenance | 5 | S1/S2 done; **S3/S4/S5 open** |
 | § 9.11 — X-series (X1–X7) | Frontend defects + design, 2026-07-27 fourth pass | 7 | **All done** — records only |
-| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | Y1–Y5/Y7/Y9/Y10/Y13 done; **Y6, Y8, Y11, Y12, Y14–Y16 open** |
+| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | 12/16 done (Y1–Y5, Y7–Y10, Y13, Y14, Y16); **Y6, Y11, Y12, Y15 open** |
 | Deployment D-1..D-7 | Human-led, needs real infra | 7 | Open |
 
 > **Note the section order.** § 9.6 (deferred, *not* authorized) sits between
@@ -81,20 +89,24 @@ still open) should be measured against.
 
 ### Start here
 
-**Continue § 9.12 (Y-series) — bundles M, N, O, P, Y0 are done; bundle Q is
-next.** Suggested order for what's left:
+**§ 9.12 (Y-series) is 12/16 done — bundles Y0, M, N, O, P, Q have all
+landed.** Suggested order for what's left:
 
-1. **Bundle Q — Y8, Y14, Y16.** Three cross-file sweeps (rail keyboard
-   access, skeleton status announcements, `formatPrice`'s `.00`). Now
-   unblocked — the M–P bundles it was waiting behind (so it wouldn't sweep
-   files mid-edit) have all landed.
-2. **Y6, Y11, Y15** — the remaining Orders.tsx/OrderStatus.tsx tasks. Y11 and
-   Y15 are visualization work and should be measured against the ~98 KB of
-   precache headroom still left from Y1.
-3. **Y12** — small `localStorage` guard on `OrderStatus.tsx`, sequence with
-   H3/Y11 (same file — see the bundle table's "I — order-status page" row).
-4. Then the still-open **H1/H3–H8**, **P4/P5**, **W3/W5/W8**, **M1–M6**,
-   **S3/S4/S5**, **Q3–Q9** — none of these were touched this pass.
+1. **Y6** — `Orders.tsx`, the accept-with-nothing-checked guard. Small, and
+   the file will get busier once Y15/H1 land, so a good first pick.
+2. **Y15** — the queue-depth strip, same file as Y6 (sequence after it), and
+   read § 9.4-H5 first so the two urgency treatments share one visual idiom.
+   H1 (the cash drawer) also owns this file and is the largest of the three —
+   land it last (see the bundle table's "K — shop orders page" row).
+3. **Y12 → H3 → Y11**, in that order, all on `pages/student/OrderStatus.tsx`
+   (the bundle table's "I — order-status page" row): Y12 is a two-line
+   `localStorage` guard; H3 is the price-drift notice (V3 already landed, so
+   it's unblocked); Y11 adds the elapsed-time line and is the largest — both
+   Y11 and Y15 should be measured against the ~97 KB of precache headroom
+   still left from Y1.
+4. Then the still-open **H1, H3–H8** (H3 is part of step 3's bundle above,
+   the rest aren't), **P4/P5**, **W3/W5/W8**, **M1–M6**, **S3/S4/S5**,
+   **Q3–Q9** — none of these were touched this pass.
 
 **Two things carry over and are still true:**
 
@@ -394,15 +406,15 @@ phone or counter tablet. These are standing rules, not suggestions:
    failure as an auth failure. Every mutation shows a pending state and toasts
    on error.
 8. **Performance budget — two numbers, both binding:**
-   - **Initial student JS ≤ ~250 KB raw.** Measured **241.74 KB** on
-     2026-07-28 (`dist/assets/index-*.js`) after H2, the § 9.7 Settings work
-     and § 9.11's X-series — under, with ~8.3 KB of headroom. This is
-     parse-and-execute on first paint.
-   - **Service-worker precache ≤ ~800 KB.** Measured **702.03 KiB / 42
-     entries — under the soft ceiling**, ~98 KB of headroom, after **Y1**
-     (font reclaim, -105 KB) plus **Y2/Y4/Y5** adding back ~5.5 KB (stamp fill
-     CSS, the History day-shape chunk). Was 801.93 KiB / 49 entries, over the
-     ceiling, before this pass.
+   - **Initial student JS ≤ ~250 KB raw.** Measured **241.78 KB** on
+     2026-07-28 (`dist/assets/index-*.js`) after H2, the § 9.7 Settings work,
+     § 9.11's X-series and this pass's Y-series work — under, with ~8.2 KB of
+     headroom. This is parse-and-execute on first paint.
+   - **Service-worker precache ≤ ~800 KB.** Measured **702.92 KiB / 42
+     entries — under the soft ceiling**, ~97 KB of headroom, after **Y1**
+     (font reclaim, -105 KB) plus **Y2/Y4/Y5/Y14** adding back ~6.4 KB (stamp
+     fill CSS, the History day-shape chunk, skeleton status markup). Was
+     801.93 KiB / 49 entries, over the ceiling, before this pass.
 
      **Remaining headroom pays for Y11/Y15**, still open — treat it as spent
      as those land, not as free margin.
@@ -1460,7 +1472,7 @@ sequence, since it sweeps files the others edit.
 
 ---
 
-### 9.12 Frontend defect + design-elevation backlog (Y-series) — Y1–Y5/Y7/Y9/Y10/Y13 DONE, Y6/Y8/Y11/Y12/Y14–Y16 OPEN, AUTHORIZED
+### 9.12 Frontend defect + design-elevation backlog (Y-series) — 12/16 DONE (Y1–Y5, Y7–Y10, Y13, Y14, Y16), Y6/Y11/Y12/Y15 OPEN, AUTHORIZED
 
 Found in the **2026-07-28 fifth-pass frontend audit**. Owner's brief: *"find
 issues, any optimization needed; frontend improvements, visualizations for
@@ -1491,15 +1503,15 @@ than renumbered:
 | Y5 | **DONE** | Design/viz | The shop's History page is the business, rendered as three stat cards. No sense of the day's shape | `pages/shop/History.tsx` |
 | Y6 | MEDIUM | Defect | Accept with every item unchecked submits an "accept" that rejects the whole order | `pages/shop/Orders.tsx` |
 | Y7 | **DONE** | Defect | `Modal` sizes to `vh` on a codebase that already knows `vh` is wrong on iOS | `components/ui/Modal.tsx` |
-| Y8 | MEDIUM | Defect | Four horizontal rails are unreachable by keyboard | `TrendingRail.tsx`, `FavoritesRail.tsx`, `MenuSkeleton.tsx`, `pages/student/Menu.tsx` |
+| Y8 | **DONE** | Defect | Four horizontal rails are unreachable by keyboard | `TrendingRail.tsx`, `FavoritesRail.tsx`, `MenuSkeleton.tsx`, `pages/student/Menu.tsx` |
 | Y9 | **DONE** | Defect | `QtyStepper` — the app's most-tapped control — still uses text glyphs and announces nothing when the quantity changes | `components/ui/QtyStepper.tsx` |
 | Y10 | **DONE** | Defect | A drag that starts inside a modal and ends on the backdrop closes the modal | `components/ui/Modal.tsx` |
 | Y11 | MEDIUM | Design/viz | The student watches an order with no sense of elapsed time | `pages/student/OrderStatus.tsx` |
 | Y12 | LOW | Defect | `markAsRated` writes to `localStorage` unguarded while its paired read is guarded | `pages/student/OrderStatus.tsx` |
 | Y13 | **DONE** | Defect | Top-items bar computes `NaN%` width on an all-zero day | `pages/shop/History.tsx` |
-| Y14 | LOW | Defect | Every loading skeleton is `aria-hidden` with nothing announced in its place | `History.tsx`, `MenuManage.tsx`, `Prep.tsx`, `Orders.tsx`, `OrderStatus.tsx`, `MenuSkeleton.tsx` |
+| Y14 | **DONE** | Defect | Every loading skeleton is `aria-hidden` with nothing announced in its place | `History.tsx`, `MenuManage.tsx`, `Prep.tsx`, `Orders.tsx`, `OrderStatus.tsx`, `MenuSkeleton.tsx` |
 | Y15 | LOW | Design/viz | The shopkeeper cannot see how deep the queue is without counting cards | `pages/shop/Orders.tsx` |
-| Y16 | LOW | Design | Every price in the app carries `.00` on a menu with no paise | `lib/format.ts` |
+| Y16 | **DONE** | Design | Every price in the app carries `.00` on a menu with no paise | `lib/format.ts` |
 
 **The budget was the constraint on this whole series — Y1 has landed.**
 Precache is now **696.51 KiB / 42 entries, under the ~800 KB soft ceiling**
@@ -1665,36 +1677,14 @@ sanity, not an iOS device (§ 12.8 — not claimed as iOS-verified, that's D-6).
 
 ---
 
-#### Y8 — [MEDIUM] Four horizontal rails are unreachable by keyboard
+#### Y8 — DONE (2026-07-28)
 
-**Where:** `components/student/TrendingRail.tsx:46`,
-`components/student/FavoritesRail.tsx:38`, `components/student/MenuSkeleton.tsx:56`,
-`pages/student/Menu.tsx:533` (the sticky category chip strip).
-
-All four are `overflow-x-auto` containers with no `tabIndex`. A scrollable
-region that is not focusable cannot be scrolled by keyboard — WCAG 2.1.1.
-
-**Failure scenario:** "Ordering right now" shows five chits and roughly two and
-a half fit at 375 px. A keyboard or switch-control user can Tab *into* the
-steppers inside the rail, and the browser will scroll the container to reveal
-the focused control — so the items are reachable *by accident of their being
-focusable*. The category strip is the real break: its chips are buttons, so
-the same accidental path exists, but the `MenuSkeleton` rail contains nothing
-focusable at all, and a rail of read-only chits would be entirely
-unreachable. The pattern is wrong in all four places and only accidentally
-survivable in three.
-
-**Fix shape:** `tabIndex={0}` plus an accessible name on each scroll container
-(`role="group"` with `aria-label`, or point at the heading each rail already
-has — `TrendingRail` and `FavoritesRail` both already carry
-`aria-labelledby` on their `<section>`, so reuse those ids). Add a visible
-focus ring — `:focus-visible` is already styled globally in `index.css:22`, so
-this comes free once the element is focusable. The skeleton rail is
-decorative: `aria-hidden` it instead, which is the more honest fix there.
-
-**Test first:** extend `Menu.test.tsx` — each rail container is focusable and
-has a non-empty accessible name; the skeleton rail is hidden from the
-accessibility tree. Confirm red today.
+Added `tabIndex={0}` plus `role="group"` and an `aria-label`/`aria-labelledby`
+(reusing each rail's existing section heading id where one exists) to
+`TrendingRail.tsx`, `FavoritesRail.tsx`, and `Menu.tsx`'s sticky category chip
+strip. The `MenuSkeleton` rail is decorative — made `aria-hidden` instead of
+focusable, the more honest fix. Focus ring comes free from the existing global
+`:focus-visible` style. Covered in `Menu.test.tsx`, confirmed red then green.
 
 ---
 
@@ -1796,31 +1786,16 @@ into Y5's commit, same file. Covered in `History.test.tsx`.
 
 ---
 
-#### Y14 — [LOW] Every loading skeleton is `aria-hidden` with nothing in its place
+#### Y14 — DONE (2026-07-28)
 
-**Where:** `pages/shop/History.tsx:72` and `pages/shop/MenuManage.tsx:42,61`
-carry an explicit `aria-hidden="true"`; `Prep.tsx`, `Orders.tsx`,
-`OrderStatus.tsx` and `MenuSkeleton.tsx` render skeletons that are decorative
-in effect but announce their placeholder divs as nothing useful.
-
-Hiding a skeleton from the accessibility tree is correct. Hiding it and
-announcing nothing instead is not: a screen-reader user gets silence between
-navigation and data, on a network § 9.1.7 explicitly describes as hostile.
-Silence is indistinguishable from a broken page.
-
-**Fix shape:** one small shared piece rather than seven ad-hoc ones — the app
-already has `LiveRegion` in `Layout.tsx` and `lib/liveAnnouncer.ts` (G7). Either
-announce "Loading <thing>" through the existing announcer when a page enters its
-loading branch, or give each skeleton an `sr-only` status element with
-`role="status"`. Prefer the `sr-only` `role="status"`: it is local to the
-skeleton, disappears with it, and needs no cleanup — the global announcer would
-need a matching "loaded" call on every exit path.
-
-Keep `aria-hidden` on the visual bones. Every skeleton gets the same treatment,
-so the behavior is consistent across both roles.
-
-**Test first:** extend the existing page tests — each page in its loading state
-exposes a status message; in its loaded state it does not. Confirm red today.
+Every affected skeleton (`History.tsx`, `MenuManage.tsx`, `Prep.tsx`,
+`Orders.tsx`, `OrderStatus.tsx`, `MenuSkeleton.tsx`) now carries a local
+`sr-only` `role="status"` element ("Loading history…" etc.) alongside its
+existing/added `aria-hidden` visual bones — local to the skeleton, no cleanup
+needed, consistent across both roles. New `History.test.tsx`/`Prep.test.tsx`
+(neither page had a test file before) plus extensions to `Orders.test.tsx`,
+`OrderStatus.test.tsx`, `MenuManage.test.tsx` — each asserts the status is
+present while loading and gone once data lands. Confirmed red then green.
 
 ---
 
@@ -1857,32 +1832,16 @@ a zero); the existing empty state still renders. Confirm red today.
 
 ---
 
-#### Y16 — [LOW] Every price carries `.00` on a menu with no paise
+#### Y16 — DONE (2026-07-28)
 
-**Where:** `lib/format.ts:3-5` — `formatPrice` is
-`` `₹${(paise / 100).toFixed(2)}` ``, unconditionally.
-
-Canteen prices are whole rupees. The result is `₹40.00` everywhere, including
-the places § 9.11-X6 and X7 deliberately promoted to display scale: the
-checkout total at `text-3xl`, the pay-at-counter amount at `text-4xl`, the
-history header at `text-2xl`. At that size the `.00` is a third of the figure's
-width, spent on two zeros that are always zeros, and it reads like a Western
-storefront rather than a chit.
-
-**Fix shape:** drop the fraction when the amount is a whole rupee; keep two
-decimals when it is not (nothing forbids a ₹12.50 item, and silently truncating
-money is not an option). One function, and every call site inherits it —
-`formatPrice` is the only price formatter in the app, which is why this is a
-one-file change and worth doing.
-
-Leave `paiseToRupeesInput` alone: it feeds a `type="number"` form field in
-`MenuManage.tsx` and wants its fixed two decimals.
-
-**Test first:** extend `format.test.ts` — whole rupees render without a
-fraction; a non-whole amount keeps both decimals; zero renders as `₹0`. Confirm
-red today. Then grep for tests asserting on `.00` strings and update them —
-this changes text several existing tests match on, and that fallout is part of
-the task.
+`formatPrice` in `lib/format.ts` now drops the fraction for whole rupees
+(`₹40.00` → `₹40`) and keeps two decimals for a genuinely fractional amount
+(a real ₹12.50 item is never truncated). `paiseToRupeesInput` left untouched —
+it feeds a form input and wants its fixed two decimals. Extended
+`format.test.ts`, confirmed red then green. Fallout: `History.tsx`'s Y5 test
+asserted `₹120.00`/`₹50.00`/`₹150.00` on whole-rupee fixture amounts — updated
+to the new no-fraction form during this merge (the sweep agent's own grep
+missed it since its worktree predated Y5).
 
 ---
 
@@ -2092,7 +2051,7 @@ task's bundle measurement is meaningless until it lands.
 | **N — stamps** | **Y2** | `components/student/StatusStamps.tsx` alone. The `bg-current/10` dead class. Verify the fix against the **compiled** CSS, not the source. | **DONE (2026-07-28)**. |
 | **O — menu row** | **Y9** → **Y4** | Y9 fixes `QtyStepper` (glyphs + live announcement); Y4 then restyles `MenuItemCard` around the fixed control. Strict order — Y4 changes when the stepper renders at all. | **DONE (2026-07-28)**. |
 | **P — shop history** | **Y5** + **Y13** | Both own `pages/shop/History.tsx`. Y13 is a one-line `NaN` guard inside the panel Y5 is rebuilding. | **DONE (2026-07-28)**. |
-| **Q — sweeps** | **Y8**, **Y14**, **Y16** | Three cross-file sweeps (rail keyboard access, skeleton status announcements, `formatPrice`). Run them **after** bundles M–P so they aren't sweeping files mid-edit — the same rule X5 followed. | Open, unstarted — **M–P now landed, this can start.** |
+| **Q — sweeps** | **Y8**, **Y14**, **Y16** | Three cross-file sweeps (rail keyboard access, skeleton status announcements, `formatPrice`). Run them **after** bundles M–P so they aren't sweeping files mid-edit — the same rule X5 followed. | **DONE (2026-07-28)** — merged with two hand-resolved conflicts (`History.test.tsx`, `Menu.test.tsx`) since its worktree branched before M–P landed; see § 12.1 note. |
 | **I — order-status page** | **Y12** → **H3** → **Y11** | All own `pages/student/OrderStatus.tsx`. Y12 is a two-line guard, first; H3 is the price-drift notice (V3 landed, so it's unblocked); Y11 adds the elapsed-time line, last — it's the largest. | Open. **X1/X7 already landed here** (§ 9.11) — read what they changed before editing. |
 | **J — menu page** | **H4** | Owns `pages/student/Menu.tsx` (the 422 recovery). Coordinate with bundle O: Y4 owns `MenuItemCard.tsx`, H4 owns the page — adjacent, not the same file, but land one before starting the other. | Open, unstarted. **X2/X6 already landed here** (§ 9.11). |
 | **K — shop orders page** | **Y6** → **Y15** → **H1** | All own `pages/shop/Orders.tsx`. Y6 is a small guard, first. Y15 adds the queue-depth strip. H1 is the cash drawer and is much the largest — last, and it also adds `components/shop/CashDrawer.tsx`. **Read § 9.4-H5 before Y15** so the two urgency treatments end up one language. | Open. **X3 already landed here** (§ 9.11). |
