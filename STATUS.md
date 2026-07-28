@@ -18,33 +18,35 @@ on 2026-07-28** — each one now survives as a single row in its section's statu
 table, which is where § 12.5 says a landed task belongs. The reasoning behind
 each fix is in `git log`.
 
-**This pass produced a new backlog: § 9.12, the Y-series** — 16 frontend
-findings from a fresh audit against the built output, aimed at the owner's
-brief (*"find issues, any optimization needed; frontend improvements,
-visualizations for better UX/UI — I want it to look the best, best experience,
-smooth"*). Nothing in it has been started. No code changed this pass.
+**§ 9.12, the Y-series** is a 16-item frontend backlog from a fresh audit
+against the built output, aimed at the owner's brief (*"find issues, any
+optimization needed; frontend improvements, visualizations for better UX/UI —
+I want it to look the best, best experience, smooth"*). **This pass landed
+nine of the sixteen**: Y1 (font reclaim), the `Modal.tsx` bundle (Y3/Y7/Y10),
+`StatusStamps.tsx` (Y2), `QtyStepper.tsx` + `MenuItemCard.tsx` (Y9→Y4), and
+`History.tsx`'s day-shape + revenue-per-item visualization (Y5/Y13). Each
+landed with a regression test confirmed red against the unfixed code first, in
+three parallel worktree-isolated agents (bundles M+N, O, P) merged back to
+`main` one at a time with the full gate re-run after each merge. **Y6, Y8,
+Y11, Y12, Y14, Y15, Y16 remain open.**
 
-Gate re-run on the committed tree to establish the baseline the Y-series will
-be measured against:
+Gate on the current tree, all Y-series work included:
 
 | Gate | Result |
 |---|---|
 | `tsc -b --noEmit` | clean |
 | `npm run lint` | 0 errors, 24 pre-existing warnings |
-| `vitest run` | **111/111 passing**, 19 test files |
+| `vitest run` | **140/140 passing**, 23 test files (was 111/19 before this pass) |
 | `npm run format:check` | clean |
-| `vite build` initial student JS | **241.74 KB raw** — under the 250 KB hard stop, ~8.3 KB headroom |
-| `vite build` service-worker precache | **696.51 KiB, 42 entries — under the ~800 KB soft ceiling** (Y1 landed 2026-07-28, see below) |
+| `vite build` initial student JS | **241.74 KB raw** — under the 250 KB hard stop, unchanged this pass (Y4/Y9 both landed in the already-lazy student route chunk, not the eager initial bundle) |
+| `vite build` service-worker precache | **702.03 KiB, 42 entries — under the ~800 KB soft ceiling**, ~98 KB headroom left |
 | Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
 
-**§ 9.12-Y1 has landed** (2026-07-28, this pass). The audit found **120 KB of
-the 802 KiB precache was `latin-ext` font subsets the app cannot render a
-single glyph from** — the shopkeeper's Hindi already falls back to a system
-font, and nothing else in the product uses Central/Eastern-European Latin.
-Deleting seven imports from `main.tsx` measured **696.51 KiB / 42 entries**
-(better than the ~682 KiB estimate), restoring ~103 KB of real headroom. That
-headroom is what pays for the visualization and design work still open in the
-same series (Y4/Y5/Y11/Y15).
+**Precache arc this pass:** 801.93 KiB/49 entries (start) → 696.51 KiB/42
+(after Y1's font reclaim alone) → 702.03 KiB/42 (final, after Y2's added CSS
+fill rules and Y5's new History chunk spent ~5.5 KB of Y1's headroom). Still
+comfortably under the ceiling; the remaining ~98 KB is what Y11 and Y15 (both
+still open) should be measured against.
 
 ### The backlogs
 
@@ -59,7 +61,7 @@ same series (Y4/Y5/Y11/Y15).
 | **§ 9.9 — M-series (M1–M6)** | Mobile experience — the app *as a phone app* | 6 | **All open** |
 | **§ 9.10 — S-series (S1–S5)** | Trust & provenance | 5 | S1/S2 done; **S3/S4/S5 open** |
 | § 9.11 — X-series (X1–X7) | Frontend defects + design, 2026-07-27 fourth pass | 7 | **All done** — records only |
-| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | **All open, unstarted, authorized** |
+| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | Y1–Y5/Y7/Y9/Y10/Y13 done; **Y6, Y8, Y11, Y12, Y14–Y16 open** |
 | Deployment D-1..D-7 | Human-led, needs real infra | 7 | Open |
 
 > **Note the section order.** § 9.6 (deferred, *not* authorized) sits between
@@ -79,22 +81,20 @@ same series (Y4/Y5/Y11/Y15).
 
 ### Start here
 
-**Pick up § 9.12 (Y-series) — it is the only backlog written against the
-current tree**, and Y1 unblocks the rest of it. Suggested order:
+**Continue § 9.12 (Y-series) — bundles M, N, O, P, Y0 are done; bundle Q is
+next.** Suggested order for what's left:
 
-1. **Y1** — the 120 KB font reclaim. One file, ~7 deleted lines, measurable,
-   and it is the precondition for every task that adds bytes.
-2. **Y2** — the status stamps ship with no fill (`bg-current/10` compiles to
-   nothing; verified absent from `dist`). Small fix, and it is the app's
-   signature element.
-3. **Y3 + Y7 + Y10** — three small `Modal.tsx` defects, one agent, one file:
-   dialogs have no accessible name, `vh` should be `dvh`, and a drag off the
-   sheet closes it.
-4. **Y4** (menu row) and **Y5** (the day's shape on the shop's History page) —
-   the two real design pieces, and the two the owner's brief is mostly about.
-   Both need Y1's headroom first.
-5. Everything else in § 9.12, then the still-open **H1/H3–H8**, **P4/P5**,
-   **W3/W5/W8**, **M1–M6**, **S3/S4/S5**, **Q3–Q9**.
+1. **Bundle Q — Y8, Y14, Y16.** Three cross-file sweeps (rail keyboard
+   access, skeleton status announcements, `formatPrice`'s `.00`). Now
+   unblocked — the M–P bundles it was waiting behind (so it wouldn't sweep
+   files mid-edit) have all landed.
+2. **Y6, Y11, Y15** — the remaining Orders.tsx/OrderStatus.tsx tasks. Y11 and
+   Y15 are visualization work and should be measured against the ~98 KB of
+   precache headroom still left from Y1.
+3. **Y12** — small `localStorage` guard on `OrderStatus.tsx`, sequence with
+   H3/Y11 (same file — see the bundle table's "I — order-status page" row).
+4. Then the still-open **H1/H3–H8**, **P4/P5**, **W3/W5/W8**, **M1–M6**,
+   **S3/S4/S5**, **Q3–Q9** — none of these were touched this pass.
 
 **Two things carry over and are still true:**
 
@@ -398,17 +398,14 @@ phone or counter tablet. These are standing rules, not suggestions:
      2026-07-28 (`dist/assets/index-*.js`) after H2, the § 9.7 Settings work
      and § 9.11's X-series — under, with ~8.3 KB of headroom. This is
      parse-and-execute on first paint.
-   - **Service-worker precache ≤ ~800 KB.** Measured **696.51 KiB / 42
-     entries — under the soft ceiling**, ~103 KB of headroom, after
-     **§ 9.12-Y1** (2026-07-28: deleted the seven `latin-ext` woff2 imports
-     from `main.tsx` — Khaao renders basic Latin and Devanagari only, and
-     Devanagari already falls back to a system font since Plex ships no
-     Devanagari glyphs; measured better than the ~682 KiB estimate). Was
-     801.93 KiB / 49 entries, over the ceiling. Same class of fix as
-     § 9.8-W6, one subset further.
+   - **Service-worker precache ≤ ~800 KB.** Measured **702.03 KiB / 42
+     entries — under the soft ceiling**, ~98 KB of headroom, after **Y1**
+     (font reclaim, -105 KB) plus **Y2/Y4/Y5** adding back ~5.5 KB (stamp fill
+     CSS, the History day-shape chunk). Was 801.93 KiB / 49 entries, over the
+     ceiling, before this pass.
 
-     **Y1's headroom pays for Y4/Y5/Y11/Y15** — treat it as spent as those
-     land, not as free margin.
+     **Remaining headroom pays for Y11/Y15**, still open — treat it as spent
+     as those land, not as free margin.
 
      **No charting library, at any budget.** The smallest mainstream one is
      ~90 KB gzipped — several times the entire student headroom — and none of
@@ -1463,7 +1460,7 @@ sequence, since it sweeps files the others edit.
 
 ---
 
-### 9.12 Frontend defect + design-elevation backlog (Y-series) — Y1 DONE, Y2–Y16 OPEN, AUTHORIZED
+### 9.12 Frontend defect + design-elevation backlog (Y-series) — Y1–Y5/Y7/Y9/Y10/Y13 DONE, Y6/Y8/Y11/Y12/Y14–Y16 OPEN, AUTHORIZED
 
 Found in the **2026-07-28 fifth-pass frontend audit**. Owner's brief: *"find
 issues, any optimization needed; frontend improvements, visualizations for
@@ -1488,18 +1485,18 @@ than renumbered:
 | # | Priority | Kind | One-line | Files owned |
 |---|---|---|---|---|
 | Y1 | **DONE** | Optimization | 120 KB of precached `latin-ext` font subsets the app can never render — the whole reason there is no byte headroom | `src/main.tsx` — precache 801.93 KiB/49 → **696.51 KiB/42 entries** |
-| Y2 | **HIGH** | Defect | `bg-current/10` compiles to nothing — every status stamp, the app's signature element, ships with its ink wash missing | `components/student/StatusStamps.tsx` |
-| Y3 | **HIGH** | Defect | Every dialog in the app announces as an unnamed "dialog" — `aria-modal` with no `aria-labelledby` | `components/ui/Modal.tsx` |
-| Y4 | **HIGH** | Design | The student's menu row — the most-looked-at surface in the product — is a generic delivery-app list item | `components/student/MenuItemCard.tsx`, `components/ui/QtyStepper.tsx` |
-| Y5 | **HIGH** | Design/viz | The shop's History page is the business, rendered as three stat cards. No sense of the day's shape | `pages/shop/History.tsx` |
+| Y2 | **DONE** | Defect | `bg-current/10` compiles to nothing — every status stamp, the app's signature element, ships with its ink wash missing | `components/student/StatusStamps.tsx` |
+| Y3 | **DONE** | Defect | Every dialog in the app announces as an unnamed "dialog" — `aria-modal` with no `aria-labelledby` | `components/ui/Modal.tsx` |
+| Y4 | **DONE** | Design | The student's menu row — the most-looked-at surface in the product — is a generic delivery-app list item | `components/student/MenuItemCard.tsx`, `components/ui/QtyStepper.tsx` |
+| Y5 | **DONE** | Design/viz | The shop's History page is the business, rendered as three stat cards. No sense of the day's shape | `pages/shop/History.tsx` |
 | Y6 | MEDIUM | Defect | Accept with every item unchecked submits an "accept" that rejects the whole order | `pages/shop/Orders.tsx` |
-| Y7 | MEDIUM | Defect | `Modal` sizes to `vh` on a codebase that already knows `vh` is wrong on iOS | `components/ui/Modal.tsx` |
+| Y7 | **DONE** | Defect | `Modal` sizes to `vh` on a codebase that already knows `vh` is wrong on iOS | `components/ui/Modal.tsx` |
 | Y8 | MEDIUM | Defect | Four horizontal rails are unreachable by keyboard | `TrendingRail.tsx`, `FavoritesRail.tsx`, `MenuSkeleton.tsx`, `pages/student/Menu.tsx` |
-| Y9 | MEDIUM | Defect | `QtyStepper` — the app's most-tapped control — still uses text glyphs and announces nothing when the quantity changes | `components/ui/QtyStepper.tsx` |
-| Y10 | MEDIUM | Defect | A drag that starts inside a modal and ends on the backdrop closes the modal | `components/ui/Modal.tsx` |
+| Y9 | **DONE** | Defect | `QtyStepper` — the app's most-tapped control — still uses text glyphs and announces nothing when the quantity changes | `components/ui/QtyStepper.tsx` |
+| Y10 | **DONE** | Defect | A drag that starts inside a modal and ends on the backdrop closes the modal | `components/ui/Modal.tsx` |
 | Y11 | MEDIUM | Design/viz | The student watches an order with no sense of elapsed time | `pages/student/OrderStatus.tsx` |
 | Y12 | LOW | Defect | `markAsRated` writes to `localStorage` unguarded while its paired read is guarded | `pages/student/OrderStatus.tsx` |
-| Y13 | LOW | Defect | Top-items bar computes `NaN%` width on an all-zero day | `pages/shop/History.tsx` |
+| Y13 | **DONE** | Defect | Top-items bar computes `NaN%` width on an all-zero day | `pages/shop/History.tsx` |
 | Y14 | LOW | Defect | Every loading skeleton is `aria-hidden` with nothing announced in its place | `History.tsx`, `MenuManage.tsx`, `Prep.tsx`, `Orders.tsx`, `OrderStatus.tsx`, `MenuSkeleton.tsx` |
 | Y15 | LOW | Design/viz | The shopkeeper cannot see how deep the queue is without counting cards | `pages/shop/Orders.tsx` |
 | Y16 | LOW | Design | Every price in the app carries `.00` on a menu with no paise | `lib/format.ts` |
@@ -1563,209 +1560,60 @@ in source, not observed live).
 
 ---
 
-#### Y2 — [HIGH] The signature element ships with its ink wash missing
+#### Y2 — DONE (2026-07-28)
 
-**Where:** `components/student/StatusStamps.tsx:46` — `STAMP_BASE` contains
-`bg-current/10`.
-
-**Verified against the compiled CSS, not the source:**
-
-```
-$ grep -c "bg-current" dist/assets/*.css
-0
-$ node -p "require('tailwindcss/package.json').version"
-3.4.19
-```
-
-The class **does not exist in the shipped stylesheet.** Tailwind 3 cannot apply
-an opacity modifier to `currentColor` — there is no color channel to
-interpolate — so the utility is silently dropped at build time. No error, no
-warning, no lint failure. It has presumably never rendered.
-
-**Why this one matters more than its size suggests:** § 9.2 names the rubber
-stamp as *the* signature element of the product and the "ready" moment as its
-emotional peak. The stamps are supposed to read as ink pressed onto paper — a
-tinted fill inside a colored ring. What actually ships is an outline: border and
-text color only, hollow interior. The `feTurbulence` distressed-ink filter, the
-per-stamp rotation, the staggered pop — all of that deliberate work is landing
-on a shape that is missing the ink itself.
-
-**Failure scenario:** there is no failure *event* here, which is why it
-survived four audits. It renders, it just renders as a weaker version of the
-intended design on the one screen the product is emotionally built around.
-
-**Fix shape:** the stamp colors are already per-entry data in the `STAMPS`
-table (`ink: 'border-ink text-ink'`). Add the fill there as a real token class
-per stamp — `bg-ink/10`, `bg-turmeric-pale/60`, `bg-stamp-light/50`,
-`bg-brand-light/60` — chosen to sit under the existing text color at readable
-contrast, and drop `bg-current/10` from `STAMP_BASE`. The void stamp
-(`REJECTED`/`CANCELLED`/`EXPIRED`) needs its own fill on the same line, since it
-does not come from the table.
-
-Do **not** solve this by upgrading Tailwind or reaching for `color-mix()` — one
-is a build-wide change far out of scope for a fill color, the other has iOS
-Safari version constraints this project has not established.
-
-**Look at it before and after.** This is a visual defect; the deliverable
-includes a before/after screenshot of the order-status page at 375 px in each
-of `submitted` / `preparing` / `ready` / `completed`, plus one void state.
-
-**Test first:** `StatusStamps.test.tsx` (new) — assert each landed stamp
-carries a fill class that is present in the compiled stylesheet. The honest
-version of this test is a **build-output assertion**: `grep` the generated CSS
-for each class the component emits. A test that only asserts the className
-string is on the element would have passed against the broken code too, which
-is the whole trap here. Confirm it fails red today.
+`STAMP_BASE`'s `bg-current/10` compiled to nothing (Tailwind 3 can't apply an
+opacity modifier to `currentColor`) — confirmed via `grep -c "bg-current"
+dist/assets/*.css` → 0 before the fix. Added a real per-stamp fill token
+(`bg-ink/10`, `bg-turmeric-pale/60`, `bg-stamp-light/50`, `bg-brand-light/60`)
+to the `STAMPS` table, plus one for the void stamp. Test is a build-output
+assertion (`StatusStamps.test.tsx`, greps the compiled CSS for each class) —
+confirmed red on the old code, green after. Visually checked the compiled CSS
+against a static 375px harness (Playwright) for all four landed states plus
+the void state — each shows a visible tinted wash under its border/text color.
 
 ---
 
-#### Y3 — [HIGH] Every dialog announces as an unnamed "dialog"
+#### Y3 — DONE (2026-07-28)
 
-**Where:** `components/ui/Modal.tsx:100-104`.
-
-The dialog element carries `role="dialog"` and `aria-modal="true"` but no
-`aria-labelledby` or `aria-label`. The `title` prop renders into a plain `div`
-at line 109 with no `id`.
-
-**Failure scenario:** a student using VoiceOver taps **View cart**. The screen
-reader announces "dialog" — nothing else. It does not say "Your order." The
-same is true of every overlay in the app, because they all go through this one
-component (§ 9.1.3 mandates that): checkout, the reject checklist, the order
-modal, every `ConfirmDialog`, the cancel-order confirmation. One missing
-attribute, every dialog in the product.
-
-**Fix shape:** `useId()` for a title id (the same hook `StatusStamps` already
-uses for its filter id), put it on the title `div`, and point
-`aria-labelledby` at it. When `title` is absent, fall back to `aria-label`
-rather than pointing at an id that does not exist — a dangling `aria-labelledby`
-is worse than none. If `subtitle` is present, wire it to `aria-describedby`
-with a second id.
-
-**Test first:** `Modal.test.tsx` (new) — a modal with a title exposes an
-accessible name matching it (`getByRole('dialog', { name: 'Your order' })`); a
-modal with no title still exposes a non-empty name and no dangling
-`aria-labelledby`. Confirm both fail red today.
+`Modal.tsx` dialogs had `role="dialog"`/`aria-modal` but no accessible name.
+Added `useId()`-generated title/subtitle ids, wired `aria-labelledby` to the
+title div and `aria-describedby` to the subtitle when present; falls back to
+`aria-label="Dialog"` when no title is given (never a dangling
+`aria-labelledby`). `Modal.test.tsx` (new, shared with Y7/Y10) confirmed red
+then green.
 
 ---
 
-#### Y4 — [HIGH] The student's menu row is a generic delivery-app list item
+#### Y4 — DONE (2026-07-28)
 
-**Where:** `components/student/MenuItemCard.tsx`.
-
-**The gap.** Every distinctive surface in this app came from a real object —
-the chit, the chalkboard, the ledger, the token. The menu row did not. It is
-`[64px photo][name, price, badge][stepper]`: the same row shape as every food
-delivery app, which is precisely the styling § 9.2 forbids. It is also the
-single most-looked-at surface in the product — a student sees twenty of these
-before they see anything else.
-
-Three concrete problems, at 375 px:
-
-1. **The stepper occupies 128 px of a 343 px row, permanently** (44 + 40 + 44),
-   showing `− 0 +` on every item the student has not ordered. A third of the row
-   is spent on a control that is doing nothing.
-2. **The price is a small mono figure jammed into a wrap-prone flex row** with
-   the rating and the status badge. On a long Hindi-transliterated name the
-   price wraps to its own line and the row loses its rhythm.
-3. **Nothing on the row is answerable to "what is this in a real canteen?"**
-   (§ 9.2).
-
-**What to build.** The object is the **menu board**: name on the left, price on
-the right, leader dots running between them. That is how a canteen board, a
-printed menu card, and a ledger line have all set a name against a price for a
-century, and it solves problem 2 outright — the price anchors right at a fixed
-position, the name truncates into the leader, and the row's rhythm holds at any
-name length. Leader dots cost one element and a `repeating-linear-gradient` or a
-dotted `border-bottom` on a `flex-1` spacer; no new token, no new dependency.
-
-And collapse the stepper: until `qty > 0`, render a single **Add** control at
-the existing 44 px target. Tapping it sets qty to 1 and swaps in the full
-stepper (which then behaves exactly as it does today, including going back to
-**Add** at zero). That returns ~84 px of row width to the name and the price.
-This is a well-worn pattern precisely because it is right — the affordance
-matches the state.
-
-**Constraints.** Stay inside the tokens (§ 9.1.10) — no new grays, radii or
-shadows. The veg/non-veg mark keeps leading the name, as it does on any Indian
-menu board. Keep the rating display as running-prose text with its `★`, which
-is the exception § 9.11-X5 deliberately carved out (the *interactive* rating
-control is SVG; the read-only display stays text). The dimmed-when-unorderable
-treatment must survive, and an out-of-stock item must not offer an **Add**
-button at all. `FavoriteToggle` stays where it is.
-
-**Spend the boldness here and nowhere else in this series.** The leader-dot
-row is the one memorable move; everything around it stays quiet.
-
-**Watch the budget:** this is student-path code, on the initial chunk. Measure
-it. Y1's headroom is what makes it affordable.
-
-**Test first:** extend `Menu.test.tsx` — an item at qty 0 renders **Add** and
-no stepper; tapping **Add** sets qty 1 and renders the stepper; decrementing to
-0 returns to **Add**; an unorderable item renders neither an enabled **Add**
-nor an enabled increment. Confirm the first two fail red today.
-
-**Also:** before/after screenshots at 375 px with (a) a short English name,
-(b) a long name that currently wraps, (c) an out-of-stock item.
+Rebuilt `MenuItemCard.tsx`'s name/price line as a **menu board** leader:
+`[VegMark] Name ⋯⋯⋯⋯ Price`, price anchored at a fixed right edge via a
+`flex-1` dotted-border spacer, name truncating into the leader instead of
+wrapping. Collapsed the stepper: at `qty 0` (and orderable) a single 44px
+**Add** button renders instead of the always-present stepper; tapping it sets
+qty 1 and swaps in the full `QtyStepper` (Y9's fixed control), which reverts to
+Add at zero. Out-of-stock items never show Add. No new tokens. Extended
+`Menu.test.tsx` (+4 tests), confirmed the Add/stepper-swap assertions red then
+green. Initial JS bundle unchanged at **241.74 KB** — `MenuItemCard`/`Menu`
+already lived in the lazy student-route chunk, not the eager initial bundle.
 
 ---
 
-#### Y5 — [HIGH] The shop's History page is the business, rendered as three stat cards
+#### Y5 — DONE (2026-07-28)
 
-**Where:** `pages/shop/History.tsx`.
-
-**The gap.** This page answers "how much did I collect today" and stops. What
-a canteen operator actually needs from a day is its *shape*: when the rush hit,
-how long it lasted, whether today's rush came earlier than yesterday's. That
-decides when to start cooking, when to take the break the shop-status control
-already supports, and how much to prep. None of it is on the screen. The one
-visual on the page is the five-row proportional bar under "Top items" (G6),
-which is good and is the idiom to extend.
-
-**The data is already there — no backend change.** `getShopHistory(date)`
-returns `orders: Order[]`, each with `created_at`, `paid_at`, `total_price`
-and `items[]` (`qty`, `price_each`). Everything below is derived client-side
-from a payload the page already fetches:
-
-- Orders per half-hour across the day, from `created_at`.
-- Revenue per half-hour, from `paid_at` + `total_price`.
-- Revenue per item, from `items[]` — which the existing `insights.item_counts`
-  cannot give you, since it carries qty only. The item that sells most is often
-  not the item that earns most, and that is exactly the thing worth showing a
-  shopkeeper.
-
-**What to build — derive the form from the counter, not from a chart library.**
-A canteen's record of its own day is the **spike**: the spindle by the register
-that finished chits get impaled on, growing through the day. Draw the day as
-columns of stacked chits — each half-hour is a column, each order in it a small
-kraft rectangle with an ink hairline, stacked upward. The height *is* the count,
-and at canteen volumes (tens of orders a day, not thousands) a shopkeeper can
-literally count them. Past a threshold per column, degrade gracefully to a solid
-`paper` bar with the mono count above it rather than rendering 200 rectangles.
-
-Label the axis in the hours a canteen actually thinks in, not clock ticks —
-the lunch rush band should be legible at a glance. The existing `ink`
-chalkboard block (`PrepSummaryStrip`, `PrepRow`'s tally) is the established
-surface for "the kitchen's own numbers"; this belongs in that language.
-
-**Rules.** Hand-drawn SVG or flex divs only — **no charting library**, see the
-series preamble. Hindi pairs on every new string (§ 9.1.11). No horizontal page
-scroll at 375 px: the day strip scrolls inside its own `overflow-x-auto`
-container (and if you add one, Y8 applies to it — make it keyboard-reachable
-from the start). The numbers stay the accessible content; the bars are
-decoration and get `aria-hidden`, exactly as G6's existing bar does. Shop-only
-code — it must not reach a student's bundle.
-
-**Do not invent a comparison you cannot compute.** The endpoint serves one day
-at a time. "Busier than yesterday" needs a second fetch and is a real product
-decision, not a styling one — if you want it, record it in § 9.6 and stop. This
-task is today's shape only.
-
-**Test first:** `History.test.tsx` (new) — a fixture day of orders across
-several half-hours produces the right per-bucket counts; an empty day renders
-the existing empty state and no chart; the revenue-per-item ordering differs
-from the qty ordering for a fixture where a low-volume item earns most (that is
-the assertion that proves the derivation is real and not a re-skin of
-`item_counts`). Confirm they fail red today.
+Added two client-derived, hand-drawn (no charting library) visualizations to
+`History.tsx`: a **day-shape** chalkboard block (`ink` background, same idiom
+as `Prep.tsx`'s tally strip) bucketing orders into 48 half-hour slots —
+stacked kraft-chit rectangles up to a threshold, then a degrade to a solid
+proportional bar, hour labels a canteen thinks in, plus a one-line busiest-slot
+summary computed from that day only; and a **Top earners** card ranking items
+by `qty × price_each` (a different, and sometimes differently-ordered, metric
+than the existing qty-based "Top items"). No cross-day comparison invented —
+out of scope per the task's own instruction. `History.test.tsx` (new)
+confirms the derivation is real (a fixture where the top-earning item isn't
+the top-qty item) — red then green. Shop-only chunk confirmed still
+lazy-loaded, unaffected by the student initial bundle.
 
 ---
 
@@ -1808,36 +1656,12 @@ called; one item checked leaves it enabled. Confirm it fails red today.
 
 ---
 
-#### Y7 — [MEDIUM] `Modal` sizes to `vh` on a codebase that already knows better
+#### Y7 — DONE (2026-07-28)
 
-**Where:** `components/ui/Modal.tsx:104` — `max-h-[92vh]` / `sm:max-h-[88vh]`.
-
-`index.css:15` sets `#root { min-height: 100svh }` — this project already
-established that `vh` is the wrong unit on mobile Safari, and then used `vh` in
-the one component that renders as a full-width bottom sheet.
-
-**Failure scenario:** a student in mobile Safari (not the installed PWA — a
-first-time student who followed a link, which is *every* student before they
-install) opens checkout with five items. `100vh` on iOS Safari is the viewport
-*without* the URL bar, so `92vh` can exceed what is actually visible. The
-sheet's footer — carrying the total and **Place order** — sits under the
-browser chrome. The content area scrolls, so it is recoverable, but the
-primary action is off-screen at the moment of purchase.
-
-**Fix shape:** `max-h-[92dvh]` / `sm:max-h-[88dvh]`. `dvh` is supported on iOS
-Safari 15.4+ and every Chromium the project targets. `svh` is the safer
-under-estimate but produces a visibly short sheet on desktop; `dvh` is the right
-unit for a sheet whose height should track the visible viewport.
-
-**Do not claim you verified this on iOS unless you held the phone** (§ 12.8).
-A DevTools device emulator does not reproduce the URL-bar behavior. "This is
-the correct unit and it renders identically in Chrome DevTools at 375×667" is
-an honest report; "fixed on iOS" is not, without D-6.
-
-**Test first:** `Modal.test.tsx` — assert the rendered class list carries the
-`dvh` values. This is a weak test and jsdom cannot evaluate viewport units;
-say so rather than dressing it up. The real deliverable is the reasoning plus a
-desktop-Safari check that the sheet still sizes sanely.
+`max-h-[92vh]`/`sm:max-h-[88vh]` → `max-h-[92dvh]`/`sm:max-h-[88dvh]` in
+`Modal.tsx`. Test is intentionally weak (jsdom can't evaluate viewport units;
+asserts the class list only) — real verification is desktop-Safari sizing
+sanity, not an iOS device (§ 12.8 — not claimed as iOS-verified, that's D-6).
 
 ---
 
@@ -1874,76 +1698,27 @@ accessibility tree. Confirm red today.
 
 ---
 
-#### Y9 — [MEDIUM] The most-tapped control in the app is still text glyphs, and silent
+#### Y9 — DONE (2026-07-28)
 
-**Where:** `components/ui/QtyStepper.tsx:31,42` — `−` (U+2212) and `+` set as
-`text-xl font-bold` text.
-
-**Two problems in one 46-line component.**
-
-**The glyphs.** § 9.11-X5 swept text glyphs to inline stroke SVGs across six
-files and explicitly listed which exceptions it was keeping. `QtyStepper` was
-not in the sweep and is not in the exception list — it was simply missed. It is
-also the highest-traffic control in the product: it is on every menu row, both
-rails, the checkout sheet, the prep board, and the shop's handover modal. A
-minus sign and a plus sign set in a text face at 20 px render at different
-optical weights and different vertical centering on iOS vs Android vs desktop —
-which is the exact reason X5 exists.
-
-**The silence.** The value `<span>` has no accessible name and no live region.
-A screen-reader user taps **Increase quantity**, and nothing is announced — the
-button's own label does not change, and the number that did change is not in a
-live region. There is no way to know the current quantity without navigating to
-the span. The app has the machinery for this already: `lib/liveAnnouncer.ts`
-and the `LiveRegion` in `Layout.tsx` (G7).
-
-**Fix shape:** swap both glyphs for inline stroke SVGs in the established
-language (`viewBox="0 0 24 24"`, `stroke="currentColor"`, `strokeWidth` and
-`strokeLinecap` matching the X5 sweep's icons — see `Toast.tsx` or `Modal.tsx`
-for the reference shape). For the announcement, give the value span an
-`aria-live="polite"` and an accessible label naming what it counts, or route
-through `liveAnnouncer` — prefer the local live region here, since the stepper
-can appear many times on one page and a global announcer would need to
-disambiguate which one changed.
-
-Also worth fixing while you are in here: `max` defaults to 20 and the `+`
-simply goes `disabled:opacity-30` on reaching it, with no explanation. One
-quiet line, or nothing — but decide deliberately rather than leaving it silent.
-
-**Test first:** `QtyStepper.test.tsx` (new) — both controls render an `svg`
-and no text glyph; the value is exposed in a live region with an accessible
-name; increment/decrement respect `min`/`max`/`disabled`/`disableIncrease`
-(regression cover for the existing behavior, which must not change). Confirm
-the first two fail red today.
+Swapped `QtyStepper.tsx`'s `−`/`+` text glyphs for inline stroke SVGs matching
+the X5 sweep's language. Value span now carries `aria-live="polite"` plus an
+accessible label naming what it counts (new optional `label` prop, so callers
+can name the item) — kept local per stepper instance rather than routing
+through the global `liveAnnouncer`, since the control can appear many times per
+page. The `max`-reached case gets a quiet accessible-only cue (`"...maximum N
+reached"` in the label) rather than a silent disable. `QtyStepper.test.tsx`
+(new, 10 tests) confirmed red then green; full min/max/disabled/
+disableIncrease regression cover included.
 
 ---
 
-#### Y10 — [MEDIUM] A drag inside a modal closes it
+#### Y10 — DONE (2026-07-28)
 
-**Where:** `components/ui/Modal.tsx:93-97` — the backdrop div carries
-`onClick={onClose}`; the sheet stops propagation at line 103.
-
-That guard handles a *click* on the sheet. It does not handle a drag: press
-inside the sheet, move the pointer past its edge, release. The browser fires
-`click` on the nearest common ancestor of `mousedown` and `mouseup` — the
-backdrop — and the modal closes.
-
-**Failure scenario:** the checkout sheet, on a phone, at the QtyStepper. A
-student presses `+`, their thumb slides a few pixels off the button and past
-the sheet edge as they lift — a routine imprecision on a 44 px target held
-one-handed. Checkout closes. Their cart is intact, so this is an annoyance
-rather than data loss, but it happens at the exact moment they are adjusting
-their order, and it will read as the app being flaky.
-
-**Fix shape:** only close when the interaction both starts and ends on the
-backdrop. Record the `pointerdown`/`mousedown` target and close on click only
-if that target was the backdrop itself. Do not switch to closing on
-`mousedown` — that breaks a legitimate click-to-close that begins on the
-backdrop and is more surprising still.
-
-**Test first:** `Modal.test.tsx` — a `mousedown` inside the sheet followed by a
-`mouseup`/`click` on the backdrop does **not** call `onClose`; a full click on
-the backdrop does. Confirm the first fails red today.
+Backdrop `onClick={onClose}` now only fires when the interaction both starts
+and ends on the backdrop itself — a `mousedown`-target ref recorded in
+`onMouseDown`, checked in `onClick` alongside the click's own target. A drag
+starting on the sheet and releasing past its edge no longer closes the modal;
+a full backdrop click still does. Covered in the shared `Modal.test.tsx`.
 
 ---
 
@@ -2013,26 +1788,11 @@ still disappears. Confirm red today.
 
 ---
 
-#### Y13 — [LOW] Top-items bar computes `NaN%` width on an all-zero day
+#### Y13 — DONE (2026-07-28)
 
-**Where:** `pages/shop/History.tsx:230` —
-`const maxQty = Math.max(...topItems.map((ic) => ic.qty))`, then
-`width: ${Math.max((ic.qty / maxQty) * 100, 6)}%`.
-
-If every returned `qty` is `0`, `maxQty` is `0`, `0/0` is `NaN`,
-`Math.max(NaN, 6)` is `NaN`, and the style is `width: NaN%` — an invalid
-declaration the browser drops, leaving the bar at its default width inside a
-`w-full` track. The panel is gated on `insights.order_count > 0`, so this
-requires completed orders whose item quantities are all zero — reachable if
-every item on the day was removed or fully rejected before payment. Narrow, and
-worth one line.
-
-**Fix shape:** guard `maxQty` to at least 1 before dividing. Fold this into
-Y5's agent — same file, and Y5 is rewriting the panel around it anyway.
-
-**Test first:** extend Y5's `History.test.tsx` — a fixture where every
-`item_counts[].qty` is 0 renders bars with a valid width and does not emit
-`NaN`. Confirm red today.
+`maxQty` in `History.tsx` now floors at `Math.max(1, ...)` before the
+division, so an all-zero day produces a valid width instead of `NaN%`. Folded
+into Y5's commit, same file. Covered in `History.test.tsx`.
 
 ---
 
@@ -2328,17 +2088,17 @@ task's bundle measurement is meaningless until it lands.
 | Bundle | Tasks | Why they group | Status |
 |---|---|---|---|
 | **Y0 — bytes** | **Y1** | Seven deleted imports in `src/main.tsx`. Owns nothing else, blocks everything that adds weight. | **DONE (2026-07-28)** — precache 801.93 KiB/49 → 696.51 KiB/42. |
-| **M — modal** | **Y3** + **Y7** + **Y10** | Three small defects in one file, `components/ui/Modal.tsx`: no accessible name, `vh` should be `dvh`, drag-off-sheet closes it. One agent, one `Modal.test.tsx`. | Open, unstarted. |
-| **N — stamps** | **Y2** | `components/student/StatusStamps.tsx` alone. The `bg-current/10` dead class. Verify the fix against the **compiled** CSS, not the source. | Open, unstarted. |
-| **O — menu row** | **Y9** → **Y4** | Y9 fixes `QtyStepper` (glyphs + live announcement); Y4 then restyles `MenuItemCard` around the fixed control. Strict order — Y4 changes when the stepper renders at all. | Open, unstarted. Needs Y1's headroom. |
-| **P — shop history** | **Y5** + **Y13** | Both own `pages/shop/History.tsx`. Y13 is a one-line `NaN` guard inside the panel Y5 is rebuilding. | Open, unstarted. Needs Y1's headroom. |
-| **Q — sweeps** | **Y8**, **Y14**, **Y16** | Three cross-file sweeps (rail keyboard access, skeleton status announcements, `formatPrice`). Run them **after** bundles M–P so they aren't sweeping files mid-edit — the same rule X5 followed. | Open, unstarted. |
+| **M — modal** | **Y3** + **Y7** + **Y10** | Three small defects in one file, `components/ui/Modal.tsx`: no accessible name, `vh` should be `dvh`, drag-off-sheet closes it. One agent, one `Modal.test.tsx`. | **DONE (2026-07-28)**. |
+| **N — stamps** | **Y2** | `components/student/StatusStamps.tsx` alone. The `bg-current/10` dead class. Verify the fix against the **compiled** CSS, not the source. | **DONE (2026-07-28)**. |
+| **O — menu row** | **Y9** → **Y4** | Y9 fixes `QtyStepper` (glyphs + live announcement); Y4 then restyles `MenuItemCard` around the fixed control. Strict order — Y4 changes when the stepper renders at all. | **DONE (2026-07-28)**. |
+| **P — shop history** | **Y5** + **Y13** | Both own `pages/shop/History.tsx`. Y13 is a one-line `NaN` guard inside the panel Y5 is rebuilding. | **DONE (2026-07-28)**. |
+| **Q — sweeps** | **Y8**, **Y14**, **Y16** | Three cross-file sweeps (rail keyboard access, skeleton status announcements, `formatPrice`). Run them **after** bundles M–P so they aren't sweeping files mid-edit — the same rule X5 followed. | Open, unstarted — **M–P now landed, this can start.** |
 | **I — order-status page** | **Y12** → **H3** → **Y11** | All own `pages/student/OrderStatus.tsx`. Y12 is a two-line guard, first; H3 is the price-drift notice (V3 landed, so it's unblocked); Y11 adds the elapsed-time line, last — it's the largest. | Open. **X1/X7 already landed here** (§ 9.11) — read what they changed before editing. |
 | **J — menu page** | **H4** | Owns `pages/student/Menu.tsx` (the 422 recovery). Coordinate with bundle O: Y4 owns `MenuItemCard.tsx`, H4 owns the page — adjacent, not the same file, but land one before starting the other. | Open, unstarted. **X2/X6 already landed here** (§ 9.11). |
 | **K — shop orders page** | **Y6** → **Y15** → **H1** | All own `pages/shop/Orders.tsx`. Y6 is a small guard, first. Y15 adds the queue-depth strip. H1 is the cash drawer and is much the largest — last, and it also adds `components/shop/CashDrawer.tsx`. **Read § 9.4-H5 before Y15** so the two urgency treatments end up one language. | Open. **X3 already landed here** (§ 9.11). |
 | **D — login screen** | P5 + **S3** | Both edit `pages/Login.tsx`. § 12.1 — sequence or single-agent, no exceptions. | Open, unstarted. S3 needs real operator/contact facts from the owner — do not fabricate. |
 | **E — manifest** | **P4** | Independent of everything; only conflict is `globPatterns`. **W6 and Y1 both touch fonts** — check `globPatterns` before adding screenshot patterns. | Open, unstarted. |
-| **F — connectivity** | **M1** → M2 → M3 | M1 establishes the persisted cache the others build recovery UI around. | Open, unstarted. **Mind the precache budget**: 801.93 KiB against an ~800 KB ceiling, currently **over**. Land Y1 first, then measure M1's persist-client package before committing to it. |
+| **F — connectivity** | **M1** → M2 → M3 | M1 establishes the persisted cache the others build recovery UI around. | Open, unstarted. **Mind the precache budget**: now 702.03 KiB against an ~800 KB ceiling (Y1 landed, ~98 KB headroom) — still measure M1's persist-client package before committing to it, since Y11/Y15 also want a share of that headroom. |
 | **G — standalone chrome** | M4 + M6 + § 9.6-B10 | All `index.html`, all only verifiable on a real device — bundle with **D-6**. | Open, unstarted. |
 | **H — provenance** | S4 + S5 | CI and build-time config; touches nothing the others touch. | Open, unstarted. S4 has a natural home — the version-footer placeholder P1 left in `Settings.tsx`. |
 | **R — prep board** | **H5** | `pages/shop/Prep.tsx` alone. Pairs conceptually with Y15 (bundle K) — whichever lands second inherits the first one's visual idiom. | Open, unstarted. |
