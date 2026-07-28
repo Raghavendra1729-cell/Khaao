@@ -9,11 +9,23 @@ import type { OrderStatus } from '../../api/types';
  * "current step" highlight), because a real stamp doesn't change color once
  * it's pressed — only whether it's landed yet.
  */
-const STAMPS: { key: string; label: string; ink: string; rot: string }[] = [
-  { key: 'in', label: 'RECEIVED', ink: 'border-ink text-ink', rot: '-4deg' },
-  { key: 'cooking', label: 'COOKING', ink: 'border-turmeric-deep text-turmeric-deep', rot: '3deg' },
-  { key: 'ready', label: 'READY', ink: 'border-stamp text-stamp', rot: '-6deg' },
-  { key: 'paid', label: 'PAID', ink: 'border-brand-dark text-brand-dark', rot: '5deg' },
+const STAMPS: { key: string; label: string; ink: string; fill: string; rot: string }[] = [
+  { key: 'in', label: 'RECEIVED', ink: 'border-ink text-ink', fill: 'bg-ink/10', rot: '-4deg' },
+  {
+    key: 'cooking',
+    label: 'COOKING',
+    ink: 'border-turmeric-deep text-turmeric-deep',
+    fill: 'bg-turmeric-pale/60',
+    rot: '3deg',
+  },
+  { key: 'ready', label: 'READY', ink: 'border-stamp text-stamp', fill: 'bg-stamp-light/50', rot: '-6deg' },
+  {
+    key: 'paid',
+    label: 'PAID',
+    ink: 'border-brand-dark text-brand-dark',
+    fill: 'bg-brand-light/60',
+    rot: '5deg',
+  },
 ];
 
 function landedCount(status: OrderStatus): number {
@@ -43,7 +55,7 @@ const VOID_LABEL: Partial<Record<OrderStatus, string>> = {
 };
 
 const STAMP_BASE =
-  'inline-flex items-center justify-center whitespace-nowrap rounded-full border-2 bg-current/10 px-2.5 py-1.5 font-display text-[10px] font-bold uppercase tracking-wider';
+  'inline-flex items-center justify-center whitespace-nowrap rounded-full border-2 px-2.5 py-1.5 font-display text-[10px] font-bold uppercase tracking-wider';
 
 export function StatusStamps({ status }: { status: OrderStatus }) {
   const filterId = useId();
@@ -54,7 +66,7 @@ export function StatusStamps({ status }: { status: OrderStatus }) {
       <div className="flex items-center justify-center py-2">
         <StampFilterDefs id={filterId} />
         <span
-          className={`${STAMP_BASE} -rotate-6 border-stamp px-4 py-2 text-sm text-stamp`}
+          className={`${STAMP_BASE} -rotate-6 border-stamp bg-stamp-light/50 px-4 py-2 text-sm text-stamp`}
           style={{ filter: `url(#${filterId})` }}
         >
           {voidLabel}
@@ -75,7 +87,7 @@ export function StatusStamps({ status }: { status: OrderStatus }) {
             key={s.key}
             className={
               isLanded
-                ? `${STAMP_BASE} animate-stamp ${s.ink}`
+                ? `${STAMP_BASE} animate-stamp ${s.ink} ${s.fill}`
                 : `${STAMP_BASE} border-dashed border-edge bg-transparent text-ink/25`
             }
             style={

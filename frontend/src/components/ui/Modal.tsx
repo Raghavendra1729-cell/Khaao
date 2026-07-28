@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalProps {
@@ -29,6 +29,15 @@ const FOCUSABLE_SELECTOR =
 export function Modal({ open, onClose, title, subtitle, children, footer, size = 'md' }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const subtitleId = useId();
+  // Tracks whether the mousedown that started this interaction landed on the
+  // backdrop itself (not the sheet). A `click` event's target is the nearest
+  // common ancestor of the mousedown and mouseup targets — so a drag that
+  // starts inside the sheet and is released past its edge fires `click` on
+  // the backdrop even though the sheet's own onClick never saw it (F/Y10).
+  // Without this guard that spurious backdrop click would close the modal.
+  const mouseDownOnBackdropRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -92,22 +101,40 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink/50 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        mouseDownOnBackdropRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (mouseDownOnBackdropRef.current && e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
       role="presentation"
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : 'Dialog'}
+        aria-describedby={subtitle ? subtitleId : undefined}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-slide-up flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-edge bg-paper shadow-ticket outline-none sm:max-h-[88vh] sm:rounded-2xl ${SIZES[size]}`}
+        className={`animate-slide-up flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-edge bg-paper shadow-ticket outline-none sm:max-h-[88dvh] sm:rounded-2xl ${SIZES[size]}`}
       >
         {(title || subtitle) && (
           <div className="flex items-start justify-between gap-3 border-b border-edge px-5 py-4">
             <div className="min-w-0">
-              {title && <div className="font-display text-base font-bold text-ink">{title}</div>}
-              {subtitle && <div className="mt-0.5 text-sm text-ink/60">{subtitle}</div>}
+              {title && (
+                <div id={titleId} className="font-display text-base font-bold text-ink">
+                  {title}
+                </div>
+              )}
+              {subtitle && (
+                <div id={subtitleId} className="mt-0.5 text-sm text-ink/60">
+                  {subtitle}
+                </div>
+              )}
             </div>
             <button
               type="button"
