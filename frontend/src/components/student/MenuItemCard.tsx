@@ -67,9 +67,12 @@ interface MenuItemCardProps {
 
 /**
  * One menu item, printed as its own kraft chit. The veg/non-veg mark leads the
- * name (as it does on any Indian menu board); the price is set in the mono
- * "data" voice; a status tag only appears when the item is anything other than
- * plainly available, so the list stays quiet.
+ * name (as it does on any Indian menu board); the name/price line runs a
+ * dotted leader between them — the printed-menu-card object this row is
+ * finally answerable to (STATUS.md § 9.9-Y4) — so the price anchors at a
+ * fixed position and a long name truncates into the leader instead of
+ * wrapping the row. A status tag only appears when the item is anything
+ * other than plainly available, so the list stays quiet.
  */
 export function MenuItemCard({
   item,
@@ -82,6 +85,15 @@ export function MenuItemCard({
 }: MenuItemCardProps) {
   const availWindow = availabilityWindowText(item);
   const dimmed = !item.orderable;
+  // At qty 0, the full stepper is replaced with a single 44px Add control —
+  // it costs the row 44px instead of the stepper's 128px, and the "− 0 +"
+  // shown on every unordered item was never meaningful before a student had
+  // added anything. An out-of-stock item never gets an Add at all, even a
+  // disabled one — there's nothing to offer (STATUS.md § 9.9-Y4). Once
+  // qty > 0 the full stepper takes over and behaves exactly as before,
+  // including returning to Add when a student decrements back to zero.
+  const showAddControl = qty <= 0 && item.orderable;
+  const addDisabled = disableStepper || disableIncrease;
 
   return (
     <div
@@ -114,14 +126,18 @@ export function MenuItemCard({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-2">
-          <VegMark diet={item.diet} className="mt-0.5" />
-          <p className="min-w-0 font-semibold leading-snug text-ink">{item.name}</p>
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <span className="tabular font-display text-sm font-bold text-brand-dark">
+        <div className="flex items-end gap-1.5">
+          <VegMark diet={item.diet} className="mb-[3px] shrink-0" />
+          <p className="min-w-0 shrink truncate pb-0.5 font-semibold leading-snug text-ink">{item.name}</p>
+          <span
+            aria-hidden
+            className="mb-1.5 h-0 min-w-[16px] flex-1 border-b-2 border-dotted border-ink/25"
+          />
+          <span className="tabular shrink-0 pb-0.5 font-display text-sm font-bold text-brand-dark">
             {formatPrice(item.price)}
           </span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
           {item.rating_count > 0 && (
             <span className="flex items-center gap-0.5 text-xs font-semibold text-ink/70">
               <span className="text-turmeric-deep text-[10px]">★</span> {item.avg_rating.toFixed(1)} (
@@ -133,12 +149,31 @@ export function MenuItemCard({
         {availWindow && <p className="mt-0.5 text-xs text-ink/45">Available {availWindow}</p>}
       </div>
 
-      <QtyStepper
-        value={qty}
-        onChange={onQtyChange}
-        disabled={disableStepper}
-        disableIncrease={disableIncrease}
-      />
+      {showAddControl ? (
+        <button
+          type="button"
+          onClick={() => onQtyChange(1)}
+          disabled={addDisabled}
+          aria-label={`Add ${item.name}`}
+          className="flex min-h-[44px] shrink-0 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white shadow-sm transition active:bg-brand-dark disabled:opacity-30"
+        >
+          Add
+        </button>
+      ) : (
+        // qty > 0 here even for a dimmed (no-longer-orderable) item — it may
+        // have gone out of stock after already being added, and disableIncrease
+        // (not this component hiding the control) is what stops it climbing
+        // further while still letting a student reduce/remove it.
+        qty > 0 && (
+          <QtyStepper
+            value={qty}
+            onChange={onQtyChange}
+            disabled={disableStepper}
+            disableIncrease={disableIncrease}
+            label={item.name}
+          />
+        )
+      )}
     </div>
   );
 }

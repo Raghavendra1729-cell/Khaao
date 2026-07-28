@@ -157,3 +157,73 @@ describe('Placing an order subscribes to push when permission is freshly granted
     expect(requestNotificationPermissionAndSubscribeMock).not.toHaveBeenCalled();
   });
 });
+
+// Guards STATUS.md § 9.9-Y4: the menu row collapses its qty stepper down to
+// a single "Add" control until the item actually has a qty, returning
+// ~84px of a 375px-wide row to the name/price "menu board" line. Uses the
+// search codepath (isSearching) so TrendingRail/FavoritesRail — untouched
+// by this change and still rendering a full QtyStepper straight away — are
+// hidden and don't add a second "Add"/"Increase quantity" control for the
+// same item into the query results.
+describe('Menu row — Add control collapses the stepper until qty > 0 (STATUS.md § 9.9-Y4)', () => {
+  // The cart persists to localStorage (Menu.tsx: survives a backgrounded
+  // PWA) — clear it so one test's qty=1 doesn't leak into the next test's
+  // fresh render within this file.
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  async function renderSearchedItem(queryClient: QueryClient, overrides: Partial<MenuItem> = {}) {
+    getMenuMock.mockResolvedValue([menuItem({ name: 'Chai', ...overrides })]);
+    renderMenu(queryClient);
+
+    await waitFor(() => expect(screen.getAllByText('Chai').length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByLabelText('Search the menu'), { target: { value: 'Chai' } });
+    await waitFor(() => expect(screen.getByText('Results (1)')).toBeInTheDocument());
+  }
+
+  // Menu.tsx keeps the full category view mounted (merely CSS-hidden) while
+  // searching, so a matched item renders twice: once in the visible search
+  // results, once in the hidden category list underneath (both driven by
+  // the same cart state). Assertions use getAllByLabelText/queryByLabelText
+  // rather than assuming a single match for that reason.
+  it('renders an Add control and no stepper for an item at qty 0', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await renderSearchedItem(queryClient);
+
+    expect(screen.getAllByLabelText('Add Chai').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('Increase quantity')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Decrease quantity')).not.toBeInTheDocument();
+  });
+
+  it('tapping Add sets qty to 1 and swaps in the full stepper', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await renderSearchedItem(queryClient);
+
+    fireEvent.click(screen.getAllByLabelText('Add Chai')[0]);
+
+    await waitFor(() => expect(screen.getAllByLabelText('Decrease quantity').length).toBeGreaterThan(0));
+    expect(screen.getAllByLabelText('Increase quantity').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('Add Chai')).not.toBeInTheDocument();
+  });
+
+  it('decrementing back to 0 returns to the Add control', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await renderSearchedItem(queryClient);
+
+    fireEvent.click(screen.getAllByLabelText('Add Chai')[0]);
+    await waitFor(() => expect(screen.getAllByLabelText('Decrease quantity').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByLabelText('Decrease quantity')[0]);
+
+    await waitFor(() => expect(screen.getAllByLabelText('Add Chai').length).toBeGreaterThan(0));
+    expect(screen.queryByLabelText('Decrease quantity')).not.toBeInTheDocument();
+  });
+
+  it('an unorderable item offers neither an enabled Add nor an enabled increment', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await renderSearchedItem(queryClient, { orderable: false, status: 'out_of_stock' });
+
+    expect(screen.queryByLabelText('Add Chai')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Increase quantity')).not.toBeInTheDocument();
+  });
+});
