@@ -53,7 +53,10 @@ export function MenuSkeleton() {
             <Bone className="h-4 w-32 rounded bg-edge/50" />
             <Bone className="h-3 w-24 rounded bg-edge/30" />
           </div>
-          <div className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
+          <div
+            data-testid="skeleton-trending-rail"
+            className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1"
+          >
             {[0, 1, 2].map((i) => (
               <div
                 key={i}

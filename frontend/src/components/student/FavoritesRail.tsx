@@ -35,7 +35,12 @@ export function FavoritesRail({ items, qtyFor, onQtyChange, hasActiveOrder, canO
         </span>
       </div>
 
-      <div className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1">
+      <div
+        className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1"
+        tabIndex={0}
+        role="group"
+        aria-labelledby="usuals-heading"
+      >
         {items.map((item) => {
           const qty = qtyFor(item.id);
           const disableIncrease = !canOrder || !item.orderable;

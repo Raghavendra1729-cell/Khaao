@@ -219,3 +219,33 @@ describe('The order modal does not go stale when the order leaves the list (STAT
     expect(screen.getByText(/updated on another device/)).toBeInTheDocument();
   });
 });
+
+// Guards STATUS.md § 9.12-Y14: the orders-list loading skeleton is decorative
+// bones with nothing announced in its place — a shopkeeper's screen reader
+// stays silent between opening the Orders tab and the real list landing.
+describe('ShopOrdersPage loading state announces a status (STATUS.md § 9.12-Y14)', () => {
+  beforeEach(() => {
+    getShopOrdersMock.mockReset();
+    acceptOrderMock.mockReset();
+    rejectOrderMock.mockReset();
+    setMenuItemStockMock.mockReset();
+  });
+
+  it('exposes a status message while loading, and clears it once data lands', async () => {
+    let resolveOrders: (value: unknown) => void = () => {};
+    getShopOrdersMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOrders = resolve;
+      }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    resolveOrders({ incoming: [], in_progress: [], awaiting_payment: [] });
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+});

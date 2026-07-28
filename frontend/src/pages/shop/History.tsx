@@ -69,26 +69,31 @@ function CountBadge({ n }: { n: number }) {
  * hostile campus network (§ 9.1.7). */
 function HistorySkeleton() {
   return (
-    <div className="flex flex-col gap-6" aria-hidden="true">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-2">
-          <div className="h-7 w-32 animate-soft-pulse rounded-md bg-edge" />
-          <div className="h-4 w-36 animate-soft-pulse rounded bg-edge/70" />
+    <div className="flex flex-col gap-6">
+      <span role="status" className="sr-only">
+        Loading history…
+      </span>
+      <div aria-hidden="true" className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2">
+            <div className="h-7 w-32 animate-soft-pulse rounded-md bg-edge" />
+            <div className="h-4 w-36 animate-soft-pulse rounded bg-edge/70" />
+          </div>
+          <div className="h-11 w-40 animate-soft-pulse rounded-xl border border-edge bg-paper" />
         </div>
-        <div className="h-11 w-40 animate-soft-pulse rounded-xl border border-edge bg-paper" />
-      </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <Card key={i} className="flex flex-col gap-3 p-4">
-            <div className="h-3 w-16 animate-soft-pulse rounded bg-edge" />
-            <div className="h-8 w-12 animate-soft-pulse rounded bg-edge/70" />
-            <div className="h-3 w-24 animate-soft-pulse rounded bg-edge/50" />
-          </Card>
-        ))}
-      </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <Card key={i} className="flex flex-col gap-3 p-4">
+              <div className="h-3 w-16 animate-soft-pulse rounded bg-edge" />
+              <div className="h-8 w-12 animate-soft-pulse rounded bg-edge/70" />
+              <div className="h-3 w-24 animate-soft-pulse rounded bg-edge/50" />
+            </Card>
+          ))}
+        </div>
 
-      <div className="h-12 w-full animate-soft-pulse rounded-xl border border-edge bg-paper" />
+        <div className="h-12 w-full animate-soft-pulse rounded-xl border border-edge bg-paper" />
+      </div>
     </div>
   );
 }

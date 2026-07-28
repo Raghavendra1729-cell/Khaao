@@ -133,14 +133,19 @@ function PrepRowSkeleton() {
 function PrepSkeleton() {
   return (
     <div>
-      <div className="mb-1 h-7 w-32 animate-soft-pulse rounded bg-ink/10" />
-      <div className="mb-5 h-4 w-56 animate-soft-pulse rounded bg-ink/10" />
-      <div className="mb-4 h-[60px] animate-soft-pulse rounded-xl bg-ink/10" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <PrepRowSkeleton />
-        <PrepRowSkeleton />
-        <PrepRowSkeleton />
-        <PrepRowSkeleton />
+      <span role="status" className="sr-only">
+        Loading prep list…
+      </span>
+      <div aria-hidden="true">
+        <div className="mb-1 h-7 w-32 animate-soft-pulse rounded bg-ink/10" />
+        <div className="mb-5 h-4 w-56 animate-soft-pulse rounded bg-ink/10" />
+        <div className="mb-4 h-[60px] animate-soft-pulse rounded-xl bg-ink/10" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <PrepRowSkeleton />
+          <PrepRowSkeleton />
+          <PrepRowSkeleton />
+          <PrepRowSkeleton />
+        </div>
       </div>
     </div>
   );

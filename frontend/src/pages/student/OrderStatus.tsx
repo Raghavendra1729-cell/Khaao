@@ -276,9 +276,12 @@ function RatingPrompt({ order, onDismiss }: { order: Order; onDismiss: () => voi
 function OrderStatusSkeleton() {
   return (
     <div className="flex flex-col gap-8">
+      <span role="status" className="sr-only">
+        Loading order status…
+      </span>
       <section>
         <h1 className="mb-4 font-display text-2xl font-bold tracking-tight text-ink">Order status</h1>
-        <Card className="animate-soft-pulse p-5">
+        <Card className="animate-soft-pulse p-5" aria-hidden="true">
           <div className="mb-6 flex justify-center">
             <div className="h-32 w-56 rounded-2xl border-2 border-dashed border-edge bg-paper" />
           </div>
@@ -302,7 +305,7 @@ function OrderStatusSkeleton() {
 
       <section>
         <h2 className="mb-3 text-lg font-bold text-ink">History</h2>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3" aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <Card key={i} className="animate-soft-pulse p-4">
               <div className="flex items-start justify-between gap-3">

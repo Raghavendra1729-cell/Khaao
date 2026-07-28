@@ -115,3 +115,33 @@ describe('MenuItemForm — a failed photo re-upload must not erase the existing 
     expect(submittedInput.photo_url).toBe(EXISTING_PHOTO_URL);
   });
 });
+
+// Guards STATUS.md § 9.12-Y14: the menu-manage loading skeleton is
+// `aria-hidden` (correctly — it's decorative bones) but announced nothing at
+// all in its place, leaving a screen-reader user in silence between opening
+// Menu manage and the real list landing.
+describe('ShopMenuManagePage loading state announces a status (STATUS.md § 9.12-Y14)', () => {
+  beforeEach(() => {
+    getShopMenuMock.mockReset();
+    updateMenuItemMock.mockReset();
+    uploadMenuItemPhotoMock.mockReset();
+  });
+
+  it('exposes a status message while loading, and clears it once data lands', async () => {
+    let resolveMenu: (value: unknown) => void = () => {};
+    getShopMenuMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMenu = resolve;
+      }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    resolveMenu([]);
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+});

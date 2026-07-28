@@ -189,3 +189,37 @@ describe('History status hint does not hardcode the configurable hold window', (
     expect(screen.queryByText(/15-minute/)).not.toBeInTheDocument();
   });
 });
+
+// Guards STATUS.md § 9.12-Y14: the order-status loading skeleton is
+// decorative bones with nothing announced in its place — a student's screen
+// reader stays silent between navigating to Order status and real data
+// landing.
+describe('OrderStatusPage loading state announces a status (STATUS.md § 9.12-Y14)', () => {
+  beforeEach(() => {
+    getActiveOrderMock.mockReset();
+    getOrderHistoryMock.mockReset();
+    cancelOrderMock.mockReset();
+    submitRatingsMock.mockReset();
+    getMenuMock.mockReset();
+  });
+
+  it('exposes a status message while loading, and clears it once data lands', async () => {
+    let resolveActive: (value: unknown) => void = () => {};
+    getActiveOrderMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveActive = resolve;
+      }),
+    );
+    getOrderHistoryMock.mockResolvedValue([]);
+    getMenuMock.mockResolvedValue([]);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    resolveActive(null);
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+});

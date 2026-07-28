@@ -1,7 +1,15 @@
 // Money & time formatting helpers. Prices are always integer paise on the wire.
 
+// STATUS.md § 9.12-Y16: the canteen menu has no paise — every price is a
+// whole rupee — so an unconditional `.toFixed(2)` rendered every price
+// (including large display-scale amounts like the checkout total and the
+// pay-at-counter figure) as e.g. "₹40.00". Drop the fraction when the
+// rupee amount is whole; keep both decimals for a genuinely fractional
+// amount so a real ₹12.50 item is never silently truncated.
 export function formatPrice(paise: number): string {
-  return `₹${(paise / 100).toFixed(2)}`;
+  const rupees = paise / 100;
+  const isWhole = Number.isInteger(rupees);
+  return `₹${isWhole ? rupees.toString() : rupees.toFixed(2)}`;
 }
 
 /** Parse a rupee decimal string/number (as typed in a form) into integer paise. */

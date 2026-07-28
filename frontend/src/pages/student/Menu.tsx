@@ -530,7 +530,12 @@ export function Menu() {
                   // F1: top-14 alone ignores the notch inset the header already
                   // respects via pt-safe — this bar would slide under it in
                   // installed-PWA standalone mode on a notched iPhone.
-                  <div className="sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2">
+                  <div
+                    className="sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-10 -mx-4 mb-4 bg-steel/95 px-4 py-2 backdrop-blur border-b border-edge overflow-x-auto no-scrollbar flex gap-2"
+                    tabIndex={0}
+                    role="group"
+                    aria-label="Menu categories"
+                  >
                     {allCategories.map((cat) => {
                       const isActive = activeCategory === cat.name;
                       return (
