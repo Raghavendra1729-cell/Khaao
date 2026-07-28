@@ -8,172 +8,102 @@
 >
 > **§ 12 is the working protocol.** Read it before you pick up a task.
 
-## Current state (2026-07-27, updated same day — fourth pass)
+## Current state (2026-07-28 — fifth pass)
 
-**The working tree has the fourth-pass X-series landed, uncommitted at the
-time of writing this update** (committed immediately after per § 12.3–12.4).
-R1–R31, F1–F24, the G-series, the T-series (2026-07-22 audit), the U-series
-(2026-07-25 audit), V1–V10, H2, Q1/Q2, W1/W2/W6/W9, P1/P2/P3/P6/P7, S1/S2, and
-— as of this update — **all of § 9.11's X1–X7** landed. Frontend gate re-run
-on the full tree (backend untouched by this pass so re-checked, not
-re-tested):
+Everything landed through 2026-07-27 is committed and green. R1–R31, F1–F24,
+the G-series, the T-series (2026-07-22 audit), the U-series (2026-07-25 audit),
+V1–V10, H2, Q1/Q2, W1/W2/W4/W6/W9, P1/P2/P3/P6/P7, S1/S2 and X1–X7 are all in
+`main`. **The long task write-ups for finished work were removed from this file
+on 2026-07-28** — each one now survives as a single row in its section's status
+table, which is where § 12.5 says a landed task belongs. The reasoning behind
+each fix is in `git log`.
+
+**This pass produced a new backlog: § 9.12, the Y-series** — 16 frontend
+findings from a fresh audit against the built output, aimed at the owner's
+brief (*"find issues, any optimization needed; frontend improvements,
+visualizations for better UX/UI — I want it to look the best, best experience,
+smooth"*). Nothing in it has been started. No code changed this pass.
+
+Gate re-run on the committed tree to establish the baseline the Y-series will
+be measured against:
 
 | Gate | Result |
 |---|---|
-| `go build ./...` | clean (unchanged this pass) |
-| `go vet ./...` | clean (unchanged this pass) |
-| `gofmt -l .` | clean (unchanged this pass) |
-| `go test ./...` | all packages ok (unchanged this pass) |
 | `tsc -b --noEmit` | clean |
-| `npm run lint` | 0 errors, 24 pre-existing warnings (unchanged) |
-| `vitest run` | **111/111 passing**, 19 test files (was 102/18 — new: `Toast.test.tsx`, plus new cases in `OrderStatus.test.tsx`, `Menu.test.tsx`, `Orders.test.tsx`) |
+| `npm run lint` | 0 errors, 24 pre-existing warnings |
+| `vitest run` | **111/111 passing**, 19 test files |
 | `npm run format:check` | clean |
-| `vite build` initial student JS | **242.10 KB raw — under the 250 KB hard stop**, ~7.9 KB headroom left (was 241.49 KB; +0.61 KB from X2's `lib/push` import into `Menu.tsx` and the inline SVG icon markup added by X5/X6/X7) |
-| `vite build` service-worker precache | **801.93 KiB, 49 entries — over the ~800 KB soft ceiling by ~2.9 KiB** (was 799.06 KiB; the X-series' inline SVG icons and the terminal-notice branch added to `Orders.tsx` account for the growth). Flagged, not hidden — the ceiling in § 9.1.8 is descriptive ("~800 KB"), not a hard stop like the 250 KB JS budget, but the next task that adds precached weight should treat this as already spent, not as 1 KB of headroom. |
+| `vite build` initial student JS | **241.74 KB raw** — under the 250 KB hard stop, ~8.3 KB headroom |
+| `vite build` service-worker precache | **801.93 KiB, 49 entries — over the ~800 KB soft ceiling** |
+| Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
 
-**This document was rewritten on 2026-07-26** after a fresh full-stack audit.
-The historical narrative of completed passes was removed (it lives in `git log`);
-what replaces it is three new backlogs of open, unstarted work:
+**The precache overage is the binding constraint, and § 9.12-Y1 is the fix.**
+The audit found that **120 KB of the 802 KiB precache is `latin-ext` font
+subsets the app cannot render a single glyph from** — the shopkeeper's Hindi
+already falls back to a system font, and nothing else in the product uses
+Central/Eastern-European Latin. Deleting seven imports from `main.tsx` takes
+the precache to roughly **682 KiB** and restores ~118 KB of headroom. That
+headroom is what pays for the visualization and design work in the same series,
+which is why Y1 is marked DO FIRST.
+
+### The backlogs
 
 | Backlog | What | Size | Status |
 |---|---|---|---|
-| **§ 9.3 — V-series (V1–V10)** | Backend defects found in the 2026-07-26 audit | 10 tasks | **Done, gate green, uncommitted at time of writing** |
-| **§ 9.4 — H-series (H1–H8)** | Frontend design + UX work | 8 tasks | **H2 done; H1/H3–H8 open, unstarted, authorized** |
-| **§ 9.5 — Q-series (Q1–Q9)** | Testing, written as real student / real shopkeeper scenarios | 9 tasks | **Q1, Q2 done; Q3–Q9 open, unstarted, authorized** |
-| § 9.6 — B-series (B1–B16) | Deferred product decisions | 16 items | **NOT authorized — owner picks deliberately** |
-| **§ 9.7 — P-series (P1–P7)** | Install & distribution — "download the app from the website," the Settings screen | 7 tasks | **P1/P2/P3/P6 done; P4/P5/P7 — P7 done, P4/P5 open, unstarted** |
-| **§ 9.8 — W-series (W1–W9)** | PWA / mobile defects found in the 2026-07-27 audit | 9 tasks | **W1/W2/W6/W9 fixed, W4 fixed (via P2/P6), W7 investigated (no change); W3/W5/W8 open, unstarted** |
-| **§ 9.9 — M-series (M1–M6)** | Mobile experience — how the app behaves *as a phone app* | 6 tasks | **Open, unstarted, authorized (2026-07-27)** |
-| **§ 9.10 — S-series (S1–S5)** | Trust & provenance — "make sure the app is not malicious" | 5 tasks | **S1/S2 done; S3/S4/S5 open, unstarted** |
-| **§ 9.11 — X-series (X1–X7)** | Frontend defects + design elevation, 2026-07-27 fourth-pass audit | 7 tasks | **Done (2026-07-27, fourth pass)** |
-| Deployment D-1..D-7 | Human-led, needs real infra | 7 items | Open |
+| § 9.3 — V-series (V1–V10) | Backend defects, 2026-07-26 audit | 10 | **All done** — records only |
+| **§ 9.4 — H-series (H1–H8)** | Frontend design + UX | 8 | H2 done; **H1, H3–H8 open** |
+| **§ 9.5 — Q-series (Q1–Q9)** | Testing, as real student / shopkeeper scenarios | 9 | Q1/Q2 done; **Q3–Q9 open** |
+| § 9.6 — B-series (B1–B16) | Deferred product decisions | 16 | **NOT authorized** — owner picks deliberately |
+| **§ 9.7 — P-series (P1–P7)** | Install & distribution, the Settings screen | 7 | P1/P2/P3/P6/P7 done; **P4/P5 open** |
+| **§ 9.8 — W-series (W1–W9)** | PWA / mobile defects, 2026-07-27 audit | 9 | W1/W2/W4/W6/W9 done, W7 investigated; **W3/W5/W8 open** |
+| **§ 9.9 — M-series (M1–M6)** | Mobile experience — the app *as a phone app* | 6 | **All open** |
+| **§ 9.10 — S-series (S1–S5)** | Trust & provenance | 5 | S1/S2 done; **S3/S4/S5 open** |
+| § 9.11 — X-series (X1–X7) | Frontend defects + design, 2026-07-27 fourth pass | 7 | **All done** — records only |
+| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | **All open, unstarted, authorized** |
+| Deployment D-1..D-7 | Human-led, needs real infra | 7 | Open |
 
-> **Note the section order.** § 9.6 (deferred, *not* authorized) sits between the
-> authorized backlogs for historical reasons — § 9.7–§ 9.10 were appended after
-> it on 2026-07-27 rather than renumbering and breaking every existing
-> cross-reference. This table is the navigation aid, not the file order.
+> **Note the section order.** § 9.6 (deferred, *not* authorized) sits between
+> the authorized backlogs for historical reasons — later sections were appended
+> after it rather than renumbering and breaking every cross-reference. This
+> table is the navigation aid, not the file order.
 
-> **Numbering note:** older commit messages reference "§ 9.5 (T-series)" and
-> "§ 9.6 (U-series)". Those backlogs are complete and were removed in this
-> rewrite; § 9.3/9.4/9.5 now hold the *new* V/H/Q backlogs. When reading old
-> commits, map T→ 2026-07-22 audit and U→ 2026-07-25 audit and go to `git log`.
+> **Numbering note:** older commits reference "§ 9.5 (T-series)" and "§ 9.6
+> (U-series)". Those are complete and were removed in the 2026-07-26 rewrite;
+> § 9.3/9.4/9.5 now hold the V/H/Q backlogs. Map T → 2026-07-22 audit,
+> U → 2026-07-25 audit, and read `git log`.
+>
+> **Section numbers are load-bearing.** Source comments cite them directly
+> (`STATUS.md § 9.11-X2` in `Menu.tsx`, `§ 9.11-X5` in `Modal.tsx`, and
+> others). Completed series keep their numbers when they collapse to records —
+> new work gets the next number. Do not renumber.
 
 ### Start here
 
-**2026-07-26 update: H2, all of V1–V10, and Q1/Q2 are implemented**, each with
-a regression test written first and confirmed red against the unfixed code,
-full backend/frontend gates green (build/vet/gofmt/`test -race`/lint/tsc/
-eslint/vitest/build/format, plus the Postgres integration suite). Landed as
-four parallel agent passes, re-verified together afterward. **Uncommitted at
-the time of this note** — see the commits immediately following it in `git
-log` for the actual landing.
+**Pick up § 9.12 (Y-series) — it is the only backlog written against the
+current tree**, and Y1 unblocks the rest of it. Suggested order:
 
-**2026-07-27 update: a second audit ran, aimed at installability, mobile
-behavior and trustworthiness** (the owner's brief: make the app downloadable
-from the website with a button in Settings, improve the mobile experience, and
-confirm the app is not malicious). It produced four new backlogs — § 9.7 P-series,
-§ 9.8 W-series, § 9.9 M-series, § 9.10 S-series. Every finding in them was
-verified against the code or the built output; the numbers quoted are measured.
+1. **Y1** — the 120 KB font reclaim. One file, ~7 deleted lines, measurable,
+   and it is the precondition for every task that adds bytes.
+2. **Y2** — the status stamps ship with no fill (`bg-current/10` compiles to
+   nothing; verified absent from `dist`). Small fix, and it is the app's
+   signature element.
+3. **Y3 + Y7 + Y10** — three small `Modal.tsx` defects, one agent, one file:
+   dialogs have no accessible name, `vh` should be `dvh`, and a drag off the
+   sheet closes it.
+4. **Y4** (menu row) and **Y5** (the day's shape on the shop's History page) —
+   the two real design pieces, and the two the owner's brief is mostly about.
+   Both need Y1's headroom first.
+5. Everything else in § 9.12, then the still-open **H1/H3–H8**, **P4/P5**,
+   **W3/W5/W8**, **M1–M6**, **S3/S4/S5**, **Q3–Q9**.
 
-**2026-07-27, third pass (same day): the top of that priority list landed.**
-Three parallel agents, each in an isolated git worktree, each test-first per
-§ 12, each running its own full gate before merge; merged back to `main`
-sequentially (two auto-merged cleanly, one needed a trivial non-conflicting
-merge of `main.tsx` since two bundles both added imports to it), then the full
-frontend gate was re-run once on the merged tree (numbers above). **Landed:**
+**Two things carry over and are still true:**
 
-- **W1 (§ 9.8) — FIXED.** `sw.ts` now calls `skipWaiting()`/`clientsClaim()`/
-  `cleanupOutdatedCaches()`. Live-verified in the built artifact (`dist/sw.js`
-  contains the calls; a stashed rebuild of the unfixed file confirmed they were
-  absent before). **Not** verified against a real device/deploy taking over a
-  live tab without closing it — that still needs D-6.
-- **W6 (§ 9.8) — FIXED.** Font imports narrowed to latin/latin-ext subsets only.
-  Precache 1058 KB → 799.06 KiB.
-- **W9 (§ 9.8) — FIXED.** `notificationclick` now rejects `//`-prefixed and
-  cross-origin payload URLs, falls back to `/`.
-- **W7 (§ 9.8) — investigated, not changed.** `@fontsource`'s per-subset CSS
-  bundles woff+woff2 in one `@font-face`; dropping `.woff` cleanly would need
-  hand-authored `@font-face` rules bypassing `@fontsource` (manual-sync risk on
-  future bumps). Left as-is per its own "don't contort the build" guidance;
-  shrank from 39→14 files per format as a side effect of W6 anyway.
-- **W2 (§ 9.8) / P7 (§ 9.7) — FIXED**, `deploy/Caddyfile`. `/assets/*` →
-  `public, max-age=31536000, immutable`; `/`, `/index.html`, `/sw.js`,
-  `/manifest.webmanifest`, and the SPA-fallback route → `no-cache`.
-  `manifest.webmanifest` gets an explicit `Content-Type: application/manifest+json`
-  override. **A real bug was caught in local testing**: an unconditional
-  `header Cache-Control no-cache` was clobbering the `/assets/*` override
-  regardless of source order (Caddy compiles repeated `header` directives so
-  the last one wins) — fixed by making the two matchers mutually exclusive
-  (`path /assets/*` vs `not path /assets/*`). Verified with `caddy validate`
-  and a local `caddy start` + `curl -I` against all six paths. **Not**
-  verified against the real production domain — that's D-6; a verification
-  table is now in `deploy/RUNBOOK.md` § 5 for whoever runs it.
-- **S1 (§ 9.10) / S2 (§ 9.10) — FIXED**, same Caddyfile `header` block.
-  `frame-ancestors 'none'` added to the CSP, `X-Frame-Options: DENY` and
-  `Permissions-Policy` added (mirroring `middleware/security.go`), and
-  `Strict-Transport-Security: max-age=31536000; includeSubDomains` added
-  (deliberately no `preload`). The Caddyfile's old comment claiming the Go and
-  Caddy header sets were "identical" was checked and was **false** — fixed and
-  the comment corrected to say why the two are intentionally not identical.
-- **P1 (§ 9.7) — FIXED.** New `/settings` route, lazy-loaded, both roles, entry
-  point is a "Settings" item added to `AvatarMenu` above Log out (no new
-  bottom-nav tab, per spec). Sections: Get the app, Notifications, Account,
-  About Khaao (placeholder, S3's job), version footer (placeholder, S4's job) —
-  both placeholders are explicit TODOs, no fabricated content.
-- **P2 (§ 9.7) — FIXED.** New `lib/install.ts`, single source of truth for
-  install state, `beforeinstallprompt`/`appinstalled` listeners registered at
-  module scope in `main.tsx` before React mounts (fixes the one-shot-card root
-  cause). Fixed the pre-existing bug where `prompt()` was called without
-  awaiting `userChoice`, losing the deferred event on cancel. New
-  `components/settings/GetTheApp.tsx` renders all four install states.
-  **A real bug was caught and fixed mid-implementation**: the initial
-  `getInstallState()` returned a fresh object per call, breaking
-  `useSyncExternalStore`'s snapshot-stability contract ("Maximum update depth
-  exceeded" in every consumer) — fixed by caching one singleton object per
-  state kind.
-- **P3 (§ 9.7) — FIXED.** New `lib/push.ts` shares the subscribe flow between
-  `PushNotificationSetup` and the new `components/settings/NotificationSettings.tsx`,
-  which shows honest per-permission-state UI (`default`/`denied`/`granted`)
-  with a Reconnect action for W5's user-facing half. "Send a test notification"
-  intentionally not built (needs a backend endpoint, out of scope).
-- **P6 (§ 9.7) / W4 (§ 9.8) — FIXED.** `appinstalled` listener added to
-  `lib/install.ts`; both `InstallPrompt` and Settings self-correct. Dismissal
-  asymmetry fixed — both iOS and Android now use a 30-day time-boxed dismissal
-  instead of iOS-permanent/Android-per-load.
-
-**Still open, in priority order:**
-
-1. **W3/W8 (§ 9.8)** — both prompt cards still collide with the bottom nav on
-   notched iPhones (arithmetic bug, `bottom-20` vs the nav's real 90 px height).
-   Not touched by this pass.
-2. **W5 (§ 9.8)** — the backend half: re-posting a pruned subscription is still
-   not wired into `PushNotificationSetup`'s mount effect (P3 built the *manual*
-   Reconnect button; W5 also wants the *silent* automatic re-post). Verify
-   whether P3's Reconnect button alone is judged sufficient or whether the
-   silent auto-repost is still wanted, then close this out. **X2 (§ 9.11) is
-   fixed** — the happy-path twin of this bug (a freshly granted permission
-   that never subscribed at all) no longer reproduces, but W5's pruned-then-
-   silently-dead case is a different failure and is still open.
-3. **H1** (the counter's cash moment) — unblocked since H2 landed.
-4. **H3** (surface the V3 price-drift on the student's ticket) — unblocked
-   since V3 landed.
-5. **Q3/Q4** ("the rush", "shopkeeper runs out mid-cook") — exercise the
-   concurrency invariants V1/V2/V10 hardened.
-6. **P4/P5 (§ 9.7)** — richer manifest (screenshots/id/shortcuts), Login
-   install mention. Independent of this pass, unstarted.
-7. **S3/S4/S5 (§ 9.10)** — the two placeholders P1 left (About Khaao, version
-   footer) plus dependency-provenance verification. S3 needs real
-   operator/contact facts from the owner — do not fabricate them.
-8. **M1–M6 (§ 9.9)**, H4–H8, Q5–Q9, and the rest of § 9.8 remain open and
-   authorized, unstarted. **§ 9.11's X1–X7 are done** (fourth pass, this
-   update) — see § 9.11 for what landed. **The precache budget is now over
-   its soft ceiling by ~2.9 KiB** (§ 9.1.8) — M1 in particular must account
-   for this before adding more precached weight.
-
-**Do not promote the § 9.7 install push to real students until W3 is fixed** —
-the install card itself currently covers the bottom nav on notched iPhones,
-which is a bad first impression for the exact feature this pass just built.
-
+- **Do not promote the § 9.7 install push to real students until W3 is fixed.**
+  Both prompt cards still collide with the bottom nav on notched iPhones —
+  a bad first impression on the exact feature being promoted.
+- **W5 (§ 9.8) needs a decision, not just code.** P3 built the *manual*
+  Reconnect button; W5 also wanted the *silent* automatic re-post of a pruned
+  subscription. Settle whether the button alone closes it before writing more.
 ---
 
 ## 1. What is Khaao?
@@ -464,18 +394,29 @@ phone or counter tablet. These are standing rules, not suggestions:
    failure as an auth failure. Every mutation shows a pending state and toasts
    on error.
 8. **Performance budget — two numbers, both binding:**
-   - **Initial student JS ≤ ~250 KB raw.** Currently **242.10 KB** after H2,
-     the § 9.7 Settings work, and § 9.11's X-series (X2's `lib/push` import
-     into `Menu.tsx` plus inline SVG icon markup, +0.61 KB) — under, with
-     ~7.9 KB of headroom. This is parse-and-execute on first paint.
-   - **Service-worker precache ≤ ~800 KB.** Currently **801.93 KiB — over the
-     soft ceiling by ~2.9 KiB** (was 799.06 KiB before the X-series; see
-     § 9.8-W6, fixed 2026-07-27, for the ~244 KB font-subset reclaim that got
-     it under in the first place). This is what every phone actually
-     downloads when it installs, over campus Wi-Fi. **There is no headroom
-     left** — the next task that adds precached weight (M1's persisted-cache
-     work is next in line) must either offset this overage or treat it as a
-     blocking budget item, not optional polish.
+   - **Initial student JS ≤ ~250 KB raw.** Measured **241.74 KB** on
+     2026-07-28 (`dist/assets/index-*.js`) after H2, the § 9.7 Settings work
+     and § 9.11's X-series — under, with ~8.3 KB of headroom. This is
+     parse-and-execute on first paint.
+   - **Service-worker precache ≤ ~800 KB.** Measured **801.93 KiB / 49
+     entries — over the soft ceiling** (see § 9.8-W6, fixed 2026-07-27, for
+     the ~244 KB font-subset reclaim that got it under in the first place;
+     the X-series then spent the remainder). This is what every phone
+     actually downloads when it installs, over campus Wi-Fi.
+
+     **§ 9.12-Y1 is the fix, and it is DO FIRST.** The 2026-07-28 audit
+     measured the composition: **120 KB of the precache is seven `latin-ext`
+     woff2 subsets the app cannot render a glyph from** (Khaao renders basic
+     Latin and Devanagari; Plex has no Devanagari, so Hindi already falls back
+     to a system font). Deleting those imports takes the precache to roughly
+     **682 KiB** and restores ~118 KB of headroom. **Until Y1 lands, treat any
+     added precache weight as overdraft, not headroom** — that applies to M1's
+     persisted-cache package and to every § 9.12 design task.
+
+     **No charting library, at any budget.** The smallest mainstream one is
+     ~90 KB gzipped — several times the entire student headroom — and none of
+     them can be made to look like a canteen (§ 9.2). Visualizations are
+     hand-drawn inline SVG or token-styled divs. This is a hard rule.
 
    New heavy dependencies must be lazy chunks (follow `App.tsx`'s route-group
    `lazy()` pattern). Menu photos always render through `cloudinaryThumb(url,
@@ -536,7 +477,8 @@ Found in the 2026-07-26 full-backend audit. **All ten fixed**, each with a
 regression test written first and confirmed red against the unfixed code, full
 gate green (build/vet/gofmt/`test -race`/golangci-lint + the Postgres
 integration suite). V8 was investigated per its own instructions and confirmed
-to be a real defect (not a false alarm) — see its entry.
+to be a real defect, not a false alarm. **The full task write-ups were removed
+on 2026-07-28** — the table below is the record; `git log` has the reasoning.
 
 | # | Severity | One-line | Status |
 |---|---|---|---|
@@ -550,329 +492,6 @@ to be a real defect (not a false alarm) — see its entry.
 | V8 | LOW | `GormOrderRepo.Save` implicitly upserts the whole `Items` association on every order mutation | **Confirmed real, fixed** — `.Omit(clause.Associations)`; a SQL-capturing test proved the extra per-item upserts existed |
 | V9 | LOW | `Subscribe` stores unvalidated `p256dh`/`auth` key material of any length | **Fixed** — base64url charset + length-bound validation |
 | V10 | LOW | `RejectAllSubmitted` reads orders without `FOR UPDATE`, unlike every sibling mutation | **Fixed** — new `FindIncomingForUpdate`, row-lock proven via a second-connection `NOWAIT` test |
-
----
-
-#### V1 — [HIGH] The "order ready" push fires before the transaction commits
-
-**Where:** `services/pool.go` — `recomputeStatus` → `notifyOrderReady`.
-
-`recomputeStatus` calls `e.notifyOrderReady(order)` at the moment it flips an
-order to `ready`. But `recomputeStatus` is only ever called from *inside* a
-`uow.WithTx` callback — in `Accept`, `Handover`, `RemoveItem` and (via
-`reallocate`) in `MarkDone`, `Reject` and `ExpiryTick`. The push goroutine is
-launched immediately; the transaction commits later, and may not commit at all.
-
-**Failure scenario:** the shopkeeper taps **Done** on the last unit of a dish.
-`MarkDone` → `reallocate` → `recomputeStatus` flips order #14 to `ready` and
-fires the push. The very next statement in the same transaction — the
-`EventItemReady` log write, or the `orderRepo.Save` inside `reallocate` — fails
-(deadlock, connection drop, constraint). The transaction rolls back: order #14
-is still `preparing` in the database, nothing is cooked, and the pool units were
-never deducted. Meanwhile the student's locked phone has already buzzed *"Order
-#14 is ready — head to the counter."* They walk down for food that does not
-exist. The `ready_at`/`expires_at` timestamps set in memory are also discarded,
-so the 15-minute hold never starts.
-
-The existing doc comment on `notifyOrderReady` acknowledges the transaction may
-"still be rolled back by a later step" but treats that as a reason to detach the
-*context*, not as a reason to defer the *send*. Detaching the context does not
-help: it makes the phantom push more reliable, not less.
-
-**Fix shape:** collect ready-transitions during the transaction instead of
-sending them. Give `PoolEngine` a per-call slice (or have `recomputeStatus`
-return the transition), and flush the pushes after `WithTx` returns `nil`,
-alongside the existing `e.broadcast(...)` / `hub.Notify*` calls that are already
-correctly placed post-commit. Do not send anything on the error path.
-
-**Test first:** a `pool_test.go` case with a fake `orderNotifier` and a `uow`
-stub whose `WithTx` runs the callback and then returns an error (simulating a
-commit failure). Assert `NotifyOrderReady` was **not** called. Verify it fails
-against today's code. Add the mirror case — successful commit *does* notify
-exactly once — so the fix can't be "never send."
-
----
-
-#### V2 — [HIGH] `CreateOrder` checks shop-open outside the lock and the transaction
-
-**Where:** `services/pool.go` — `CreateOrder`, first line.
-
-```go
-if err := e.ensureShopOpen(ctx); err != nil { ... }   // ← unlocked, untransacted
-...
-e.mu.Lock()
-defer e.mu.Unlock()
-err = e.uow.WithTx(ctx, func(txCtx context.Context) error { ... })
-```
-
-`ensureShopOpen` reads `shop_status` on its own connection, before the engine
-mutex is taken and before the transaction (and therefore before the advisory
-lock) exists. Every other invariant in this engine is checked inside the
-transaction that acts on it; this one is not.
-
-**Failure scenario:** it's 3 pm and the shopkeeper taps **Close**.
-`ShopStatusService.Set` saves `closed`, commits, then runs `RejectAllSubmitted`
-to sweep away undecided orders. A student's phone, which has had the menu open
-since lunch, submits an order in the gap. `ensureShopOpen` runs *before* the
-close commits and reads `open` — the check passes. The engine then blocks on
-the advisory lock until the close commits and the sweep finishes, and inserts a
-brand-new `submitted` order **into a closed shop, after the sweep has already
-run**. Nothing will ever reject it: the shop is closed so the shopkeeper isn't
-looking at the Orders screen, `ExpiryTick` only touches `ready` orders, and the
-student now holds their one-active-order slot indefinitely. They cannot place
-another order tomorrow without someone manually resolving it. This is the same
-class of gap as the known R14 residual (§ 9.6 caveats), but on the more common
-path — students submit far more often than shopkeepers close.
-
-**Fix shape:** move the `ensureShopOpen` read inside the existing `WithTx`
-callback, ahead of the `FindActiveByUserIDForUpdate` call. The advisory lock
-then serializes it against `ShopStatusService.Set`'s own transaction, so the
-read either sees the pre-close state (and the sweep will catch the order) or
-sees `closed` (and the order is refused with the existing 409). Keep the
-error messages identical — "The canteen is closed." / "The canteen is on a
-break." are already correct copy.
-
-**Test first:** `pool_test.go` with a fake `shopStatusRepo` whose `Get` records
-whether it was called with a transaction context (the existing test fakes can
-inspect `txCtx`). Assert the shop-status read happens inside the transaction.
-Better if feasible: an integration test (`-tags=integration`) that closes the
-shop concurrently with a create and asserts the resulting order count is either
-0, or 1-and-rejected — never 1-and-submitted.
-
----
-
-#### V3 — [HIGH] Menu prices drift silently between the student's cart and the charge
-
-**Where:** `services/pool.go` `CreateOrder` (`candidate.TotalPrice += mi.Price *
-in.Qty`), `services/orders.go` (`OrderResponse`), and the student cart on the
-frontend (see the paired **H3**).
-
-The server correctly prices the order from the live `menu_items` row at submit
-time. The student's cart total, though, is computed on the phone from whatever
-menu payload it last fetched. There is no agreement between the two and no
-signal when they disagree.
-
-**Failure scenario:** a student builds a ₹120 cart at 12:40. The shopkeeper
-edits the samosa from ₹20 to ₹30 at 12:44 (a real thing that happens — supply
-prices move, and `MenuManage` makes it a two-tap edit). The student's phone is
-in their pocket, screen off; the `menu_update` SSE event is delivered but the
-refetch result never gets looked at. At 12:45 they hit **Place order** having
-last seen ₹120. The server charges ₹140. The order ticket shows ₹140, the
-counter asks for ₹140, and the student is certain they were shown ₹120. In a
-canteen where payment is cash at a counter, that argument costs the shopkeeper
-real time during a rush, and it is the app's fault.
-
-The reverse direction is just as bad in trust terms: a price *drop* the student
-never sees means the app under-delivers on a win.
-
-**Fix shape (backend half):** the order response already carries the
-authoritative `total_price`; the missing piece is telling the client that it
-changed. Accept an optional `expected_total` on the create-order request. When
-it is present and does not match the computed total, still create the order
-(refusing it during a rush would be worse), but return the discrepancy in the
-response — e.g. `price_changed: {expected, charged}` — so H3 can surface it
-honestly on the ticket the student lands on. Do **not** silently refuse and do
-not re-price to the stale value.
-
-**Test first:** `pool_test.go` — create an order whose menu item price differs
-from the submitted `expected_total`; assert the order is created at the live
-price *and* the response carries the discrepancy. Second case: matching
-expectation → no discrepancy field. Third: omitted `expected_total` → behaves
-exactly as today (old clients must not break).
-
-**Coordinate with H3.** Land the backend first; H3 consumes the new field.
-
----
-
-#### V4 — [MEDIUM] `Accept` silently ignores unknown `rejected_item_ids`
-
-**Where:** `services/pool.go` — `Accept`.
-
-`rejectedSet` is built from the caller's IDs and then only ever *consulted*
-while looping over `order.Items`. An ID that belongs to a different order, or
-to no order at all, is silently discarded.
-
-**Failure scenario:** the shop tablet has two incoming order cards open. A stale
-render, a double-tap during a rush, or a retried request after a timeout sends
-order #12's accept with item IDs that belong to order #11. The API returns
-`200 OK` with a fully-accepted order. The shopkeeper's screen shows the trim
-they asked for did not apply, and they cannot tell whether the tap registered —
-so they tap again. Meanwhile the item they meant to drop is now queued for
-cooking.
-
-**Fix shape:** validate before mutating. Build the set of the order's own item
-IDs; if any supplied ID is not in it, return `ErrBadRequest` naming the count
-("2 of the items sent aren't part of this order"). Fail the whole call rather
-than partially applying — a partially-applied trim is worse than a rejected one.
-
-**Test first:** `pool_test.go` — `Accept` with one valid and one foreign item ID
-returns a 400 and leaves every item's status untouched.
-
----
-
-#### V5 — [MEDIUM] A student is never told their order was rejected or expired
-
-**Where:** `services/push.go` (only `NotifyNewOrder` and `NotifyOrderReady`
-exist), `services/pool.go` (`Reject`, `ExpiryTick`).
-
-The push channel notifies the shopkeeper of a new order and the student of a
-ready order. There is nothing for the two outcomes a student most needs to hear
-about, both of which are decided by someone else while their phone is in their
-pocket.
-
-**Failure scenario A (reject):** a student orders at 12:30 and puts the phone
-away. At 12:33 the shopkeeper runs out of paneer and rejects the order. The SSE
-event fires into a backgrounded tab that iOS has already frozen. The student
-walks to the counter at 12:50 expecting food, and finds out there. Worse, they
-believe they still have an active order and cannot place a new one until they
-open the app and see the REJECTED stamp.
-
-**Failure scenario B (expire):** the 15-minute hold lapses on a ready order. The
-student gets no warning before it happens and no notice after. From their side
-the app simply stopped working.
-
-**Fix shape:** add `NotifyOrderRejected(ctx, userID, orderNo, reason)` and
-`NotifyOrderExpired(ctx, userID, orderNo)` alongside the existing notifiers,
-with the same pure-payload-function shape (`rejectedPayload` /
-`expiredPayload`, unit-testable without a fake endpoint) and a `URL` of
-`/order`. Wire them from `Reject` and `ExpiryTick` — **post-commit, per V1's
-rule**, not from inside the transaction. Extend the `orderNotifier` interface so
-`pool_test.go` can assert on them. Copy must follow § 9.2: state what happened
-and what to do ("Order #14 couldn't be prepared. Nothing to pay — order again
-when you're ready."), never apologize, never blame the student.
-
-**Consider (product call, flag it rather than deciding):** a warning push ~3
-minutes before expiry is arguably more valuable than the after-the-fact one.
-Implement the two above; note the warning as a follow-up.
-
-**Test first:** `push_test.go` for the exact payload bytes; `pool_test.go`
-asserting `Reject` and `ExpiryTick` each notify the right user exactly once, and
-do not notify when the transaction fails.
-
----
-
-#### V6 — [MEDIUM] Expired orders keep items in `queued` status
-
-**Where:** `services/pool.go` — `ExpiryTick`.
-
-When an order expires, allocated units are returned to the pool and the item is
-walked *backwards*: `if it.Status == models.ItemAllocated { it.Status =
-models.ItemQueued }`. The order itself is then terminal (`expired`), but its
-items claim to be waiting to be cooked.
-
-**Why it matters:** nothing reads it wrongly *today* — `remainingByMenuItem`
-scans `FindInProgress`, which excludes expired orders — so this is latent, not
-live. But it is a lie in the data, and the next thing to scan `order_items` by
-status will believe it. Two of the already-planned items scan exactly that way:
-§ 9.6-B15 (the business-day reset) and any future analytics or waste report. An
-expired order's items were never handed over and never will be; `rejected` is
-the status that means that, and it is what `Cancel` and `Reject` both use.
-
-**Fix shape:** set `it.Status = models.ItemRejected` for every non-rejected item
-on an expiring order, and save it — mirroring `Cancel`'s loop. Keep the pool
-return exactly as it is.
-
-**Test first:** `pool_test.go` — expire a ready order with one allocated and one
-queued item; assert both end as `rejected` and the allocated qty went back to
-the pool. Verify the current code fails the status assertion.
-
----
-
-#### V7 — [MEDIUM] `SubmitRatings` accepts an unbounded, un-deduplicated array
-
-**Where:** `services/ratings.go` — `SubmitRatings`.
-
-Every element is validated individually (ownership, not-rejected, 1–5 stars),
-but the slice length is never checked and duplicates within one request are
-never collapsed. An order holds at most 30 lines; a request can carry 30,000
-entries pointing at the same line, and they all reach `SaveAll` as a single
-multi-row insert. The 1 MiB body cap is the only ceiling, and it permits roughly
-30k entries. `SubmitRatings` also runs outside a transaction, so a partial
-insert failure leaves whatever the DB accepted.
-
-**Failure scenario:** low-drama but real — a buggy retry loop in a client, or one
-bored student with curl, turns a rating submit into a multi-megabyte insert
-during the lunch rush, on the same connection pool the order engine needs.
-
-**Fix shape:** cap `len(inputs)` at a number derived from reality — an order
-cannot have more than 30 lines, so 30 is the honest cap — and return
-`ErrBadRequest` above it. De-duplicate by `order_item_id` (last value wins, or
-first — pick one and say so in a comment). Keep the existing `ON CONFLICT DO
-NOTHING` behavior for genuine re-rating.
-
-**Test first:** `ratings_test.go` — 31 inputs → 400; duplicate `order_item_id`
-in one request → exactly one row reaches the repo.
-
----
-
-#### V8 — [LOW] `Save` implicitly upserts the whole `Items` association
-
-**Where:** `repository/gorm.go` — `GormOrderRepo.Save`.
-
-`getDB(ctx, r.db).Save(order)` is called with an `order` whose `Items` slice is
-populated (every caller loads via `FindByIDForUpdate`, which fills it). GORM's
-default `Save` also upserts loaded associations, so each order-status write also
-emits an insert-with-conflict-clause for every order item — extra statements
-inside the advisory-locked critical section, on the hottest path in the app.
-
-**Verify before fixing.** Turn on GORM's SQL logging (or add a session-scoped
-logger in a test) and confirm the association statements actually appear on the
-current version. If they do not, close this task as not-a-defect and record that
-here. If they do, the fix is `Session(&gorm.Session{SkipHooks: false}).Omit(clause.Associations).Save(order)`
-— or an explicit `Select` of the columns `Save` is meant to own.
-
-**Test first:** an integration-tagged test asserting the statement count for one
-`Accept` (GORM's logger can count). If counting proves fiddly, a plain assertion
-that item rows are untouched when `Save` is called with a deliberately-stale
-in-memory `Items` slice is the more valuable test anyway.
-
----
-
-#### V9 — [LOW] Push subscription key material is stored unvalidated
-
-**Where:** `services/push.go` — `Subscribe`.
-
-`endpoint` is properly validated against the vendor-host allowlist (the 2026-07-21
-SSRF fix). `p256dh` and `auth`, however, are stored verbatim: any length, any
-character set. A real subscription's `p256dh` is a 65-byte base64url-encoded
-P-256 point and `auth` is 16 bytes; anything else can only be junk that will fail
-at encryption time inside `webpush-go`, per row, per send, forever.
-
-**Fix shape:** length-bound and charset-check both (base64url alphabet), and
-reject on mismatch with a clear 400. Cheap, and it keeps the `push_subscriptions`
-table honest.
-
-**Note:** this touches the same file as V5. Sequence them (V5 first, it is the
-larger change) or give both to one agent.
-
-**Test first:** `push_test.go` — over-length and non-base64url values are
-rejected; a real-shaped pair is accepted.
-
----
-
-#### V10 — [LOW] `RejectAllSubmitted` reads without `FOR UPDATE`
-
-**Where:** `services/pool.go` — `RejectAllSubmitted`; `repository/gorm.go` —
-`FindIncoming`.
-
-Every other engine mutation loads its target through a `…ForUpdate` variant.
-This one uses the plain `FindIncoming` and then `Save`s the rows it read. It is
-protected today by the advisory lock that `WithTx` takes, so this is a
-consistency-of-idiom issue rather than a live race — but it is precisely the
-"unlocked read then whole-row `Save`" shape that produced the 2026-07-24
-`MenuService.Update` lost-update bug, and the next person to add a code path
-that writes `orders` outside the advisory lock will be bitten by it.
-
-**Fix shape:** add `FindIncomingForUpdate` (mirroring `findOrdersForUpdate`'s
-existing pattern, filtering `status = submitted`) and use it here. Leave
-`FindIncoming` for the read-only `ShopOrders` path.
-
-**Note:** touches `repository/gorm.go`, shared with V8. Sequence or combine.
-
-**Test first:** given the protection is already there, the honest test is at the
-repository level under `-tags=integration`: assert `FindIncomingForUpdate` holds
-a row lock (a second connection's `SELECT … FOR UPDATE NOWAIT` on the same row
-errors).
 
 ---
 
@@ -892,33 +511,6 @@ none of them are licence to restyle the app.
 | H6 | MEDIUM | Terminal-state arrival is silent — no chime, no announcement, no closure | `components/student/StudentRealtime.tsx`, `lib/sound.ts` |
 | H7 | MEDIUM | Low-contrast secondary text fails WCAG AA across both roles | `tailwind.config.js`, sweep across pages/components |
 | H8 | LOW | Error and empty-state copy has drifted from the § 9.2 writing rules | copy-only sweep, all pages |
-
----
-
-#### H2 — [DO FIRST] Lazy-split the shop shell out of the initial student chunk
-
-Formerly § 9.6-B13; **promoted out of the deferred backlog and authorized**,
-because the budget is now blocking: initial student JS is 250.24 KB against a
-250 KB hard stop (§ 9.1.8). Every other H-task adds bytes.
-
-`Layout.tsx` statically imports `ShopRealtime` and `ShopStatusControl`, and
-carries the shop-only header/nav branches. All of it ships to every student's
-phone, over campus Wi-Fi, on first load, and none of it will ever execute there.
-
-**Fix shape:** put a `lazy()`/`Suspense` boundary around the shop-only realtime
-and status components, following the route-group pattern already in `App.tsx`.
-The shell is always mounted, so the boundary needs a fallback that renders
-nothing visible and does not shift layout — the shopkeeper must never see a
-flash of missing header controls.
-
-**Verify:** `npm run build` and record the new number *in this file*. Then live-
-verify both roles: a student session must never fetch the shop chunk (check the
-network panel), and a shopkeeper's status control must still be interactive on
-first paint. Reclaims far more than the 240 bytes currently over.
-
-**Test:** existing `Orders.test.tsx` / `ShopRealtime.test.tsx` must stay green;
-add a `Layout` test asserting the student render does not mount the shop
-components.
 
 ---
 
@@ -1081,12 +673,27 @@ double-announce on a repeated identical SSE payload.
 
 #### H7 — [MEDIUM] Low-contrast secondary text fails WCAG AA
 
-**The finding:** `text-ink/40` on the `paper` surface (`#211F1A` at 40 % over
-`#EEDFBB`) computes to roughly **2.1:1** — well under the 4.5:1 AA threshold for
-body text, and under 3:1 even for large text. It is used for the small
-uppercase labels that carry real meaning ("left to cook" on the prep board is
-one). `text-ink/50` and `text-paper/70` are in similar territory and need
-measuring, not assuming.
+**The finding, now measured.** The 2026-07-28 audit (§ 9.12) computed the WCAG
+2.x ratios this task asked for and counted the usages. It is worse and more
+widespread than the original estimate:
+
+| Class | vs `paper` #EEDFBB | vs `steel` #DCE4DE | Usages | AA (4.5:1) |
+|---|---|---|---|---|
+| `text-ink/35` | 2.1:1 | 2.1:1 | 2 | **fail** |
+| `text-ink/40` | **2.33:1** | 2.3:1 | 14 | **fail** |
+| `text-ink/45` | ~2.6:1 | ~2.6:1 | 7 | **fail** |
+| `text-ink/50` | **3.02:1** | **3.02:1** | 28 | **fail** |
+| `text-ink/60` | **3.96:1** | ~3.9:1 | 26 | **fail** |
+| `text-ink/70` | **5.31:1** | ~5.2:1 | 36 | pass |
+
+**77 usages below AA**, and the failures are not decoration: they carry
+timestamps, availability windows, "left to cook", every `hint` on every
+`EmptyState`, and the shopkeeper's ready/handed-over counts. `text-ink/70` is
+the floor that passes — it is already the most-used value in the codebase, so
+the fix is mostly convergence on a value the design already reaches for.
+
+The original estimate here (2.1:1 for `ink/40`) was close; treat the table
+above as the number of record and re-derive it if the tokens change.
 
 This is not a theoretical audit item. The shopkeeper's tablet sits on a counter
 under canteen lighting, often near a doorway; students read their phones
@@ -1156,59 +763,6 @@ real Tuesday at 12:45 catches bugs that a test named
 | Q7 | MEDIUM | Browser end-to-end: one full lifecycle, both roles, checked in and runnable | new `frontend/e2e/` |
 | Q8 | MEDIUM | The untested frontend surfaces: `Prep`, `History`, `ShopStatusControl`, `Layout` | new `*.test.tsx` |
 | Q9 | LOW | Service worker behavior: precache, `/api` NetworkOnly, push + notificationclick | new `sw.test.ts` |
-
----
-
-#### Q1 — [HIGH] The route auth and role matrix
-
-Every route in `routes.go` is wired with some combination of `requireAuth`,
-`requireStudent`/`requireShopkeeper`, `rateLimit`, `requireSSEAuth` and
-`limitSSEConns`. A single misplaced middleware — one route registered on the
-wrong group — is a total authorization failure, and nothing in the repo would
-catch it. This is the highest-value missing test in the codebase.
-
-**Build:** a table-driven test that boots the real `routes.Setup` against fake
-services and asserts, for **every registered route**:
-- no token → 401
-- valid student token on a `/api/shop/*` route → 403
-- valid shopkeeper token on a student route → 403
-- the correct role → not 401/403
-- public routes (`/api/health`, `GET /api/menu`, `GET /api/shop-status`,
-  `GET /api/push/vapid-public-key`, `POST /api/auth/firebase`) → reachable
-  with no token, and confirm that list is exactly right
-
-Drive it off `router.Routes()` so a **newly added route that the table does not
-cover fails the test.** That property is what makes this test keep paying.
-
-**Also assert:** an SSE ticket is single-use (second connect with the same
-ticket → 401), and a student cannot open `/api/shop/stream`.
-
----
-
-#### Q2 — [HIGH] Repository SQL contracts against real Postgres
-
-`repository/gorm.go` is 619 lines of hand-written queries, locking clauses, and
-one raw `INSERT … ON CONFLICT`. The existing
-`repository/integration_test.go` covers *schema* invariants only — unique
-constraints, the partial unique index, foreign keys — not the query methods
-themselves. The service tests all use fakes, which means **the fakes, not the
-SQL, are what is verified.** Extend the existing file rather than replacing it.
-
-**Build** (integration-tagged, real Postgres): per-method tests for the
-non-obvious ones —
-- `FindActiveByUserIDForUpdate` returns exactly one active order and locks it
-- `FindPreparingOldestForUpdate` orders strictly oldest-first including items
-- `PoolRepo.Add` with a negative delta on a missing row (the documented
-  UPDATE-then-INSERT path — assert the CHECK constraint behavior it exists for)
-- `GetMaxOrderNo` per business day, and the `idx_orders_date_no` conflict the
-  create-order retry loop depends on
-- `HasActiveItemsForMenuItem` across each order status
-- `SumOrderedQtyByDate` excluding rejected orders
-- soft-delete: a deleted menu item disappears from `FindAll` but its
-  `order_items` snapshot still renders
-
-Fixtures should read like real data: one shopkeeper, three students, a lunch
-menu.
 
 ---
 
@@ -1339,7 +893,7 @@ promoted to § 9.4-H2 and is no longer deferred.**
 | B3 | Menu item descriptions | Backend: new column + API field; would unlock a student item-detail sheet. |
 | B4 | Scheduled pickup time slots | Product decision + backend scheduling; changes the FCFS model. |
 | B5 | Student history beyond `LIMIT 20` | Backend pagination param + UI. Not felt until months of use. |
-| B6 | Weekly/range shop insights | Backend aggregation across days + a real dataviz pass. |
+| B6 | Weekly/range shop insights | Backend aggregation across days. **§ 9.12-Y5 builds the single-day version** from data the endpoint already returns; anything comparing days ("busier than yesterday") needs a second fetch and lands here, not there. |
 | B7 | Queue position / ETA for students | Backend derivation from pool state; needs careful honesty about accuracy. |
 | B8 | Shopkeeper allowlist admin UI | Backend endpoints; today it's env-seeded, fine at this scale. |
 | B9 | httpOnly cookie sessions | § 11.2 — an architecture project, not a task. |
@@ -1411,140 +965,6 @@ of all of them and can run concurrently from the start.
 
 ---
 
-#### P1 — [HIGH, DO FIRST] There is no Settings screen
-
-**Verified:** `src/pages/` contains `Login`, `student/{Menu,OrderStatus}` and
-`shop/{Orders,Prep,History,MenuManage}`. There is no Settings route in
-`App.tsx`, no settings entry in either tab set in `Layout.tsx`, and the only
-account surface in the whole app is `AvatarMenu` — a dropdown containing the
-user's name and a Log out button. Everything the owner asked for needs a home,
-and there isn't one.
-
-**What to build:** a `/settings` route, available to **both** roles, lazy-loaded
-as its own chunk (§ 9.1.8 — it must not land in the student's initial JS).
-
-**Entry point — deliberate:** add a **Settings** item to the existing
-`AvatarMenu`, above Log out. **Do not add a bottom-nav tab.** The student nav is
-2 tabs and the shop nav is 4; settings is a rare destination and the thumb zone
-belongs to Menu/Order (§ 9.1.3). `AvatarMenu` already handles outside-click and
-Escape — reuse it, don't rebuild it.
-
-**Structure** (each section is a `Card`; nothing here invents a new component):
-
-```
-Settings
-  ┌ Get the app ──────────────  ← P2. First section. This is the ask.
-  ┌ Notifications ────────────  ← P3
-  ┌ Account ──────────────────  name, email, role, Log out
-  ┌ About Khaao ──────────────  ← S3 (§ 9.10). Who runs this, what it stores.
-  └ version / build ──────────  ← S4 (§ 9.10)
-```
-
-**Rules to honor:** the shopkeeper sees the same screen, so every string needs a
-Hindi pair via `useLanguage()` **except** the student-only ones, which stay
-English by design (§ 9.1.11) — gate on `isShop` the way `AvatarMenu` already
-does, not on `language` alone, or a shared device leaks Hindi into a student
-session. 44 px targets. No horizontal scroll at 375 px. `pb-safe` on anything
-docked to the bottom.
-
-**Test:** a new `Settings.test.tsx` — the route renders for both roles; the
-student render contains no Hindi; the AvatarMenu item navigates to it.
-
----
-
-#### P2 — [HIGH] "Get the app": a download button that is always there
-
-**The gap, verified:** `InstallPrompt.tsx` is the *only* install affordance in
-the app, and it is a one-shot card. It renders when `beforeinstallprompt` fires
-(once per page load) or, on iOS, when a `localStorage` flag is absent. Tap the
-X and:
-
-- **iOS:** `khaao_install_dismissed` is written to `localStorage` and the hint
-  never returns. `clearAuthStorage()` deliberately preserves this key across
-  logout (`api/client.ts:50`), so it survives even a re-login. **The student can
-  never be shown how to install the app again on that phone.**
-- **Android/Chrome:** the deferred event is discarded. `beforeinstallprompt` will
-  not fire again until a reload, and there is no button anywhere that could use
-  it if it did.
-
-A student who dismisses the card once — during the lunch rush, because it is
-covering the bottom nav (**see W3, § 9.8**) — has permanently lost the ability to
-install the app. That is the actual state of "downloadable from the website"
-today.
-
-**What to build:** a `Get the app` section in Settings that works from a cold
-start, on every platform, every time.
-
-Extract the platform detection out of `InstallPrompt.tsx` into a shared
-`lib/install.ts` so both surfaces read the same truth:
-
-```ts
-// lib/install.ts — one source of truth for install state.
-export type InstallState =
-  | { kind: 'installed' }                 // display-mode: standalone, or navigator.standalone
-  | { kind: 'promptable'; prompt(): Promise<void> }  // a live beforeinstallprompt is held
-  | { kind: 'ios-manual' }                // iOS Safari: Share → Add to Home Screen
-  | { kind: 'unsupported' };              // desktop Firefox, in-app webviews, etc.
-```
-
-The deferred `beforeinstallprompt` event must be **held at module scope, captured
-by a listener registered in `main.tsx` before React mounts** — not inside a
-component. The event fires early, often before the Settings screen has ever been
-mounted; a component-scoped listener is precisely why the current card is
-one-shot.
-
-Render per state, in the § 9.2 voice:
-
-| State | What the section shows |
-|---|---|
-| `promptable` | **Download Khaao** button → calls `prompt()`, then **awaits `userChoice`** and only clears the held event on `'accepted'`. The current code (`InstallPrompt.tsx:78`) drops the event without awaiting, so cancelling the OS dialog loses the install forever — do not repeat that. |
-| `ios-manual` | Numbered steps with the real Share glyph drawn inline as an SVG path (§ 9.2: **no emoji-as-icon**). "Tap Share, then Add to Home Screen." Not a button that does nothing. |
-| `installed` | A stamped confirmation, in the `StatusStamps` idiom — "Installed." No button. |
-| `unsupported` | Say what to do instead: open `khaao.<domain>` in Chrome or Safari on the phone. Never show a dead button. |
-
-**Copy:** the heading is **"Get the app"** and the button says **"Download
-Khaao."** No "PWA," no "install prompt," no jargon. One line underneath saying
-what it buys them — opens from the home screen, works on a bad connection,
-notifies when food is ready. Hindi pair for the shopkeeper.
-
-**Test:** a new `GetTheApp.test.tsx` — each of the four states renders its own
-affordance; `promptable` calls `prompt()` on tap; a `userChoice` of `dismissed`
-leaves the button still usable; `installed` renders no button.
-
----
-
-#### P3 — [HIGH] Notifications have no controls and no way back
-
-**Verified:** `PushNotificationSetup.tsx` is the only notification surface.
-Dismissing it writes `khaao_push_dismissed` to `sessionStorage` (line 124), and
-the effect bails outright when `Notification.permission === 'denied'` (line 54).
-So: a student who taps "Block" in the browser dialog, or who dismisses the card,
-gets **no notification when their food is ready** and there is nothing anywhere
-in the app that says so or tells them how to fix it. For a product whose entire
-signature moment is the "ready" push, that is the highest-cost silent failure we
-have.
-
-**What to build**, in Settings:
-
-- The **current permission state**, named honestly: *"Notifications are off — you
-  won't know when your food is ready."*
-- `default` → an **Enable notifications** button that runs the existing
-  subscribe flow (reuse the logic in `PushNotificationSetup.handleEnable`; pull
-  it into a shared function rather than copying it).
-- `denied` → per-browser instructions to re-allow, since **the app cannot
-  re-prompt after a denial** — that is a browser rule, not our bug. Say that
-  plainly rather than showing a button that will silently no-op.
-- `granted` but **no subscription on the server** → a **Reconnect notifications**
-  button. This is the user-facing half of **W5 (§ 9.8)**; ship them together.
-- A **Send a test notification** action while debugging is tempting — it needs a
-  backend endpoint, so it is **out of scope**. Record it in § 9.6 if wanted.
-
-**Test:** extend `PushNotificationSetup.test.tsx` and add coverage in
-`Settings.test.tsx` — each permission state renders its own affordance; `denied`
-renders instructions and no button.
-
----
-
 #### P4 — [HIGH] The manifest is too thin for a real install dialog
 
 **Verified** against the built `dist/manifest.webmanifest`:
@@ -1604,50 +1024,6 @@ when `installed`, and the Google button is unaffected in both.
 
 ---
 
-#### P6 — [MEDIUM] Nothing listens for `appinstalled`
-
-**Verified:** `InstallPrompt.tsx` registers exactly one listener,
-`beforeinstallprompt` (line 59). There is no `appinstalled` listener anywhere in
-`src/`. Consequences:
-
-- A student who installs the app from Chrome's own menu (⋮ → Add to Home screen)
-  — bypassing our card entirely — keeps being shown the install card in the tab
-  they still have open.
-- `computeShowIosHint()` checks `display-mode: standalone`, which is correct but
-  only re-evaluated on mount, so the same staleness applies within a session.
-
-**Fix shape:** in `lib/install.ts` (P2), listen for `appinstalled`, flip the
-shared state to `{ kind: 'installed' }`, drop the held prompt, and clear
-`khaao_install_dismissed`. `InstallPrompt` and the Settings section both read
-that state, so both correct themselves without extra wiring.
-
-While in this file, **fix the dismissal asymmetry**: the iOS hint dismissal is
-permanent (`localStorage`) while the Android one is per-page-load. Once P2 gives
-Settings a permanent home for the install button, the card's job is only to be a
-polite one-time nudge — make both dismissals identical and time-boxed (store a
-timestamp, re-offer after ~30 days), and let Settings be the always-available
-path. Do not leave a permanent flag with no user-facing way to clear it.
-
-**Test:** extend the P2 test file — dispatching `appinstalled` moves the state
-to `installed` and clears the dismissal key.
-
----
-
-#### P7 — [MEDIUM] The install cannot work correctly without deploy-side headers
-
-Owned by `deploy/Caddyfile`. This is the deployment half of **W1 and W2
-(§ 9.8)** — the app-side fix is necessary but not sufficient without it. See W2
-for the failure scenario and the exact header set; this entry exists so the
-Caddyfile work has an owner in this series and is not lost between the two.
-
-Additionally, confirm at D-6 that Caddy serves `manifest.webmanifest` as
-`application/manifest+json`. Caddy's MIME table generally covers it; if it falls
-back to `application/octet-stream`, the manifest is ignored and **the app
-silently stops being installable** with no console error. One `curl -I` proves
-it — do not assume.
-
----
-
 ### 9.8 PWA / mobile find-fix backlog (W-series) — W1/W2/W4/W6/W9 DONE, W3/W5/W8 OPEN, W7 INVESTIGATED (no change)
 
 Found in the **2026-07-27 install-and-mobile audit**. Every item below was
@@ -1665,117 +1041,6 @@ not estimated.
 | W7 | LOW | 39 legacy `.woff` files (~430 KB) ship to the server and are never fetched | `src/main.tsx` | **Investigated, not changed.** `@fontsource` bundles woff+woff2 in one `@font-face`; dropping `.woff` cleanly needs hand-authored `@font-face` rules (manual-sync risk against future `@fontsource` bumps). Shrank 39→14 files per format as a side effect of W6. |
 | W8 | LOW | Both prompt cards are hand-rolled `fixed` divs, against § 9.1.3 | same files as W3 — fold into W3 | **Open** — folds into W3, not started. |
 | W9 | LOW | `notificationclick` navigates to an unvalidated payload URL | `src/sw.ts` | **FIXED** — rejects `//`-prefixed/cross-origin URLs, falls back to `/`. Test-covered in `sw.test.ts`. |
-
----
-
-#### W1 — [CRITICAL] The service worker can never activate an update
-
-**The defect:** `vite.config.ts` sets `strategies: 'injectManifest'` **and**
-`registerType: 'autoUpdate'`. In `generateSW` mode the plugin injects
-`skipWaiting`/`clientsClaim` into the generated worker. **In `injectManifest`
-mode it does not** — the hand-written `src/sw.ts` is shipped as-is, and it calls
-neither. Verified two ways:
-
-```
-$ grep -c "skipWaiting\|clientsClaim" dist/sw.js
-0
-```
-
-and in the plugin's own registration client
-(`node_modules/vite-plugin-pwa/dist/client/build/register.js`), where the
-`autoUpdate` path deliberately **never sends the skip-waiting message**:
-
-```js
-const updateServiceWorker = async (_reloadPage = true) => {
-  await registerPromise;
-  if (!auto) { sendSkipWaitingMessage?.(); }   // ← `auto` is true for us
-};
-```
-
-In `autoUpdate` mode the client only listens for `activated` and reloads. `sw.ts`
-registers no `message` listener either, so nothing can ever trigger the
-transition.
-
-**Failure scenario:** we deploy a fix. A student's installed PWA fetches the new
-`sw.js`, installs it, and it enters `waiting`. The old worker still controls the
-page, so `activated` never fires, so the reload never happens. A waiting worker
-only takes over when **every** window of the app is closed — and an installed
-PWA on a phone is backgrounded, not closed, for weeks. That student keeps
-running the old build, served from the old precache, **indefinitely**. When the
-backend contract moves under them, they get errors we cannot reproduce and
-cannot push a fix to. This gets worse with every additional install, which is
-exactly what § 9.7 is about to do.
-
-**Fix shape:** in `src/sw.ts`, alongside the existing `precacheAndRoute`:
-
-```ts
-import { clientsClaim } from 'workbox-core';
-self.skipWaiting();
-clientsClaim();
-```
-
-plus `cleanupOutdatedCaches()` from `workbox-precaching`, which is not called
-today either — old precache generations accumulate in Cache Storage across
-deploys and are never reclaimed.
-
-**Be deliberate about the tradeoff, and record the choice here.** `skipWaiting`
-swaps the controlling worker under a live page. For this app that is the right
-call — sessions are short, the shell is small, and `registerType: 'autoUpdate'`
-already reloads on activation, so the page is refreshing anyway. **This also
-resolves § 9.6-B11**, which recorded "switch to an update prompt" as an open
-product decision on the assumption that autoUpdate *worked*. It does not.
-Choosing a prompt instead is still legitimate, but it is now a fix, not a
-preference — and it needs the `message`/`SKIP_WAITING` listener that is likewise
-absent today.
-
-**Test:** this is § 9.5-Q9's territory (SW handlers, mocked global). Assert the
-module calls `skipWaiting()` on evaluation and registers `clientsClaim`. Then
-**live-verify**, which is what actually counts: build, serve, install, deploy a
-changed build, and confirm the new version takes over **without** closing every
-tab. Record the result here.
-
-**Sequence with W6** — both own `sw.ts`/`vite.config.ts`. W1 goes first; it is
-correctness and W6 is bytes.
-
----
-
-#### W2 — [HIGH] No cache-control policy at the edge
-
-**Verified:** the static block in `deploy/Caddyfile` is `root` + `encode` +
-`try_files` + `file_server`, and the `header` block sets three security headers.
-**No `Cache-Control` is set on anything.** Caddy's `file_server` emits `Etag`
-and `Last-Modified` but no explicit freshness directive, which leaves every
-intermediary and the browser free to heuristically cache — typically ~10 % of
-the resource's age, which for a file that has been on disk a week is hours.
-
-**Failure scenario:** we deploy. `index.html` on disk now references
-`/assets/index-NEWHASH.js`. A student's browser or a campus/ISP proxy serves the
-*old* `index.html` from its heuristic cache, which references
-`/assets/index-OLDHASH.js` — a file the new build deleted. The request 404s and
-the student gets a white screen. They cannot fix it; a hard refresh is not a
-gesture most people know, and inside an installed PWA there is no reload button
-at all. Compounding: `sw.js` under the same heuristic caching means the new
-service worker isn't even discovered, so W1's fix cannot take effect either.
-
-**Fix shape** — Vite's asset hashing makes the split unambiguous:
-
-```
-@font-face never-changing, content-hashed:
-  handle /assets/*   → Cache-Control: public, max-age=31536000, immutable
-Identity documents, must always revalidate:
-  /, /index.html, /sw.js, /manifest.webmanifest
-                     → Cache-Control: no-cache
-```
-
-`no-cache` (revalidate every time) is correct here, **not** `no-store` — a 304
-is cheap and keeps the app launchable on a slow connection. Getting these two
-backwards is the classic version of this bug; `/assets/*` must be `immutable`
-and the four documents must not be.
-
-**Verify:** `curl -I` each of the six paths against a real deploy and paste the
-`Cache-Control` values into this file. Add the check to `deploy/RUNBOOK.md` § 5
-so a future frontend deploy cannot silently regress it. **This is P7's other
-half** — one agent should own both.
 
 ---
 
@@ -1865,90 +1130,6 @@ the silent path fails. Ship them together.
 **Test:** extend `PushNotificationSetup.test.tsx` — an existing local
 subscription re-posts to the server exactly once and shows no prompt; a fresh
 `serviceWorker.ready` with no subscription still shows the prompt.
-
----
-
-#### W6 — [MEDIUM] The precache is 1058 KB, and 244 KB of it can never render
-
-**Measured against the committed `dist/`** (73 precache entries, 1058.1 KB):
-
-| Type | Precached |
-|---|---|
-| **woff2** | **483.4 KB (46 %)** |
-| js | 496.7 KB |
-| css | 46.7 KB |
-| png / svg / html / webmanifest | 31.3 KB |
-
-`main.tsx` imports seven `@fontsource` CSS files (IBM Plex Mono 500/600/700 and
-Sans 400/500/600/700). Each pulls **every subset**: latin, latin-ext, cyrillic,
-cyrillic-ext, greek, vietnamese. Of 39 precached font files, **25 are
-cyrillic/greek/vietnamese — 243.7 KB**. Khaao's UI is English and Hindi. IBM
-Plex's Devanagari is a separate family that we do not ship (Hindi falls back to
-the system font), so **not one of those 25 files can ever render a glyph in this
-app.**
-
-Every student's phone downloads all of it on first visit, over campus Wi-Fi, the
-moment the service worker installs — and this series is about to increase how
-many phones do that.
-
-**Two things worth stating honestly:** first, this is a *precache* number, not
-the § 9.1.8 initial-JS number — H2's 239.57 KB is still correct for
-parse-and-execute on first paint. But 496.7 KB of JS *is* pulled down in the
-background, shop chunks included, so H2 bought first-paint time rather than
-bytes-over-the-wire. Second, that means § 9.1.8's single budget line has been
-measuring one of the two numbers that matter. **Both belong in the budget** —
-add the precache figure there when this lands.
-
-**Fix shape**, in order of value:
-
-1. Import only the `latin` and `latin-ext` subsets — `@fontsource/ibm-plex-sans/latin-400.css`
-   and friends. Reclaims ~244 KB, changes nothing visible. **Verify the rendered
-   result on the shop pages** — the Hindi strings must look exactly as they do
-   now (they are already falling back).
-2. Drop unused weights. Seven faces is a lot for a two-family system; audit which
-   are actually referenced in compiled CSS before removing any (§ 10: check the
-   *compiled* output, not assumed source).
-3. Consider excluding the shop route chunks from `globPatterns`. **Weigh this
-   carefully** — precaching is why the shopkeeper's tablet survives a Wi-Fi drop
-   mid-rush, which is a real operational property, not overhead. Probably keep
-   them; if so, write that decision down here so the next audit doesn't reopen it.
-
-Do **not** precache the P4 screenshots — they are install-dialog art and never
-render in-app. Check `globPatterns` after P4 lands.
-
-**Verify:** rebuild and re-run the measurement; record the new precache total and
-composition here.
-
----
-
-#### W7 — [LOW] 39 legacy `.woff` files ship and are never fetched
-
-`dist/assets` contains 39 `.woff` files alongside 39 `.woff2`, ~430 KB of the
-1.7 MB `dist`. `injectManifest.globPatterns` does not list `woff`, so they are
-**not** precached — no user ever downloads them. They are pure deploy weight and
-noise. Every browser that can run a service worker has supported woff2 for a
-decade, so the `.woff` fallback in the `@fontsource` CSS is unreachable for this
-app's audience. Drop them if the fontsource import style makes it clean; if it
-does not, leave it and note that here — 430 KB of dead files on a server is not
-worth contorting the build for. Fold into W6, same agent.
-
----
-
-#### W9 — [LOW] `notificationclick` navigates to an unvalidated payload URL
-
-`src/sw.ts:56` reads `event.notification.data.url` and passes it straight to
-`client.navigate()` / `clients.openWindow()`. **Not exploitable today** —
-verified that every URL in `services/push.go` is a server-side constant (`/order`,
-`/shop`), and VAPID signing means only our backend can send a push to these
-subscriptions. This is defense in depth against a future change that makes the
-URL data-derived.
-
-**Fix shape:** before navigating, require the value to start with `/` and not
-`//` (which is protocol-relative and would leave the origin), else fall back to
-`/`. Three lines. Do it while W1 is already in this file.
-
-**Test:** part of § 9.5-Q9 — a payload carrying `https://evil.example/` or
-`//evil.example` navigates to `/`.
 
 ---
 
@@ -2166,61 +1347,6 @@ more trust, not less.
 
 ---
 
-#### S1 — [HIGH] The app HTML can be framed by any site
-
-**Verified.** `middleware.SecurityHeaders()` sets `X-Frame-Options: DENY` — but
-that middleware runs on the **Go backend**, which serves only `/api/*`. In
-production the browser-rendered app is served by Caddy's `file_server` from
-`/var/www/khaao/frontend/dist`, and Caddy's `header` block sets only
-`X-Content-Type-Options`, `Referrer-Policy` and the CSP. That CSP has **no
-`frame-ancestors` directive**.
-
-So the API — which cannot be usefully framed — is protected, and the actual UI,
-which can, is not. Khaao's login screen and order screens can be embedded in an
-iframe on any site on the internet. The Caddyfile's own comment asserts the two
-header sets are "identical"; they are not, and this is the difference.
-
-**Failure scenario:** a lookalike page frames the real Khaao login and overlays
-its own chrome. The student sees genuine Khaao UI at a URL they do not check,
-completes a real Google sign-in, and the framing page manipulates what they
-believe they are doing. Cheap to build, and it works precisely *because* the
-framed content is authentic.
-
-**Fix shape:** add `frame-ancestors 'none'` to the CSP string, and set
-`X-Frame-Options: DENY` and `Permissions-Policy` in the Caddy `header` block.
-Then make the two copies genuinely identical — or better, **reduce them to one
-source** so they cannot drift again. Note that `frame-ancestors` is ignored in a
-`<meta>` CSP and must come from the response header; it is also the only one of
-the two that CSP Level 3 respects, so ship both.
-
-**Verify:** `curl -I` the deployed root and paste the full header set here.
-Attempt to frame the deployed app from a scratch HTML file and confirm the
-browser refuses.
-
----
-
-#### S2 — [HIGH] Nobody sets HSTS
-
-`middleware/security.go` says, in a comment: *"HSTS is intentionally left to the
-proxy (it owns the TLS/HTTPS decision)."* That is the correct division of
-responsibility. But the proxy does not set it — `deploy/Caddyfile`'s `header`
-block has no `Strict-Transport-Security`, and Caddy v2 does not add one
-automatically. Each layer documents the other as the owner and neither does it.
-
-Without HSTS the first request of every session is downgradeable on a hostile
-network — and campus Wi-Fi is exactly the threat model this app lives on
-(§ 9.1.7 already says the network is hostile). A student's Khaao JWT lives in
-`localStorage` (§ 11.2) and travels on that first request.
-
-**Fix shape:** `Strict-Transport-Security "max-age=31536000; includeSubDomains"`
-in the Caddy `header` block. **Do not add `preload` yet** — preload is a
-practically irreversible commitment for the whole domain, and this is a
-subdomain of a college domain we may not own. Say so in `deploy/RUNBOOK.md`.
-
-**Sequence with S1 and W2** — three tasks, one `header` block, one agent.
-
----
-
 #### S3 — [MEDIUM] Nothing says who runs Khaao
 
 `pages/Login.tsx` renders the K mark, a tagline, a Google button and "Use your
@@ -2314,8 +1440,9 @@ from the tree at the time of writing. X1–X4 are defects; X5–X7 sharpen the
 § 9.2 identity on the surfaces it hasn't reached yet. **All seven landed the
 same day**, one agent, test-first per § 12.2 (X6/X7 used before/after
 verification against the live dev server in place of a red test, as the
-section originally allowed), full frontend gate green (numbers in "Current
-state" above). Landed as **one commit** rather than split by task — the
+section originally allowed), full frontend gate green at the time
+(242.10 KB initial JS / 801.93 KiB precache — see § 9.1.8 for the current
+numbers). Landed as **one commit** rather than split by task — the
 tasks touch a small, overlapping set of files (see the bundle table in § 12)
 and none of the individual diffs was large enough to justify seven review
 points.
@@ -2339,273 +1466,699 @@ sequence, since it sweeps files the others edit.
 
 ---
 
-#### X1 — [HIGH] A failed history fetch renders as "No past orders yet"
+### 9.12 Frontend defect + design-elevation backlog (Y-series) — OPEN, AUTHORIZED, UNSTARTED
 
-**Where:** `pages/student/OrderStatus.tsx` — `OrderStatusPage` checks
-`activeOrderQuery.isError` (line ~493) but **never checks
-`historyQuery.isError`**. On failure, `history = historyQuery.data ?? []`
-becomes `[]`, `hasPastOrders` is false, and `HistoryList` renders the
-empty state: *"No past orders yet — your order history will show up here."*
+Found in the **2026-07-28 fifth-pass frontend audit**. Owner's brief: *"find
+issues, any optimization needed; frontend improvements, visualizations for
+better UX/UI — I want it to look the best, best experience, smooth."*
 
-**Failure scenario:** campus Wi-Fi drops the history request (the active-order
-request got through — different TCP fates on a saturated AP are normal). A
-student who has ordered every day for a month opens the app and is told they
-have no history. That is a network failure presented as a confident factual
-claim — the exact thing § 9.1.7 forbids and the R25 guard exists to prevent,
-applied everywhere else on this page but not here. Worse, if they have no
-*active* order either, the combined branch shows the first-time-user welcome
-("Place your first order") to a regular. There is no retry affordance on any
-of it.
+Every finding below was verified against the current tree — source lines, the
+**compiled** CSS in `dist/`, the built bundle, and measured contrast ratios.
+Numbers quoted are measured, not estimated. Where a check was not run, the
+entry says so.
 
-**Fix shape:** mirror the page's own `activeOrderQuery` pattern:
-`historyQuery.isError && historyQuery.data === undefined` → render the History
-section with an honest error state ("Couldn't load your past orders.") and a
-**Try again** button wired to `historyQuery.refetch()` — do not replace the
-whole page, the active-order section above it is healthy and must still
-render. The `!activeOrder && !hasPastOrders` first-time-user branch must also
-require `!historyQuery.isError` so a regular is never greeted as a newcomer on
-a network blip. Cached data still wins: a failed *background* refetch with
-data present changes nothing (that's what the `data === undefined` arm is for).
+**This series does not duplicate open H-work.** Two findings this audit
+surfaced are already owned by existing tasks and were folded into them rather
+than renumbered:
 
-**Test first:** `OrderStatus.test.tsx` — (a) history query rejects with no
-cached data → error state + retry control render, active order still renders,
-the "No past orders yet" copy does **not**; (b) retry control calls `refetch`;
-(c) history rejects while cached data exists → cached rows still render.
-Confirm (a) fails red today.
+- **Text contrast** → **§ 9.4-H7**, still open. This audit measured the actual
+  ratios H7 asked for and wrote them into H7's entry. Do not open a Y-task for
+  contrast; do H7.
+- **Prep board wait times** → **§ 9.4-H5**, still open. Y15 below is the
+  *shopkeeper's queue-depth* surface on `Orders.tsx`, which is a different
+  screen; read H5 first so the two stay one visual language.
 
-**Expected output:** the standard four deliverables (top of § 9.11).
+| # | Priority | Kind | One-line | Files owned |
+|---|---|---|---|---|
+| Y1 | **DO FIRST** | Optimization | 120 KB of precached `latin-ext` font subsets the app can never render — the whole reason there is no byte headroom | `src/main.tsx` |
+| Y2 | **HIGH** | Defect | `bg-current/10` compiles to nothing — every status stamp, the app's signature element, ships with its ink wash missing | `components/student/StatusStamps.tsx` |
+| Y3 | **HIGH** | Defect | Every dialog in the app announces as an unnamed "dialog" — `aria-modal` with no `aria-labelledby` | `components/ui/Modal.tsx` |
+| Y4 | **HIGH** | Design | The student's menu row — the most-looked-at surface in the product — is a generic delivery-app list item | `components/student/MenuItemCard.tsx`, `components/ui/QtyStepper.tsx` |
+| Y5 | **HIGH** | Design/viz | The shop's History page is the business, rendered as three stat cards. No sense of the day's shape | `pages/shop/History.tsx` |
+| Y6 | MEDIUM | Defect | Accept with every item unchecked submits an "accept" that rejects the whole order | `pages/shop/Orders.tsx` |
+| Y7 | MEDIUM | Defect | `Modal` sizes to `vh` on a codebase that already knows `vh` is wrong on iOS | `components/ui/Modal.tsx` |
+| Y8 | MEDIUM | Defect | Four horizontal rails are unreachable by keyboard | `TrendingRail.tsx`, `FavoritesRail.tsx`, `MenuSkeleton.tsx`, `pages/student/Menu.tsx` |
+| Y9 | MEDIUM | Defect | `QtyStepper` — the app's most-tapped control — still uses text glyphs and announces nothing when the quantity changes | `components/ui/QtyStepper.tsx` |
+| Y10 | MEDIUM | Defect | A drag that starts inside a modal and ends on the backdrop closes the modal | `components/ui/Modal.tsx` |
+| Y11 | MEDIUM | Design/viz | The student watches an order with no sense of elapsed time | `pages/student/OrderStatus.tsx` |
+| Y12 | LOW | Defect | `markAsRated` writes to `localStorage` unguarded while its paired read is guarded | `pages/student/OrderStatus.tsx` |
+| Y13 | LOW | Defect | Top-items bar computes `NaN%` width on an all-zero day | `pages/shop/History.tsx` |
+| Y14 | LOW | Defect | Every loading skeleton is `aria-hidden` with nothing announced in its place | `History.tsx`, `MenuManage.tsx`, `Prep.tsx`, `Orders.tsx`, `OrderStatus.tsx`, `MenuSkeleton.tsx` |
+| Y15 | LOW | Design/viz | The shopkeeper cannot see how deep the queue is without counting cards | `pages/shop/Orders.tsx` |
+| Y16 | LOW | Design | Every price in the app carries `.00` on a menu with no paise | `lib/format.ts` |
+
+**The budget is the constraint on this whole series.** Precache is **801.93
+KiB against the ~800 KB soft ceiling — already over** (§ 9.1.8). Y1 reclaims
+~120 KB and is listed **DO FIRST** for exactly that reason: it is what pays for
+Y4, Y5, Y11 and Y15. Until Y1 lands, treat every added byte as overdraft.
+
+**No charting library. Not one.** Y5, Y11 and Y15 are all "visualization"
+tasks and the reflex is to reach for Recharts/Chart.js/D3 — the smallest of
+them is ~90 KB gzipped, which is the entire student bundle headroom several
+times over, and none of them can be made to look like a canteen (§ 9.2). Every
+chart in this series is hand-drawn: inline SVG or flex/grid divs with the
+existing tokens. This is a hard constraint, not a preference.
+
+**Sequencing / shared files (§ 12.1):**
+
+- Y3, Y7 and Y10 all own `components/ui/Modal.tsx` — **one agent takes all
+  three**, they are three small diffs in one file.
+- Y4 and Y9 share `QtyStepper.tsx` — Y9 first (it fixes the control), Y4 then
+  restyles the row around it.
+- Y5 and Y13 own `pages/shop/History.tsx` — Y13 is a one-line guard, fold it
+  into Y5's agent.
+- Y6 and Y15 own `pages/shop/Orders.tsx`, **and so does the still-open
+  § 9.4-H1**. Three tasks, one file — sequence them or give all three to one
+  agent. H1 is the largest; it should go last.
+- Y11 and Y12 own `pages/student/OrderStatus.tsx`, **and so does the
+  still-open § 9.4-H3**. Same rule.
+- Y1 must land before Y4/Y5/Y11/Y15 are measured, or their bundle numbers are
+  meaningless.
+
+**Expected output for every task below** (the standard four, per § 12):
+1. The fix, matching the "Fix shape" line.
+2. The regression test named in "Test first," confirmed red against the
+   unfixed code before the fix (§ 12.2).
+3. The full frontend gate green (§ 6), with the bundle and precache numbers
+   updated in § 9.1.8 if `npm run build` moved them.
+4. This file updated — move the task into the § 9.12 record table with what
+   actually landed, including anything you found that the entry got wrong.
 
 ---
 
-#### X2 — [HIGH] Post-order permission grant never creates a push subscription
+#### Y1 — [DO FIRST] 120 KB of precached font subsets the app can never render
 
-**Where:** `pages/student/Menu.tsx`, `submitMutation.onSuccess` (~line 171):
+**Where:** `src/main.tsx` lines 15–30 — seven `latin-ext` `@fontsource`
+imports (mono 500/600/700, sans 400/500/600/700).
 
-```ts
-if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-  void Notification.requestPermission();
-}
+**Measured, from the current build:**
+
+| Precached | Files | Size |
+|---|---|---|
+| `*-latin-*.woff2` | 7 | 144 KB |
+| `*-latin-ext-*.woff2` | 7 | **120 KB** |
+| Everything else (JS/CSS/HTML/icons) | 35 | ~538 KB |
+| **Total precache** | **49** | **801.93 KiB — over the ~800 KB ceiling** |
+
+**The finding:** Latin Extended-A/B is the Central/Eastern-European Latin range
+— `ą ć ě ł ő ș ż` and friends. Khaao renders exactly two scripts: English
+(basic Latin) and Devanagari (`हिं`, `ऑर्डर`, `तैयारी`, `पकाना बाकी`). IBM Plex
+Sans and Mono carry **no** Devanagari glyphs in any of these subsets, so the
+Hindi shopkeeper strings already fall through to the system font today — that
+is existing, working behavior, not a regression this task introduces. Nothing
+in the product needs latin-ext. It is 15 % of the precache, downloaded by every
+phone that installs the app over campus Wi-Fi, to render nothing.
+
+This is the same class of finding as **W6** (§ 9.8), which reclaimed 244 KB by
+narrowing away cyrillic/greek/vietnamese. W6 stopped one subset short.
+
+**Fix shape:** delete the seven `latin-ext` imports from `main.tsx`. Keep the
+weight set exactly as it is (mono 500/600/700, sans 400/500/600/700) — every
+one is used. Nothing else changes; `globPatterns` already scopes to `woff2`.
+
+**The one real edge case, and it is not a blocker.** `user.name` comes from
+Google and can legitimately contain a latin-ext character — a student named
+Łukasz gets a system-font `Ł` in the avatar initial and in the AvatarMenu's
+"Signed in as" line. `tailwind.config.js` already declares the fallback chain
+(`-apple-system, BlinkMacSystemFont, sans-serif`), so it renders; it just
+renders in a different face. One glyph in one header, against 120 KB on every
+install, is the right trade. **Verify it, do not assume it** — set a name with
+a latin-ext character in a local session and look at the header.
+
+**Also worth knowing (do not fix here):** `dist/` still ships 7 `.woff` files
+alongside the `.woff2` ones — but `globPatterns` is `woff2`-only, so they are
+**not** in the precache. They are deploy weight, not install weight. That is
+the residue of **W7** (§ 9.8), which investigated and correctly declined to
+hand-author `@font-face` rules. Leave it.
+
+**Test first:** this one is a build-output assertion, not a unit test. Record
+`npm run build`'s precache line before and after in this file, and confirm the
+entry count drops by 7. Expected: **49 entries / 801.93 KiB → 42 entries /
+~682 KiB**, restoring ~118 KB of headroom. If the measured number differs,
+write down what it actually was.
+
+---
+
+#### Y2 — [HIGH] The signature element ships with its ink wash missing
+
+**Where:** `components/student/StatusStamps.tsx:46` — `STAMP_BASE` contains
+`bg-current/10`.
+
+**Verified against the compiled CSS, not the source:**
+
+```
+$ grep -c "bg-current" dist/assets/*.css
+0
+$ node -p "require('tailwindcss/package.json').version"
+3.4.19
 ```
 
-The F10 timing (ask after the order exists, not during submit) is right and
-must be kept. But the result is discarded: on **grant**, nothing calls
-`pushManager.subscribe()` and nothing POSTs to `/api/push/subscribe`. The
-subscription only exists if the student *separately* taps Enable on the
-`PushNotificationSetup` card — which may never be shown again (its mount
-effect already ran; it re-checks nothing after this grant) or was suppressed
-by the install card claiming the slot (`promptCoordination.ts`).
+The class **does not exist in the shipped stylesheet.** Tailwind 3 cannot apply
+an opacity modifier to `currentColor` — there is no color channel to
+interpolate — so the utility is silently dropped at build time. No error, no
+warning, no lint failure. It has presumably never rendered.
 
-**Failure scenario:** a student places their first order, the browser asks
-"Allow notifications?", they tap **Allow**, put the phone in their pocket, and
-reasonably believe they're done. Their order goes ready; no push is ever sent
-— there is no subscription row on the server. The product's signature signal
-(§ 9.1.9: web push is the *only* screen-off signal) silently fails on the
-happy path where the student did everything right. P3's Settings screen can
-repair this manually, but nobody who believes notifications are on will ever
-go looking.
+**Why this one matters more than its size suggests:** § 9.2 names the rubber
+stamp as *the* signature element of the product and the "ready" moment as its
+emotional peak. The stamps are supposed to read as ink pressed onto paper — a
+tinted fill inside a colored ring. What actually ships is an outline: border and
+text color only, hollow interior. The `feTurbulence` distressed-ink filter, the
+per-stamp rotation, the staggered pop — all of that deliberate work is landing
+on a shape that is missing the ink itself.
 
-**Fix shape:** `lib/push.ts` already exports
-`requestNotificationPermissionAndSubscribe()` (P3 extracted exactly this
-flow). Call it here instead of the bare `Notification.requestPermission()`,
-keep the same `permission === 'default'` guard and the same fire-and-forget
-shape (`void`, never block or delay the navigate to `/order`), and swallow
-subscribe errors silently — this is opportunistic repair at a happy moment,
-not a surface that may toast an error over the order-placed celebration.
+**Failure scenario:** there is no failure *event* here, which is why it
+survived four audits. It renders, it just renders as a weaker version of the
+intended design on the one screen the product is emotionally built around.
 
-**Test first:** `Menu.test.tsx` — a successful order submit with permission
-`'default'` invokes the shared subscribe flow (mock `lib/push.ts`); with
-permission `'granted'` or `'denied'` it does not re-prompt. Confirm the first
-case fails red today (the bare `requestPermission` is called, the subscribe
-flow is not).
+**Fix shape:** the stamp colors are already per-entry data in the `STAMPS`
+table (`ink: 'border-ink text-ink'`). Add the fill there as a real token class
+per stamp — `bg-ink/10`, `bg-turmeric-pale/60`, `bg-stamp-light/50`,
+`bg-brand-light/60` — chosen to sit under the existing text color at readable
+contrast, and drop `bg-current/10` from `STAMP_BASE`. The void stamp
+(`REJECTED`/`CANCELLED`/`EXPIRED`) needs its own fill on the same line, since it
+does not come from the table.
 
-**Expected output:** the standard four deliverables.
+Do **not** solve this by upgrading Tailwind or reaching for `color-mix()` — one
+is a build-wide change far out of scope for a fill color, the other has iOS
+Safari version constraints this project has not established.
 
----
+**Look at it before and after.** This is a visual defect; the deliverable
+includes a before/after screenshot of the order-status page at 375 px in each
+of `submitted` / `preparing` / `ready` / `completed`, plus one void state.
 
-#### X3 — [MEDIUM] The shop's order modal goes stale forever
-
-**Where:** `pages/shop/Orders.tsx`, the modal render (~line 666):
-
-```ts
-order={allInProgress.find((o) => o.id === modalOrder.id) ?? modalOrder}
-```
-
-The fallback keeps the last-seen copy alive after the order has left
-`in_progress`/`awaiting_payment` entirely. Nothing ever closes or flags the
-modal.
-
-**Failure scenario:** the "two devices, one shopkeeper" reality Q5 documents
-(it has already produced two real bugs). The counter tablet has order #12's
-modal open; the owner's phone marks it paid (or rejects it). SSE refetches,
-#12 leaves the list — and the tablet's modal keeps rendering the stale copy
-with live-looking **Handover** and **Collect** buttons. Every tap 409s with an
-error toast the shopkeeper can't interpret mid-rush, and nothing on screen
-says the order is already done. The same happens single-device if an order
-expires while the modal is open.
-
-**Fix shape:** when `modalOrder` is set but the id is no longer in
-`allInProgress` **and** `ordersQuery` is not fetching (don't flicker during a
-refetch), replace the modal's body with a terminal notice in the § 9.2 voice —
-"Order #12 was completed on another device." / "यह ऑर्डर दूसरी डिवाइस पर पूरा
-हो गया।" — with a single Close action; or auto-close with a toast carrying the
-same sentence. Pick one, say why in the code. No new endpoint; the information
-is already in the query result.
-
-**Test first:** `Orders.test.tsx` — open the modal for an order, update the
-query data so the order is gone, assert the handover/collect controls are no
-longer rendered and the terminal notice (or close+toast) is. Confirm red
-today: the current render keeps the stale buttons.
-
-**Expected output:** the standard four deliverables.
+**Test first:** `StatusStamps.test.tsx` (new) — assert each landed stamp
+carries a fill class that is present in the compiled stylesheet. The honest
+version of this test is a **build-output assertion**: `grep` the generated CSS
+for each class the component emits. A test that only asserts the className
+string is on the element would have passed against the broken code too, which
+is the whole trap here. Confirm it fails red today.
 
 ---
 
-#### X4 — [MEDIUM] Toasts: a ~20 px dismiss target and a 5 s flat timeout
+#### Y3 — [HIGH] Every dialog announces as an unnamed "dialog"
 
-**Where:** `components/ui/Toast.tsx`.
+**Where:** `components/ui/Modal.tsx:100-104`.
 
-Two measured problems:
+The dialog element carries `role="dialog"` and `aria-modal="true"` but no
+`aria-labelledby` or `aria-label`. The `title` prop renders into a plain `div`
+at line 109 with no `id`.
 
-1. The dismiss button is a `✕` text glyph with `p-0.5` — a tap target of
-   roughly 20 px, on the surface most often tapped in a hurry. § 9.1.2's 44 px
-   floor applies to every control; the codebase's own idiom for this exact
-   button (`PushNotificationSetup.tsx:119`) is a 44 px hit area around a small
-   SVG.
-2. `AUTO_DISMISS_MS = 5000`, flat, for every variant. The toasts this app
-   sends through the `error` path include the highest-stakes copy it has —
-   *"2 items removed from your order: … — new total ₹140"*
-   (`StudentRealtime.tsx`), *"Couldn't mark Paneer Roll out of stock — set
-   them manually on the Menu tab"* (`Orders.tsx`). Five seconds is not enough
-   to read a two-clause sentence with numbers while walking; the information
-   is gone with no way to get it back.
+**Failure scenario:** a student using VoiceOver taps **View cart**. The screen
+reader announces "dialog" — nothing else. It does not say "Your order." The
+same is true of every overlay in the app, because they all go through this one
+component (§ 9.1.3 mandates that): checkout, the reject checklist, the order
+modal, every `ConfirmDialog`, the cancel-order confirmation. One missing
+attribute, every dialog in the product.
 
-Also worth folding in while here: the container sets `aria-live="polite"` *and*
-each toast sets `role="alert"` (which implies `aria-live="assertive"`) — pick
-one announcement path so screen readers don't get double-announced or
-wrongly-prioritized toasts; and the list is unbounded — a burst of SSE events
-can stack toasts past the viewport. Cap the visible stack (3 is plenty) and
-drop the oldest.
+**Fix shape:** `useId()` for a title id (the same hook `StatusStamps` already
+uses for its filter id), put it on the title `div`, and point
+`aria-labelledby` at it. When `title` is absent, fall back to `aria-label`
+rather than pointing at an id that does not exist — a dangling `aria-labelledby`
+is worse than none. If `subtitle` is present, wire it to `aria-describedby`
+with a second id.
 
-**Fix shape:** 44 px dismiss target using the shared X stroke-SVG (see X5 —
-coordinate; X4 lands first and X5's sweep then has one fewer glyph to chase).
-Variant-aware duration: `error` gets ~10 s, `success`/`info` keep 5 s — do
-**not** make errors persistent-until-dismissed; a permanently stuck toast over
-the top of the screen is its own § 9.1 problem. One `aria-live` strategy.
-Stack cap.
-
-**Test first:** extend/create the Toast test — error variant's timeout is the
-longer one; the dismiss button carries the 44 px classes; a 4th toast evicts
-the 1st. Red today on all three.
-
-**Expected output:** the standard four deliverables.
+**Test first:** `Modal.test.tsx` (new) — a modal with a title exposes an
+accessible name matching it (`getByRole('dialog', { name: 'Your order' })`); a
+modal with no title still exposes a non-empty name and no dangling
+`aria-labelledby`. Confirm both fail red today.
 
 ---
 
-#### X5 — [MEDIUM] Text glyphs are standing in for icons
+#### Y4 — [HIGH] The student's menu row is a generic delivery-app list item
 
-**Where (verified occurrences):** `Toast.tsx:64` (`✕` dismiss),
-`OrderModal.tsx:119` (`✓ Handed over`), `Orders.tsx` `ItemStatusDots` (`✓`
-inside the dot), `Menu.tsx:372` (`→` on the active-order banner),
-`Orders.tsx:420` (`→` on "Tap to manage"), `OrderStatus.tsx` / `MenuItemCard.tsx`
-(`★` for ratings).
+**Where:** `components/student/MenuItemCard.tsx`.
 
-§ 9.2 rules out emoji-as-icon, and the app already has a consistent
-hand-drawn stroke-SVG language (`Layout.tsx`'s `Icon`, `EmptyStateIcons.tsx`,
-the search/clear SVGs in `Menu.tsx`) — these glyphs predate it. Text glyphs
-render differently per platform font (Android's `✓` is not iOS's), don't
-scale with the stroke weight of the surrounding icon set, and read as
-unfinished next to the drawn icons.
+**The gap.** Every distinctive surface in this app came from a real object —
+the chit, the chalkboard, the ledger, the token. The menu row did not. It is
+`[64px photo][name, price, badge][stepper]`: the same row shape as every food
+delivery app, which is precisely the styling § 9.2 forbids. It is also the
+single most-looked-at surface in the product — a student sees twenty of these
+before they see anything else.
 
-**The one deliberate exception:** the rating `★`. A typographic star for
-ratings is a real convention and it appears inside running text. Decide it —
-either draw a small star in the stroke language (preferred: it appears in
-`RatingPrompt` as a 44 px *control*, where "icon" clearly applies) or record
-here that the text star stays, and why. Do not leave it undecided.
+Three concrete problems, at 375 px:
 
-**Fix shape:** replace each occurrence with an inline stroke SVG matching the
-established language (`strokeWidth` 1.7–1.9, `strokeLinecap="round"`), sized
-to the text it sits beside. No new icon file/library — these are one-path
-inline SVGs like every existing one. Zero layout change; this is a
-same-size swap.
+1. **The stepper occupies 128 px of a 343 px row, permanently** (44 + 40 + 44),
+   showing `− 0 +` on every item the student has not ordered. A third of the row
+   is spent on a control that is doing nothing.
+2. **The price is a small mono figure jammed into a wrap-prone flex row** with
+   the rating and the status badge. On a long Hindi-transliterated name the
+   price wraps to its own line and the row loses its rhythm.
+3. **Nothing on the row is answerable to "what is this in a real canteen?"**
+   (§ 9.2).
 
-**Test first:** no meaningful unit test for glyph identity — the deliverable
-is the sweep itself plus a grep proving the app's TSX contains no remaining
-`✕`/`✓`/`→`/`★` used as a control or status mark (running-prose arrows in
-comments/strings like "Waiting → Cooking" are copy, not icons, and stay).
-Existing tests asserting on `✓`-containing strings must be updated, not
-deleted. **Run last in any shared-file sequence** (see the sequencing note in
-the table above).
+**What to build.** The object is the **menu board**: name on the left, price on
+the right, leader dots running between them. That is how a canteen board, a
+printed menu card, and a ledger line have all set a name against a price for a
+century, and it solves problem 2 outright — the price anchors right at a fixed
+position, the name truncates into the leader, and the row's rhythm holds at any
+name length. Leader dots cost one element and a `repeating-linear-gradient` or a
+dotted `border-bottom` on a `flex-1` spacer; no new token, no new dependency.
 
-**Expected output:** the standard four deliverables, with the grep result
-pasted into this file in place of a red test.
+And collapse the stepper: until `qty > 0`, render a single **Add** control at
+the existing 44 px target. Tapping it sets qty to 1 and swaps in the full
+stepper (which then behaves exactly as it does today, including going back to
+**Add** at zero). That returns ~84 px of row width to the name and the price.
+This is a well-worn pattern precisely because it is right — the affordance
+matches the state.
 
----
+**Constraints.** Stay inside the tokens (§ 9.1.10) — no new grays, radii or
+shadows. The veg/non-veg mark keeps leading the name, as it does on any Indian
+menu board. Keep the rating display as running-prose text with its `★`, which
+is the exception § 9.11-X5 deliberately carved out (the *interactive* rating
+control is SVG; the read-only display stays text). The dimmed-when-unorderable
+treatment must survive, and an out-of-stock item must not offer an **Add**
+button at all. `FavoriteToggle` stays where it is.
 
-#### X6 — [MEDIUM] Checkout is a generic modal on the product's most important action
+**Spend the boldness here and nowhere else in this series.** The leader-dot
+row is the one memorable move; everything around it stays quiet.
 
-**Where:** `pages/student/Menu.tsx`, the `showCheckout` modal (~line 606).
+**Watch the budget:** this is student-path code, on the initial chunk. Measure
+it. Y1's headroom is what makes it affordable.
 
-**The gap:** every surface in this app was derived from a real canteen object
-(§ 9.2) — the ticket, the chalkboard, the ledger, the stamps. Checkout is the
-moment the student's choices *become a chit*, the single action the whole
-product funnels toward — and it renders as a default list, a Total row, and a
-button. `Login.tsx` already has the exact idiom this moment deserves: the
-`ticket-notch` dashed-border paper card. The order ticket (`OrderTicket`) is
-what this modal *produces*, and nothing about it says so.
+**Test first:** extend `Menu.test.tsx` — an item at qty 0 renders **Add** and
+no stepper; tapping **Add** sets qty 1 and renders the stepper; decrementing to
+0 returns to **Add**; an unorderable item renders neither an enabled **Add**
+nor an enabled increment. Confirm the first two fail red today.
 
-**What to build** (inside the existing `Modal` — § 9.1.3, it is already a
-bottom sheet on phones; this task restyles the modal's *content*, it does not
-build a new overlay):
-
-- The item list set as chit lines: name left, mono price right, on `paper`
-  with `edge` hairlines — the components and tokens all exist.
-- The total set in the mono display voice at real size — it is the number the
-  student will hand cash over for (H1 is the shopkeeper's side of this same
-  number).
-- One quiet line under the Place-order button in the § 9.2 voice telling the
-  student what happens next: "You'll get a token number — pay at the counter
-  when you pick up." Active voice, no jargon, English-only (student surface).
-- The dashed `ticket-notch` treatment from `Login.tsx` on the sheet's content
-  frame, so the thing being confirmed visibly *is* the chit.
-
-**Constraints:** no new tokens, no new components beyond what this composes,
-no gradient/glass anything (§ 9.2), `Place order` stays the only primary
-action and keeps its exact behavior including the disabled/paused states and
-V3/H3's `expected_total` wiring when that lands (coordinate if H4/H3 are in
-flight — same file). Budget: this is class-string work; the § 9.1.8 number
-should not move by more than noise. Verify and record it.
-
-**Test first:** existing `Menu.test.tsx` checkout tests stay green (behavior
-is untouched). The design deliverable is **before/after screenshots at
-375×667**, including the paused-shop and disabled states, recorded in this
-file.
-
-**Expected output:** deliverables 2–4 of the standard four, plus the
-screenshots in place of a new red test.
+**Also:** before/after screenshots at 375 px with (a) a short English name,
+(b) a long name that currently wraps, (c) an out-of-stock item.
 
 ---
 
-#### X7 — [LOW] The student's pay-at-counter banner is a plain colored box
+#### Y5 — [HIGH] The shop's History page is the business, rendered as three stat cards
 
-**Where:** `pages/student/OrderStatus.tsx`, the `awaiting_payment` branch
-(~line 81) — a turmeric rounded box: "Pay ₹140 at the counter."
+**Where:** `pages/shop/History.tsx`.
 
-**Why it matters (kept honest — this is LOW):** it works and it's clear. But
-it is the student's half of the cash moment H1 is building for the shopkeeper,
-and it's the one status banner still in the generic-box voice while `ready`
-got the full stamp treatment. The student shows this screen at the counter
-while paying — the amount is the payload and it's currently body-size.
+**The gap.** This page answers "how much did I collect today" and stops. What
+a canteen operator actually needs from a day is its *shape*: when the rush hit,
+how long it lasted, whether today's rush came earlier than yesterday's. That
+decides when to start cooking, when to take the break the shop-status control
+already supports, and how much to prep. None of it is on the screen. The one
+visual on the page is the five-row proportional bar under "Top items" (G6),
+which is good and is the idiom to extend.
 
-**Fix shape:** keep the banner's position and turmeric family. Set the amount
-in the large mono display voice (tabular figures, same scale discipline as
-`ReadyBanner`'s countdown), the words around it small. If a stamp-language
-touch is added, it must come from the existing `animate-stamp`/`StatusStamps`
-idiom, not a new visual idea. Ten lines of class changes, not a component.
+**The data is already there — no backend change.** `getShopHistory(date)`
+returns `orders: Order[]`, each with `created_at`, `paid_at`, `total_price`
+and `items[]` (`qty`, `price_each`). Everything below is derived client-side
+from a payload the page already fetches:
 
-**Test first:** existing `OrderStatus.test.tsx` assertions on the banner copy
-stay green; deliverable is before/after screenshots at 375×667 recorded here.
+- Orders per half-hour across the day, from `created_at`.
+- Revenue per half-hour, from `paid_at` + `total_price`.
+- Revenue per item, from `items[]` — which the existing `insights.item_counts`
+  cannot give you, since it carries qty only. The item that sells most is often
+  not the item that earns most, and that is exactly the thing worth showing a
+  shopkeeper.
 
-**Expected output:** deliverables 2–4 of the standard four, plus screenshots.
+**What to build — derive the form from the counter, not from a chart library.**
+A canteen's record of its own day is the **spike**: the spindle by the register
+that finished chits get impaled on, growing through the day. Draw the day as
+columns of stacked chits — each half-hour is a column, each order in it a small
+kraft rectangle with an ink hairline, stacked upward. The height *is* the count,
+and at canteen volumes (tens of orders a day, not thousands) a shopkeeper can
+literally count them. Past a threshold per column, degrade gracefully to a solid
+`paper` bar with the mono count above it rather than rendering 200 rectangles.
+
+Label the axis in the hours a canteen actually thinks in, not clock ticks —
+the lunch rush band should be legible at a glance. The existing `ink`
+chalkboard block (`PrepSummaryStrip`, `PrepRow`'s tally) is the established
+surface for "the kitchen's own numbers"; this belongs in that language.
+
+**Rules.** Hand-drawn SVG or flex divs only — **no charting library**, see the
+series preamble. Hindi pairs on every new string (§ 9.1.11). No horizontal page
+scroll at 375 px: the day strip scrolls inside its own `overflow-x-auto`
+container (and if you add one, Y8 applies to it — make it keyboard-reachable
+from the start). The numbers stay the accessible content; the bars are
+decoration and get `aria-hidden`, exactly as G6's existing bar does. Shop-only
+code — it must not reach a student's bundle.
+
+**Do not invent a comparison you cannot compute.** The endpoint serves one day
+at a time. "Busier than yesterday" needs a second fetch and is a real product
+decision, not a styling one — if you want it, record it in § 9.6 and stop. This
+task is today's shape only.
+
+**Test first:** `History.test.tsx` (new) — a fixture day of orders across
+several half-hours produces the right per-bucket counts; an empty day renders
+the existing empty state and no chart; the revenue-per-item ordering differs
+from the qty ordering for a fixture where a low-volume item earns most (that is
+the assertion that proves the derivation is real and not a re-skin of
+`item_counts`). Confirm they fail red today.
+
+---
+
+#### Y6 — [MEDIUM] Accept with nothing checked submits an "accept" that rejects everything
+
+**Where:** `pages/shop/Orders.tsx` — `IncomingOrderCard`, `acceptMutation`
+(line ~159): `const rejectedItems = pendingItems.filter((i) => !checked[i.id])`.
+
+Every pending item starts checked. Unchecking one marks it out of stock and
+drops it from the order — that is the intended flow and the card's own copy
+explains it. But there is no floor: uncheck **all** of them and **Accept**
+stays enabled, sending an accept whose `rejected_item_ids` is the entire order.
+
+**Failure scenario:** 12:47, the rush. The shopkeeper is out of everything on a
+two-item order and unchecks both, reading the tick as "do I have this?" rather
+than "keep this." They tap **Accept**. Depending on how the backend handles a
+fully-rejected accept, the student either gets an order containing nothing or a
+rejection that arrived through the accept path — and the shopkeeper believes
+they accepted an order. Either way the two ends of the counter now disagree, and
+the shopkeeper's mental model of the control is wrong in a way nothing on screen
+corrects.
+
+**Check the backend before choosing the fix.** `V4` (§ 9.3, landed) tightened
+`Accept`'s handling of `rejected_item_ids`; read what it actually does with a
+full set now. If it already 400s, this is purely a client-side affordance
+problem. If it does not, say so in your write-up — a backend guard would be
+V-series scope, not this task's.
+
+**Fix shape:** when nothing is checked, the action is a rejection and the UI
+should say so. Either disable **Accept** with a one-line reason under it
+("Nothing left to accept — use Reject"), or relabel the button to **Reject**
+and route it through `rejectMutation` so the student gets the rejection path
+they should get. Prefer the first: silently changing what a button does under
+the shopkeeper's finger during a rush is worse than disabling it. Keep the
+Hindi pair.
+
+**Test first:** extend `Orders.test.tsx` — unchecking every item on a two-item
+incoming card disables **Accept** and shows the reason; `acceptOrder` is never
+called; one item checked leaves it enabled. Confirm it fails red today.
+
+---
+
+#### Y7 — [MEDIUM] `Modal` sizes to `vh` on a codebase that already knows better
+
+**Where:** `components/ui/Modal.tsx:104` — `max-h-[92vh]` / `sm:max-h-[88vh]`.
+
+`index.css:15` sets `#root { min-height: 100svh }` — this project already
+established that `vh` is the wrong unit on mobile Safari, and then used `vh` in
+the one component that renders as a full-width bottom sheet.
+
+**Failure scenario:** a student in mobile Safari (not the installed PWA — a
+first-time student who followed a link, which is *every* student before they
+install) opens checkout with five items. `100vh` on iOS Safari is the viewport
+*without* the URL bar, so `92vh` can exceed what is actually visible. The
+sheet's footer — carrying the total and **Place order** — sits under the
+browser chrome. The content area scrolls, so it is recoverable, but the
+primary action is off-screen at the moment of purchase.
+
+**Fix shape:** `max-h-[92dvh]` / `sm:max-h-[88dvh]`. `dvh` is supported on iOS
+Safari 15.4+ and every Chromium the project targets. `svh` is the safer
+under-estimate but produces a visibly short sheet on desktop; `dvh` is the right
+unit for a sheet whose height should track the visible viewport.
+
+**Do not claim you verified this on iOS unless you held the phone** (§ 12.8).
+A DevTools device emulator does not reproduce the URL-bar behavior. "This is
+the correct unit and it renders identically in Chrome DevTools at 375×667" is
+an honest report; "fixed on iOS" is not, without D-6.
+
+**Test first:** `Modal.test.tsx` — assert the rendered class list carries the
+`dvh` values. This is a weak test and jsdom cannot evaluate viewport units;
+say so rather than dressing it up. The real deliverable is the reasoning plus a
+desktop-Safari check that the sheet still sizes sanely.
+
+---
+
+#### Y8 — [MEDIUM] Four horizontal rails are unreachable by keyboard
+
+**Where:** `components/student/TrendingRail.tsx:46`,
+`components/student/FavoritesRail.tsx:38`, `components/student/MenuSkeleton.tsx:56`,
+`pages/student/Menu.tsx:533` (the sticky category chip strip).
+
+All four are `overflow-x-auto` containers with no `tabIndex`. A scrollable
+region that is not focusable cannot be scrolled by keyboard — WCAG 2.1.1.
+
+**Failure scenario:** "Ordering right now" shows five chits and roughly two and
+a half fit at 375 px. A keyboard or switch-control user can Tab *into* the
+steppers inside the rail, and the browser will scroll the container to reveal
+the focused control — so the items are reachable *by accident of their being
+focusable*. The category strip is the real break: its chips are buttons, so
+the same accidental path exists, but the `MenuSkeleton` rail contains nothing
+focusable at all, and a rail of read-only chits would be entirely
+unreachable. The pattern is wrong in all four places and only accidentally
+survivable in three.
+
+**Fix shape:** `tabIndex={0}` plus an accessible name on each scroll container
+(`role="group"` with `aria-label`, or point at the heading each rail already
+has — `TrendingRail` and `FavoritesRail` both already carry
+`aria-labelledby` on their `<section>`, so reuse those ids). Add a visible
+focus ring — `:focus-visible` is already styled globally in `index.css:22`, so
+this comes free once the element is focusable. The skeleton rail is
+decorative: `aria-hidden` it instead, which is the more honest fix there.
+
+**Test first:** extend `Menu.test.tsx` — each rail container is focusable and
+has a non-empty accessible name; the skeleton rail is hidden from the
+accessibility tree. Confirm red today.
+
+---
+
+#### Y9 — [MEDIUM] The most-tapped control in the app is still text glyphs, and silent
+
+**Where:** `components/ui/QtyStepper.tsx:31,42` — `−` (U+2212) and `+` set as
+`text-xl font-bold` text.
+
+**Two problems in one 46-line component.**
+
+**The glyphs.** § 9.11-X5 swept text glyphs to inline stroke SVGs across six
+files and explicitly listed which exceptions it was keeping. `QtyStepper` was
+not in the sweep and is not in the exception list — it was simply missed. It is
+also the highest-traffic control in the product: it is on every menu row, both
+rails, the checkout sheet, the prep board, and the shop's handover modal. A
+minus sign and a plus sign set in a text face at 20 px render at different
+optical weights and different vertical centering on iOS vs Android vs desktop —
+which is the exact reason X5 exists.
+
+**The silence.** The value `<span>` has no accessible name and no live region.
+A screen-reader user taps **Increase quantity**, and nothing is announced — the
+button's own label does not change, and the number that did change is not in a
+live region. There is no way to know the current quantity without navigating to
+the span. The app has the machinery for this already: `lib/liveAnnouncer.ts`
+and the `LiveRegion` in `Layout.tsx` (G7).
+
+**Fix shape:** swap both glyphs for inline stroke SVGs in the established
+language (`viewBox="0 0 24 24"`, `stroke="currentColor"`, `strokeWidth` and
+`strokeLinecap` matching the X5 sweep's icons — see `Toast.tsx` or `Modal.tsx`
+for the reference shape). For the announcement, give the value span an
+`aria-live="polite"` and an accessible label naming what it counts, or route
+through `liveAnnouncer` — prefer the local live region here, since the stepper
+can appear many times on one page and a global announcer would need to
+disambiguate which one changed.
+
+Also worth fixing while you are in here: `max` defaults to 20 and the `+`
+simply goes `disabled:opacity-30` on reaching it, with no explanation. One
+quiet line, or nothing — but decide deliberately rather than leaving it silent.
+
+**Test first:** `QtyStepper.test.tsx` (new) — both controls render an `svg`
+and no text glyph; the value is exposed in a live region with an accessible
+name; increment/decrement respect `min`/`max`/`disabled`/`disableIncrease`
+(regression cover for the existing behavior, which must not change). Confirm
+the first two fail red today.
+
+---
+
+#### Y10 — [MEDIUM] A drag inside a modal closes it
+
+**Where:** `components/ui/Modal.tsx:93-97` — the backdrop div carries
+`onClick={onClose}`; the sheet stops propagation at line 103.
+
+That guard handles a *click* on the sheet. It does not handle a drag: press
+inside the sheet, move the pointer past its edge, release. The browser fires
+`click` on the nearest common ancestor of `mousedown` and `mouseup` — the
+backdrop — and the modal closes.
+
+**Failure scenario:** the checkout sheet, on a phone, at the QtyStepper. A
+student presses `+`, their thumb slides a few pixels off the button and past
+the sheet edge as they lift — a routine imprecision on a 44 px target held
+one-handed. Checkout closes. Their cart is intact, so this is an annoyance
+rather than data loss, but it happens at the exact moment they are adjusting
+their order, and it will read as the app being flaky.
+
+**Fix shape:** only close when the interaction both starts and ends on the
+backdrop. Record the `pointerdown`/`mousedown` target and close on click only
+if that target was the backdrop itself. Do not switch to closing on
+`mousedown` — that breaks a legitimate click-to-close that begins on the
+backdrop and is more surprising still.
+
+**Test first:** `Modal.test.tsx` — a `mousedown` inside the sheet followed by a
+`mouseup`/`click` on the backdrop does **not** call `onClose`; a full click on
+the backdrop does. Confirm the first fails red today.
+
+---
+
+#### Y11 — [MEDIUM] The student watches an order with no sense of elapsed time
+
+**Where:** `pages/student/OrderStatus.tsx` — `ActiveOrderView`.
+
+**The gap.** The page shows the token, the stamps, the items, the total. Once
+the order is `ready`, `ReadyBanner` runs a real countdown — the one moment on
+the page with a live figure. Everything before that is static: a student who
+ordered at 12:47 and is waiting has no idea whether it has been two minutes or
+eleven, and refreshing tells them nothing new. `Orders.tsx` already computes
+and displays order age for the *shopkeeper*; the student, who is the one
+actually waiting, does not get it.
+
+**What to build.** The chit is a physical object that gets *punched* with a
+time at the counter. Put that on the ticket: the time the order was placed, and
+the time elapsed since, in the mono chit voice — one line, at label scale, under
+the token. It ticks live off the same one-interval-per-page pattern
+`ReadyBanner` already uses (do not add a timer per item). As the order moves
+through the stamps, the elapsed figure is the only thing that changes, and that
+is the point: it makes the page feel alive while nothing is happening, which is
+exactly the interval students currently spend re-opening the app.
+
+**Do not invent an ETA.** There is no prep-time data anywhere in this system —
+not in the menu, not on the order, not in the backend. A "ready in ~8 min"
+figure would be fabricated, and a wrong ETA at a canteen counter is worse than
+no ETA (§ 9.2: errors never mislead; the same holds for predictions). Elapsed
+time is a fact. Show the fact.
+
+**Rules.** Reduced motion: the figure updates, it does not animate. Do not
+compete with `ReadyBanner` — once the order is `ready`, the countdown is the
+hero and the elapsed line should recede or go away. Keep the interval cleaned
+up on unmount. Student-facing copy is English-only (§ 9.1.11).
+
+**Watch the budget:** student-path code, initial chunk. Small, but measure it.
+
+**Test first:** extend `OrderStatus.test.tsx` — an order created 6 minutes ago
+renders an elapsed figure of 6 minutes; the figure advances on a faked timer
+tick; a `ready` order does not render two competing timers; the interval is
+cleared on unmount. Confirm red today.
+
+---
+
+#### Y12 — [LOW] `markAsRated` writes to `localStorage` unguarded
+
+**Where:** `pages/student/OrderStatus.tsx:505-512`.
+
+The paired *read* three lines above is wrapped in `try/catch` (line 497-503);
+the write is not. Every other `localStorage` write in this codebase is guarded
+— `Menu.tsx`'s diet filter (line 79-85) and favorites (line 102-108) both
+catch, with a comment naming the private-browsing/quota case.
+
+**Failure scenario:** Safari private browsing, or a phone at its origin quota.
+The student submits a rating; `submitRatings` succeeds; `onDismiss` fires;
+`markAsRated` throws inside a React event handler. The throw escapes into
+`ErrorBoundary` and the student loses the page after a *successful* rating —
+the one interaction in the product that is pure goodwill.
+
+**Fix shape:** wrap the write, matching the existing idiom and comment style in
+`Menu.tsx`. Keep the `setRatedOrders` state update outside the `try` so the
+prompt still dismisses for this session even when persistence fails.
+
+**Test first:** extend `OrderStatus.test.tsx` — with `localStorage.setItem`
+stubbed to throw, dismissing the rating prompt does not throw and the prompt
+still disappears. Confirm red today.
+
+---
+
+#### Y13 — [LOW] Top-items bar computes `NaN%` width on an all-zero day
+
+**Where:** `pages/shop/History.tsx:230` —
+`const maxQty = Math.max(...topItems.map((ic) => ic.qty))`, then
+`width: ${Math.max((ic.qty / maxQty) * 100, 6)}%`.
+
+If every returned `qty` is `0`, `maxQty` is `0`, `0/0` is `NaN`,
+`Math.max(NaN, 6)` is `NaN`, and the style is `width: NaN%` — an invalid
+declaration the browser drops, leaving the bar at its default width inside a
+`w-full` track. The panel is gated on `insights.order_count > 0`, so this
+requires completed orders whose item quantities are all zero — reachable if
+every item on the day was removed or fully rejected before payment. Narrow, and
+worth one line.
+
+**Fix shape:** guard `maxQty` to at least 1 before dividing. Fold this into
+Y5's agent — same file, and Y5 is rewriting the panel around it anyway.
+
+**Test first:** extend Y5's `History.test.tsx` — a fixture where every
+`item_counts[].qty` is 0 renders bars with a valid width and does not emit
+`NaN`. Confirm red today.
+
+---
+
+#### Y14 — [LOW] Every loading skeleton is `aria-hidden` with nothing in its place
+
+**Where:** `pages/shop/History.tsx:72` and `pages/shop/MenuManage.tsx:42,61`
+carry an explicit `aria-hidden="true"`; `Prep.tsx`, `Orders.tsx`,
+`OrderStatus.tsx` and `MenuSkeleton.tsx` render skeletons that are decorative
+in effect but announce their placeholder divs as nothing useful.
+
+Hiding a skeleton from the accessibility tree is correct. Hiding it and
+announcing nothing instead is not: a screen-reader user gets silence between
+navigation and data, on a network § 9.1.7 explicitly describes as hostile.
+Silence is indistinguishable from a broken page.
+
+**Fix shape:** one small shared piece rather than seven ad-hoc ones — the app
+already has `LiveRegion` in `Layout.tsx` and `lib/liveAnnouncer.ts` (G7). Either
+announce "Loading <thing>" through the existing announcer when a page enters its
+loading branch, or give each skeleton an `sr-only` status element with
+`role="status"`. Prefer the `sr-only` `role="status"`: it is local to the
+skeleton, disappears with it, and needs no cleanup — the global announcer would
+need a matching "loaded" call on every exit path.
+
+Keep `aria-hidden` on the visual bones. Every skeleton gets the same treatment,
+so the behavior is consistent across both roles.
+
+**Test first:** extend the existing page tests — each page in its loading state
+exposes a status message; in its loaded state it does not. Confirm red today.
+
+---
+
+#### Y15 — [LOW] The shopkeeper cannot see how deep the queue is
+
+**Where:** `pages/shop/Orders.tsx`.
+
+**Read § 9.4-H5 first.** H5 adds oldest-waiting-time to the *prep board*. This
+is the same question on the *orders* screen, and the two must end up in one
+visual language rather than two independent inventions of "how urgent is this."
+If H5 has not landed yet, whoever does it second inherits the first one's idiom.
+
+**The gap.** Order age exists on the incoming card (`formatOrderAge`, F18) and
+escalates by text color at 5 and 10 minutes — turmeric, then stamp. That tells
+the shopkeeper about *one* order at a time. It does not answer the question
+they actually have at 12:47: how deep am I, and who has been waiting longest?
+Both answers require counting cards.
+
+**What to build.** The chalkboard strip, in the idiom `PrepSummaryStrip`
+already established (`ink` background, `paper` mono digits) — the count waiting
+and the oldest wait, at tally scale, above the incoming column. If you add a
+per-order age visual, keep it to the existing 5/10-minute escalation and do not
+introduce a third urgency level: H5's entry makes the point that a red "late"
+badge in a kitchen becomes wallpaper within a day, and it applies here just as
+well.
+
+**Rules.** Hindi pairs on every new string. `useTicker(30_000)` already runs on
+this page — reuse it, do not add a second interval. Shop-only code. No new
+tokens.
+
+**Test first:** extend `Orders.test.tsx` — the strip reports the incoming count
+and the oldest age from a fixture; an empty incoming list renders no strip (not
+a zero); the existing empty state still renders. Confirm red today.
+
+---
+
+#### Y16 — [LOW] Every price carries `.00` on a menu with no paise
+
+**Where:** `lib/format.ts:3-5` — `formatPrice` is
+`` `₹${(paise / 100).toFixed(2)}` ``, unconditionally.
+
+Canteen prices are whole rupees. The result is `₹40.00` everywhere, including
+the places § 9.11-X6 and X7 deliberately promoted to display scale: the
+checkout total at `text-3xl`, the pay-at-counter amount at `text-4xl`, the
+history header at `text-2xl`. At that size the `.00` is a third of the figure's
+width, spent on two zeros that are always zeros, and it reads like a Western
+storefront rather than a chit.
+
+**Fix shape:** drop the fraction when the amount is a whole rupee; keep two
+decimals when it is not (nothing forbids a ₹12.50 item, and silently truncating
+money is not an option). One function, and every call site inherits it —
+`formatPrice` is the only price formatter in the app, which is why this is a
+one-file change and worth doing.
+
+Leave `paiseToRupeesInput` alone: it feeds a `type="number"` form field in
+`MenuManage.tsx` and wants its fixed two decimals.
+
+**Test first:** extend `format.test.ts` — whole rupees render without a
+fraction; a non-whole amount keeps both decimals; zero renders as `₹0`. Confirm
+red today. Then grep for tests asserting on `.00` strings and update them —
+this changes text several existing tests match on, and that fallout is part of
+the task.
 
 ---
 
@@ -2762,10 +2315,10 @@ CORS pinned to `FRONTEND_ORIGIN` (no wildcard); `ParseToken` uses
 **Read § 9.1 and § 9.2 before any frontend change. Read the task's own section
 before starting it — the "Fix shape" and "Test first" lines are the spec.**
 
-1. **One task at a time.** Every V/H/Q task lists the files it owns. Do not
-   touch files another task owns; where two tasks share a file (V8/V10 share
-   `repository/gorm.go`; V5/V9 share `push.go`), either sequence them or give
-   both to one agent.
+1. **One task at a time.** Every task lists the files it owns. Do not touch
+   files another task owns; where two tasks share a file, either sequence them
+   or give both to one agent. The § 9.12 Y-series has several of these — see
+   its own sequencing note and the bundle table below.
 2. **Test first, and prove it fails.** Write the regression test, run it against
    the *unfixed* code, and confirm it fails for the right reason (`git stash` on
    just the implementation file is the established technique here). A test that
@@ -2775,9 +2328,17 @@ before starting it — the "Fix shape" and "Test first" lines are the spec.**
 4. **Commit split by stack**, one commit per stack per round — the standing
    convention. Descriptive messages; `git log` is the history of record.
 5. **Update this file as you land work.** Move the task from its backlog into a
-   one-line record, and update the bundle number in § 9.1.8 whenever `npm run
-   build` changes it. If a task turns out to be a non-defect (V8 may), record
-   that verdict here rather than deleting the entry.
+   one-line record in its section's status table, delete the long write-up, and
+   update **both** numbers in § 9.1.8 whenever `npm run build` changes them.
+   If a task turns out to be a non-defect, record that verdict as its row
+   rather than deleting the entry — a finding that was investigated and
+   dismissed is worth as much as one that was fixed, and stops the next audit
+   re-finding it. § 9.3 and § 9.11 are what a fully-collapsed section looks
+   like.
+
+   **Do not renumber sections.** Source comments cite them (`STATUS.md
+   § 9.11-X2` in `Menu.tsx`, `§ 9.11-X5` in `Modal.tsx`). A completed series
+   keeps its number; new work takes the next one.
 6. **Do not start anything in § 9.6.** It is a decision list, not a queue.
 7. **If a task's premise turns out to be wrong,** say so and stop rather than
    inventing adjacent work. The audit that produced these was thorough but not
@@ -2791,34 +2352,44 @@ before starting it — the "Fix shape" and "Test first" lines are the spec.**
 
 **Parallelization guidance:**
 
-*Pre-existing backlogs.* V1–V7 are independent of the H-series and can run
-concurrently with it. Within § 9.4, **H2 must land before H1**. **V3 must land
-before H3.** Q1 and Q2 are independent of everything and are the best first
-tasks for an agent with no prior context on this codebase.
+Bundles A, B, C and L are complete and were removed on 2026-07-28 — see § 9.7,
+§ 9.8, § 9.10 and § 9.11 for what landed. What remains, plus the new § 9.12
+work, groups as follows. **Give each bundle to one agent**; shared files are
+what the grouping is for.
 
-*The 2026-07-27 backlogs (§ 9.7–§ 9.10).* Shared files make the grouping matter
-more than usual here — **give each bundle below to one agent**:
+**Y1 goes first, alone, before anything in bundles M–Q.** It is the precache
+reclaim (§ 9.12), it touches one file nothing else touches, and every design
+task's bundle measurement is meaningless until it lands.
 
 | Bundle | Tasks | Why they group | Status |
 |---|---|---|---|
-| **A — service worker** | **W1** → W9, then W6/W7 | All own `src/sw.ts` / `vite.config.ts`. W1 is correctness and goes first; W6 is bytes. | **DONE (2026-07-27)** — W1/W6/W9 fixed, W7 investigated (no change, see § 9.8). |
-| **B — edge headers** | **W2** + P7 + **S1** + **S2** | One `header` block in `deploy/Caddyfile`. Four separate findings, one file, one `curl -I` verification pass. | **DONE (2026-07-27)** — all four fixed, local-verified (`caddy validate` + local `curl -I`); real-domain `curl -I` still needs D-6. |
-| **C — Settings & install** | **P1** → **P2** → P3, P6 | P1 builds the screen everything else mounts into. P2 creates `lib/install.ts`, which P6 extends and P5 consumes. | **DONE (2026-07-27)** for P1/P2/P3/P6. **P5 still open** — it consumes `lib/install.ts`, which now exists; pick it up any time. |
-| **D — login screen** | P5 + **S3** | Both edit `pages/Login.tsx`. § 12.1 — sequence or single-agent, no exceptions. | Open, unstarted. S3 needs real operator/contact facts from the owner before writing — do not fabricate. |
-| **E — manifest** | **P4** | Independent of everything; only conflict is `globPatterns`, and only if W6 (bundle A) lands first — **W6 has now landed**, so P4 must check `globPatterns` before adding screenshot patterns. | Open, unstarted. |
-| **F — connectivity** | **M1** → M2 → M3 | M1 establishes the persisted cache the others build recovery UI around. | Open, unstarted. **Mind the precache budget** — it's now 799.06 KiB against an ~800 KB ceiling, ~1 KB of headroom; M1's persist-client package must be measured before landing. |
+| **Y0 — bytes** | **Y1** | Seven deleted imports in `src/main.tsx`. Owns nothing else, blocks everything that adds weight. | **Open — DO FIRST.** |
+| **M — modal** | **Y3** + **Y7** + **Y10** | Three small defects in one file, `components/ui/Modal.tsx`: no accessible name, `vh` should be `dvh`, drag-off-sheet closes it. One agent, one `Modal.test.tsx`. | Open, unstarted. |
+| **N — stamps** | **Y2** | `components/student/StatusStamps.tsx` alone. The `bg-current/10` dead class. Verify the fix against the **compiled** CSS, not the source. | Open, unstarted. |
+| **O — menu row** | **Y9** → **Y4** | Y9 fixes `QtyStepper` (glyphs + live announcement); Y4 then restyles `MenuItemCard` around the fixed control. Strict order — Y4 changes when the stepper renders at all. | Open, unstarted. Needs Y1's headroom. |
+| **P — shop history** | **Y5** + **Y13** | Both own `pages/shop/History.tsx`. Y13 is a one-line `NaN` guard inside the panel Y5 is rebuilding. | Open, unstarted. Needs Y1's headroom. |
+| **Q — sweeps** | **Y8**, **Y14**, **Y16** | Three cross-file sweeps (rail keyboard access, skeleton status announcements, `formatPrice`). Run them **after** bundles M–P so they aren't sweeping files mid-edit — the same rule X5 followed. | Open, unstarted. |
+| **I — order-status page** | **Y12** → **H3** → **Y11** | All own `pages/student/OrderStatus.tsx`. Y12 is a two-line guard, first; H3 is the price-drift notice (V3 landed, so it's unblocked); Y11 adds the elapsed-time line, last — it's the largest. | Open. **X1/X7 already landed here** (§ 9.11) — read what they changed before editing. |
+| **J — menu page** | **H4** | Owns `pages/student/Menu.tsx` (the 422 recovery). Coordinate with bundle O: Y4 owns `MenuItemCard.tsx`, H4 owns the page — adjacent, not the same file, but land one before starting the other. | Open, unstarted. **X2/X6 already landed here** (§ 9.11). |
+| **K — shop orders page** | **Y6** → **Y15** → **H1** | All own `pages/shop/Orders.tsx`. Y6 is a small guard, first. Y15 adds the queue-depth strip. H1 is the cash drawer and is much the largest — last, and it also adds `components/shop/CashDrawer.tsx`. **Read § 9.4-H5 before Y15** so the two urgency treatments end up one language. | Open. **X3 already landed here** (§ 9.11). |
+| **D — login screen** | P5 + **S3** | Both edit `pages/Login.tsx`. § 12.1 — sequence or single-agent, no exceptions. | Open, unstarted. S3 needs real operator/contact facts from the owner — do not fabricate. |
+| **E — manifest** | **P4** | Independent of everything; only conflict is `globPatterns`. **W6 and Y1 both touch fonts** — check `globPatterns` before adding screenshot patterns. | Open, unstarted. |
+| **F — connectivity** | **M1** → M2 → M3 | M1 establishes the persisted cache the others build recovery UI around. | Open, unstarted. **Mind the precache budget**: 801.93 KiB against an ~800 KB ceiling, currently **over**. Land Y1 first, then measure M1's persist-client package before committing to it. |
 | **G — standalone chrome** | M4 + M6 + § 9.6-B10 | All `index.html`, all only verifiable on a real device — bundle with **D-6**. | Open, unstarted. |
-| **H — provenance** | S4 + S5 | CI and build-time config; touches nothing the others touch. | Open, unstarted. S4 has a natural home now — the version footer placeholder P1 left in `Settings.tsx`. |
-| **I — order-status page** | **X1** → H3 → X7 | All own `pages/student/OrderStatus.tsx`. X1 is the defect, goes first; H3 needs V3 (landed); X7 is class-string polish, last. | **X1/X7 done (2026-07-27, fourth pass).** H3 still open — pick up any time, V3's dependency is satisfied. |
-| **J — menu page** | **X2** → H4 → X6 | All own `pages/student/Menu.tsx`. X2 is a two-line defect fix, first; H4 is the 422 recovery; X6 restyles the checkout content, last. | **X2/X6 done (2026-07-27, fourth pass).** H4 still open. |
-| **K — shop orders page** | X3 + H1 | Both own `pages/shop/Orders.tsx` (H1 also adds `CashDrawer.tsx`). Sequence or single-agent. | **X3 done (2026-07-27, fourth pass).** H1 still open — the terminal-notice branch X3 added is new context for whoever picks up H1 next. |
-| **L — toast & glyphs** | **X4** → X5 | X4 rebuilds the toast's dismiss/duration; X5's glyph sweep then covers the remaining files. X5 runs **after** bundles I/J/K to avoid sweeping files mid-edit. | **Done (2026-07-27, fourth pass).** X5's sweep also covered `components/ui/Modal.tsx`'s own close button, one file beyond its original scope (see § 9.11-X5's note). |
+| **H — provenance** | S4 + S5 | CI and build-time config; touches nothing the others touch. | Open, unstarted. S4 has a natural home — the version-footer placeholder P1 left in `Settings.tsx`. |
+| **R — prep board** | **H5** | `pages/shop/Prep.tsx` alone. Pairs conceptually with Y15 (bundle K) — whichever lands second inherits the first one's visual idiom. | Open, unstarted. |
+| **S — contrast** | **H7** | A token change plus a sweep across nearly every page. The measurements it asked for are now in its entry. Run it **last**, or it collides with every other frontend bundle. | Open, unstarted. |
+| **T — copy** | **H8** | Copy-only sweep, all pages. Same reasoning as bundle S — run it last. | Open, unstarted. |
+| **U — backend tests** | Q3 → Q4, then Q5/Q6/Q8/Q9, then Q7 | Independent of every frontend bundle above and the best first work for an agent with no context on this codebase. | Open, unstarted. |
 
-**Bundles A and B are done — W1 and W2 are live in the tree** (not yet
-live-verified against a real deploy; that's D-6). The install push (§ 9.7) can
-now be promoted to students from a correctness standpoint, **except**: fix
-**W3** first (§ 9.8) — the install/notification prompt cards still collide
-with the bottom nav on notched iPhones, which is a bad first impression on the
-exact feature bundle C just built. Bundles D–H can run concurrently with each
-other and with the remaining V/H/Q backlogs. **M5 depends on P1**, which is
-now done — M5 is unblocked.
+**Standing constraints that outlive any single bundle:**
+
+- **Do not promote the § 9.7 install push to real students until W3 is fixed**
+  (§ 9.8) — both prompt cards still collide with the bottom nav on notched
+  iPhones, which is a bad first impression on the exact feature being promoted.
+- **W5 needs a decision before more code.** P3 built the manual Reconnect
+  button; W5 also wanted the silent automatic re-post. Settle which is wanted.
+- Bundles D–H, R and U run concurrently with each other and with the § 9.12
+  work. **M5 depends on P1**, which is done — M5 is unblocked.
+- A, B and D–H were verified locally but **not** against a real deploy or a
+  real phone. That is D-6, and § 12.8 applies to everything downstream of it.
