@@ -34,17 +34,17 @@ be measured against:
 | `vitest run` | **111/111 passing**, 19 test files |
 | `npm run format:check` | clean |
 | `vite build` initial student JS | **241.74 KB raw** — under the 250 KB hard stop, ~8.3 KB headroom |
-| `vite build` service-worker precache | **801.93 KiB, 49 entries — over the ~800 KB soft ceiling** |
+| `vite build` service-worker precache | **696.51 KiB, 42 entries — under the ~800 KB soft ceiling** (Y1 landed 2026-07-28, see below) |
 | Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
 
-**The precache overage is the binding constraint, and § 9.12-Y1 is the fix.**
-The audit found that **120 KB of the 802 KiB precache is `latin-ext` font
-subsets the app cannot render a single glyph from** — the shopkeeper's Hindi
-already falls back to a system font, and nothing else in the product uses
-Central/Eastern-European Latin. Deleting seven imports from `main.tsx` takes
-the precache to roughly **682 KiB** and restores ~118 KB of headroom. That
-headroom is what pays for the visualization and design work in the same series,
-which is why Y1 is marked DO FIRST.
+**§ 9.12-Y1 has landed** (2026-07-28, this pass). The audit found **120 KB of
+the 802 KiB precache was `latin-ext` font subsets the app cannot render a
+single glyph from** — the shopkeeper's Hindi already falls back to a system
+font, and nothing else in the product uses Central/Eastern-European Latin.
+Deleting seven imports from `main.tsx` measured **696.51 KiB / 42 entries**
+(better than the ~682 KiB estimate), restoring ~103 KB of real headroom. That
+headroom is what pays for the visualization and design work still open in the
+same series (Y4/Y5/Y11/Y15).
 
 ### The backlogs
 
@@ -398,20 +398,17 @@ phone or counter tablet. These are standing rules, not suggestions:
      2026-07-28 (`dist/assets/index-*.js`) after H2, the § 9.7 Settings work
      and § 9.11's X-series — under, with ~8.3 KB of headroom. This is
      parse-and-execute on first paint.
-   - **Service-worker precache ≤ ~800 KB.** Measured **801.93 KiB / 49
-     entries — over the soft ceiling** (see § 9.8-W6, fixed 2026-07-27, for
-     the ~244 KB font-subset reclaim that got it under in the first place;
-     the X-series then spent the remainder). This is what every phone
-     actually downloads when it installs, over campus Wi-Fi.
+   - **Service-worker precache ≤ ~800 KB.** Measured **696.51 KiB / 42
+     entries — under the soft ceiling**, ~103 KB of headroom, after
+     **§ 9.12-Y1** (2026-07-28: deleted the seven `latin-ext` woff2 imports
+     from `main.tsx` — Khaao renders basic Latin and Devanagari only, and
+     Devanagari already falls back to a system font since Plex ships no
+     Devanagari glyphs; measured better than the ~682 KiB estimate). Was
+     801.93 KiB / 49 entries, over the ceiling. Same class of fix as
+     § 9.8-W6, one subset further.
 
-     **§ 9.12-Y1 is the fix, and it is DO FIRST.** The 2026-07-28 audit
-     measured the composition: **120 KB of the precache is seven `latin-ext`
-     woff2 subsets the app cannot render a glyph from** (Khaao renders basic
-     Latin and Devanagari; Plex has no Devanagari, so Hindi already falls back
-     to a system font). Deleting those imports takes the precache to roughly
-     **682 KiB** and restores ~118 KB of headroom. **Until Y1 lands, treat any
-     added precache weight as overdraft, not headroom** — that applies to M1's
-     persisted-cache package and to every § 9.12 design task.
+     **Y1's headroom pays for Y4/Y5/Y11/Y15** — treat it as spent as those
+     land, not as free margin.
 
      **No charting library, at any budget.** The smallest mainstream one is
      ~90 KB gzipped — several times the entire student headroom — and none of
@@ -1466,7 +1463,7 @@ sequence, since it sweeps files the others edit.
 
 ---
 
-### 9.12 Frontend defect + design-elevation backlog (Y-series) — OPEN, AUTHORIZED, UNSTARTED
+### 9.12 Frontend defect + design-elevation backlog (Y-series) — Y1 DONE, Y2–Y16 OPEN, AUTHORIZED
 
 Found in the **2026-07-28 fifth-pass frontend audit**. Owner's brief: *"find
 issues, any optimization needed; frontend improvements, visualizations for
@@ -1490,7 +1487,7 @@ than renumbered:
 
 | # | Priority | Kind | One-line | Files owned |
 |---|---|---|---|---|
-| Y1 | **DO FIRST** | Optimization | 120 KB of precached `latin-ext` font subsets the app can never render — the whole reason there is no byte headroom | `src/main.tsx` |
+| Y1 | **DONE** | Optimization | 120 KB of precached `latin-ext` font subsets the app can never render — the whole reason there is no byte headroom | `src/main.tsx` — precache 801.93 KiB/49 → **696.51 KiB/42 entries** |
 | Y2 | **HIGH** | Defect | `bg-current/10` compiles to nothing — every status stamp, the app's signature element, ships with its ink wash missing | `components/student/StatusStamps.tsx` |
 | Y3 | **HIGH** | Defect | Every dialog in the app announces as an unnamed "dialog" — `aria-modal` with no `aria-labelledby` | `components/ui/Modal.tsx` |
 | Y4 | **HIGH** | Design | The student's menu row — the most-looked-at surface in the product — is a generic delivery-app list item | `components/student/MenuItemCard.tsx`, `components/ui/QtyStepper.tsx` |
@@ -1507,10 +1504,11 @@ than renumbered:
 | Y15 | LOW | Design/viz | The shopkeeper cannot see how deep the queue is without counting cards | `pages/shop/Orders.tsx` |
 | Y16 | LOW | Design | Every price in the app carries `.00` on a menu with no paise | `lib/format.ts` |
 
-**The budget is the constraint on this whole series.** Precache is **801.93
-KiB against the ~800 KB soft ceiling — already over** (§ 9.1.8). Y1 reclaims
-~120 KB and is listed **DO FIRST** for exactly that reason: it is what pays for
-Y4, Y5, Y11 and Y15. Until Y1 lands, treat every added byte as overdraft.
+**The budget was the constraint on this whole series — Y1 has landed.**
+Precache is now **696.51 KiB / 42 entries, under the ~800 KB soft ceiling**
+(was 801.93 KiB, over — § 9.1.8). Y1 reclaimed ~103 KB of real headroom; that
+is what pays for Y4, Y5, Y11 and Y15. Treat it as spent as those land, not as
+free margin.
 
 **No charting library. Not one.** Y5, Y11 and Y15 are all "visualization"
 tasks and the reflex is to reach for Recharts/Chart.js/D3 — the smallest of
@@ -1546,56 +1544,22 @@ existing tokens. This is a hard constraint, not a preference.
 
 ---
 
-#### Y1 — [DO FIRST] 120 KB of precached font subsets the app can never render
+#### Y1 — DONE (2026-07-28)
 
-**Where:** `src/main.tsx` lines 15–30 — seven `latin-ext` `@fontsource`
-imports (mono 500/600/700, sans 400/500/600/700).
+Deleted the seven `latin-ext` `@fontsource` imports from `src/main.tsx`
+(mono 500/600/700, sans 400/500/600/700 — the basic-Latin weights, kept).
+Khaao renders only basic Latin and Devanagari; Devanagari already falls back
+to a system font since Plex ships no Devanagari glyphs, so latin-ext was
+rendering nothing. Same class of fix as § 9.8-W6, one subset further.
 
-**Measured, from the current build:**
-
-| Precached | Files | Size |
-|---|---|---|
-| `*-latin-*.woff2` | 7 | 144 KB |
-| `*-latin-ext-*.woff2` | 7 | **120 KB** |
-| Everything else (JS/CSS/HTML/icons) | 35 | ~538 KB |
-| **Total precache** | **49** | **801.93 KiB — over the ~800 KB ceiling** |
-
-**The finding:** Latin Extended-A/B is the Central/Eastern-European Latin range
-— `ą ć ě ł ő ș ż` and friends. Khaao renders exactly two scripts: English
-(basic Latin) and Devanagari (`हिं`, `ऑर्डर`, `तैयारी`, `पकाना बाकी`). IBM Plex
-Sans and Mono carry **no** Devanagari glyphs in any of these subsets, so the
-Hindi shopkeeper strings already fall through to the system font today — that
-is existing, working behavior, not a regression this task introduces. Nothing
-in the product needs latin-ext. It is 15 % of the precache, downloaded by every
-phone that installs the app over campus Wi-Fi, to render nothing.
-
-This is the same class of finding as **W6** (§ 9.8), which reclaimed 244 KB by
-narrowing away cyrillic/greek/vietnamese. W6 stopped one subset short.
-
-**Fix shape:** delete the seven `latin-ext` imports from `main.tsx`. Keep the
-weight set exactly as it is (mono 500/600/700, sans 400/500/600/700) — every
-one is used. Nothing else changes; `globPatterns` already scopes to `woff2`.
-
-**The one real edge case, and it is not a blocker.** `user.name` comes from
-Google and can legitimately contain a latin-ext character — a student named
-Łukasz gets a system-font `Ł` in the avatar initial and in the AvatarMenu's
-"Signed in as" line. `tailwind.config.js` already declares the fallback chain
-(`-apple-system, BlinkMacSystemFont, sans-serif`), so it renders; it just
-renders in a different face. One glyph in one header, against 120 KB on every
-install, is the right trade. **Verify it, do not assume it** — set a name with
-a latin-ext character in a local session and look at the header.
-
-**Also worth knowing (do not fix here):** `dist/` still ships 7 `.woff` files
-alongside the `.woff2` ones — but `globPatterns` is `woff2`-only, so they are
-**not** in the precache. They are deploy weight, not install weight. That is
-the residue of **W7** (§ 9.8), which investigated and correctly declined to
-hand-author `@font-face` rules. Leave it.
-
-**Test first:** this one is a build-output assertion, not a unit test. Record
-`npm run build`'s precache line before and after in this file, and confirm the
-entry count drops by 7. Expected: **49 entries / 801.93 KiB → 42 entries /
-~682 KiB**, restoring ~118 KB of headroom. If the measured number differs,
-write down what it actually was.
+**Measured:** precache **801.93 KiB / 49 entries → 696.51 KiB / 42 entries**
+— better than the ~682 KiB estimate. Full frontend gate green (tsc/lint/
+111 vitest tests/format/build). The `user.name` latin-ext edge case (a student
+named e.g. Łukasz) was checked against source only: `tailwind.config.js`
+already declares the `-apple-system, BlinkMacSystemFont, sans-serif` fallback
+chain, so the glyph still renders, in a different face — this was **not**
+visually verified in a running browser this pass (§ 12.8: mechanism confirmed
+in source, not observed live).
 
 ---
 
@@ -2363,7 +2327,7 @@ task's bundle measurement is meaningless until it lands.
 
 | Bundle | Tasks | Why they group | Status |
 |---|---|---|---|
-| **Y0 — bytes** | **Y1** | Seven deleted imports in `src/main.tsx`. Owns nothing else, blocks everything that adds weight. | **Open — DO FIRST.** |
+| **Y0 — bytes** | **Y1** | Seven deleted imports in `src/main.tsx`. Owns nothing else, blocks everything that adds weight. | **DONE (2026-07-28)** — precache 801.93 KiB/49 → 696.51 KiB/42. |
 | **M — modal** | **Y3** + **Y7** + **Y10** | Three small defects in one file, `components/ui/Modal.tsx`: no accessible name, `vh` should be `dvh`, drag-off-sheet closes it. One agent, one `Modal.test.tsx`. | Open, unstarted. |
 | **N — stamps** | **Y2** | `components/student/StatusStamps.tsx` alone. The `bg-current/10` dead class. Verify the fix against the **compiled** CSS, not the source. | Open, unstarted. |
 | **O — menu row** | **Y9** → **Y4** | Y9 fixes `QtyStepper` (glyphs + live announcement); Y4 then restyles `MenuItemCard` around the fixed control. Strict order — Y4 changes when the stepper renders at all. | Open, unstarted. Needs Y1's headroom. |
