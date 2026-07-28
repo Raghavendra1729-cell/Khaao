@@ -471,15 +471,20 @@ function OrderCardSkeleton() {
 function OrdersSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      {/* Matches the real page's own breakpoint (line ~545 below): at lg+ the
-          segmented control is replaced by side-by-side columns, so a skeleton
-          that kept showing this bone at that width would have it vanish the
-          instant real data landed. */}
-      <div className="h-11 animate-soft-pulse rounded-xl border border-edge bg-paper lg:hidden" />
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
-        <OrderCardSkeleton />
-        <OrderCardSkeleton />
-        <OrderCardSkeleton />
+      <span role="status" className="sr-only">
+        Loading orders…
+      </span>
+      <div aria-hidden="true" className="flex flex-col gap-4">
+        {/* Matches the real page's own breakpoint (line ~545 below): at lg+
+            the segmented control is replaced by side-by-side columns, so a
+            skeleton that kept showing this bone at that width would have it
+            vanish the instant real data landed. */}
+        <div className="h-11 animate-soft-pulse rounded-xl border border-edge bg-paper lg:hidden" />
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
+          <OrderCardSkeleton />
+          <OrderCardSkeleton />
+          <OrderCardSkeleton />
+        </div>
       </div>
     </div>
   );

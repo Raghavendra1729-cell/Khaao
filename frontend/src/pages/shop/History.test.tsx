@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { ShopHistoryPage } from './History';
 import { LanguageProvider } from '../../context/LanguageContext';
 import type { Order } from '../../api/types';
@@ -54,13 +55,15 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
   };
 }
 
-function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(queryClient?: QueryClient) {
+  const client = queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <LanguageProvider>
-        <ShopHistoryPage />
-      </LanguageProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <LanguageProvider>
+          <ShopHistoryPage />
+        </LanguageProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -105,8 +108,9 @@ describe('Day shape — half-hour order buckets (STATUS.md § 9.12 Y5)', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
     // The busiest half-hour (5 orders, 1-1:30pm) is named with its own
     // correct count and revenue — proof the bucketing lines up orders with
-    // the right half-hour rather than dumping them in one pile.
-    expect(screen.getByText(/Busiest around 1p.*5 orders.*₹150\.00/)).toBeInTheDocument();
+    // the right half-hour rather than dumping them in one pile. Whole-rupee
+    // revenue (₹150) renders without a trailing ".00" per § 9.12-Y16.
+    expect(screen.getByText(/Busiest around 1p.*5 orders.*₹150\b/)).toBeInTheDocument();
   });
 
   it('renders the existing empty state and no day-shape chart for an empty day', async () => {
@@ -183,8 +187,9 @@ describe('Revenue per item differs from qty ranking (STATUS.md § 9.12 Y5)', () 
       .map((el) => el.textContent);
     expect(topEarnersOrder).toEqual(['Thali', 'Chai']); // revenue order — reversed
 
-    expect(within(topEarnersCard).getByText('₹120.00')).toBeInTheDocument();
-    expect(within(topEarnersCard).getByText('₹50.00')).toBeInTheDocument();
+    // Whole-rupee amounts render without a trailing ".00" per § 9.12-Y16.
+    expect(within(topEarnersCard).getByText('₹120')).toBeInTheDocument();
+    expect(within(topEarnersCard).getByText('₹50')).toBeInTheDocument();
   });
 });
 
@@ -218,5 +223,33 @@ describe('Top items bar never emits a NaN width (STATUS.md § 9.12 Y13)', () => 
     bars.forEach((bar) => {
       expect(bar.style.width).toMatch(/^\d+(\.\d+)?%$/);
     });
+  });
+});
+
+// Guards STATUS.md § 9.12-Y14: the loading skeleton is `aria-hidden` (correct
+// — it's decorative bones, not real content) but announced nothing at all in
+// its place, leaving a screen-reader user in silence between navigating to
+// History and the real data landing.
+describe('ShopHistoryPage loading state announces a status (STATUS.md § 9.12-Y14)', () => {
+  it('exposes a status message while loading, and clears it once data lands', async () => {
+    let resolveHistory: (value: unknown) => void = () => {};
+    getShopHistoryMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveHistory = resolve;
+      }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    resolveHistory({
+      orders: [],
+      total_paid: 0,
+      insights: { order_count: 0, item_counts: [], customers: [] },
+    });
+
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
 });

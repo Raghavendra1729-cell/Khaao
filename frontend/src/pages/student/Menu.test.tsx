@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Menu } from './Menu';
 import { ToastProvider } from '../../components/ui/Toast';
+import { MenuSkeleton } from '../../components/student/MenuSkeleton';
 import type { MenuItem } from '../../api/types';
 
 // jsdom has no IntersectionObserver; Menu.tsx uses one for category scroll-spy.
@@ -225,5 +226,55 @@ describe('Menu row — Add control collapses the stepper until qty > 0 (STATUS.m
 
     expect(screen.queryByLabelText('Add Chai')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Increase quantity')).not.toBeInTheDocument();
+  });
+});
+
+// Guards STATUS.md § 9.12-Y8: TrendingRail, FavoritesRail, and the sticky
+// category chip strip are all `overflow-x-auto` containers with no
+// `tabIndex` — a scrollable region that isn't itself focusable can't be
+// scrolled by keyboard (WCAG 2.1.1). Each must be reachable via Tab and
+// expose a non-empty accessible name. The MenuSkeleton's rail, by contrast,
+// is purely decorative and must stay out of the accessibility tree rather
+// than becoming a focusable no-op.
+describe('Horizontal rails are keyboard-reachable (STATUS.md § 9.12-Y8)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('makes the trending rail, favorites rail, and category chip strip focusable with an accessible name', async () => {
+    const chai = menuItem({ id: 1, name: 'Chai', tags: ['Drinks'] });
+    const samosa = menuItem({ id: 2, name: 'Samosa', tags: ['Snacks'] });
+    // Pin the samosa as a favorite (device-local, read from localStorage on mount).
+    localStorage.setItem('khaao_favorites_v1', JSON.stringify([2]));
+
+    getMenuMock.mockResolvedValue([chai, samosa]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderMenu(queryClient);
+
+    await waitFor(() => expect(screen.getAllByText('Chai').length).toBeGreaterThan(0));
+
+    const trendingHeading = screen.getByText('Fresh on the menu');
+    const trendingRail = trendingHeading.closest('section')!.querySelector('[tabindex="0"]');
+    expect(trendingRail).toBeTruthy();
+    expect(trendingRail).toHaveAccessibleName();
+
+    const usualsHeading = screen.getByText('Your usuals');
+    const favoritesRail = usualsHeading.closest('section')!.querySelector('[tabindex="0"]');
+    expect(favoritesRail).toBeTruthy();
+    expect(favoritesRail).toHaveAccessibleName();
+
+    const chipStrip = screen.getByText('Drinks').closest('[tabindex="0"]');
+    expect(chipStrip).toBeTruthy();
+    expect(chipStrip).toHaveAccessibleName();
+  });
+});
+
+describe('The decorative skeleton rail stays out of the accessibility tree (STATUS.md § 9.12-Y8)', () => {
+  it('hides the trending-rail skeleton bones from the accessibility tree instead of making them focusable', () => {
+    render(<MenuSkeleton />);
+
+    const skeletonRail = screen.getByTestId('skeleton-trending-rail');
+    expect(skeletonRail.closest('[aria-hidden="true"]')).toBeTruthy();
+    expect(skeletonRail).not.toHaveAttribute('tabindex');
   });
 });

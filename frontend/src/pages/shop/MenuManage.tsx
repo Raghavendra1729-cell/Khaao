@@ -58,18 +58,23 @@ function MenuItemRowSkeleton() {
 
 function MenuManageSkeleton() {
   return (
-    <div aria-hidden="true">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col gap-2">
-          <div className="h-7 w-24 animate-soft-pulse rounded-md bg-edge" />
-          <div className="h-4 w-44 animate-soft-pulse rounded bg-edge/70" />
+    <div>
+      <span role="status" className="sr-only">
+        Loading menu…
+      </span>
+      <div aria-hidden="true">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col gap-2">
+            <div className="h-7 w-24 animate-soft-pulse rounded-md bg-edge" />
+            <div className="h-4 w-44 animate-soft-pulse rounded bg-edge/70" />
+          </div>
+          <div className="h-11 w-28 animate-soft-pulse rounded-xl border border-edge bg-paper" />
         </div>
-        <div className="h-11 w-28 animate-soft-pulse rounded-xl border border-edge bg-paper" />
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <MenuItemRowSkeleton key={i} />
-        ))}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <MenuItemRowSkeleton key={i} />
+          ))}
+        </div>
       </div>
     </div>
   );

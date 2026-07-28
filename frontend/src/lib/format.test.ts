@@ -9,14 +9,24 @@ import {
   secondsUntil,
 } from './format';
 
+// STATUS.md § 9.12-Y16: the canteen menu has no paise — every price is a
+// whole rupee — yet formatPrice unconditionally appended ".00", so every
+// price in the app (including large display-scale amounts like the
+// checkout total and the pay-at-counter figure) read as e.g. "₹40.00".
+// Whole-rupee amounts drop the fraction; a genuinely fractional amount
+// (a real ₹12.50 item) must keep both decimals rather than being truncated.
 describe('formatPrice', () => {
-  it('formats integer paise as a rupee string with 2 decimals', () => {
-    expect(formatPrice(10000)).toBe('₹100.00');
-    expect(formatPrice(150)).toBe('₹1.50');
-    expect(formatPrice(0)).toBe('₹0.00');
+  it('drops the fraction for a whole-rupee amount', () => {
+    expect(formatPrice(10000)).toBe('₹100');
+    expect(formatPrice(4000)).toBe('₹40');
   });
 
-  it('rounds to the nearest paise-derived cent', () => {
+  it('renders zero without a fraction', () => {
+    expect(formatPrice(0)).toBe('₹0');
+  });
+
+  it('keeps two decimals for a non-whole-rupee amount', () => {
+    expect(formatPrice(150)).toBe('₹1.50');
     expect(formatPrice(999)).toBe('₹9.99');
   });
 });
