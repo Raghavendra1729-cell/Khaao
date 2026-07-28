@@ -7,6 +7,7 @@ import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { OrderStatusBadge } from '../../components/ui/StatusBadge';
 import { useLanguage } from '../../context/LanguageContext';
+import type { Order } from '../../api/types';
 
 /** Today's date as "YYYY-MM-DD" in the browser's local timezone (not UTC —
  * the canteen device is physically where the business day is being tracked,
@@ -60,6 +61,164 @@ function CountBadge({ n }: { n: number }) {
     <span className="tabular inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-brand-light px-1.5 font-display text-xs font-bold text-brand-dark">
       {n}
     </span>
+  );
+}
+
+// ─── Y5: day-shape + revenue-per-item, derived client-side from `orders` ─────
+// (`getShopHistory` already fetches everything needed — no backend change.)
+
+const HALF_HOURS_PER_DAY = 48;
+
+/** Which half-hour bucket (0-47, local time) an ISO timestamp falls into. */
+function halfHourBucketIndex(iso: string): number {
+  const d = new Date(iso);
+  return d.getHours() * 2 + (d.getMinutes() >= 30 ? 1 : 0);
+}
+
+interface DayShapeBucket {
+  index: number;
+  hour: number;
+  half: 0 | 1;
+  count: number; // orders created in this half-hour
+  revenue: number; // paise paid in this half-hour
+}
+
+/** Buckets the day's orders by half-hour: order count from `created_at`
+ * (when the rush arrived), revenue from `paid_at` (when the money actually
+ * landed — not always the same moment, e.g. pay-after-handover). Always
+ * returns all 48 buckets; callers slice down to the active range. */
+function buildDayShape(orders: Order[]): DayShapeBucket[] {
+  const buckets: DayShapeBucket[] = Array.from({ length: HALF_HOURS_PER_DAY }, (_, i) => ({
+    index: i,
+    hour: Math.floor(i / 2),
+    half: (i % 2) as 0 | 1,
+    count: 0,
+    revenue: 0,
+  }));
+  for (const order of orders) {
+    if (order.created_at) {
+      buckets[halfHourBucketIndex(order.created_at)].count += 1;
+    }
+    if (order.paid_at) {
+      buckets[halfHourBucketIndex(order.paid_at)].revenue += order.total_price;
+    }
+  }
+  return buckets;
+}
+
+/** Short, deterministic hour label a canteen actually thinks in — "1p",
+ * "12p", "9a" — instead of raw 24-hour clock ticks or an ICU-dependent
+ * locale format (kept in the same spirit as lib/format.ts's formatShortDate,
+ * which avoids toLocaleDateString for the same determinism reason). */
+function formatHourLabel(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}${hour < 12 ? 'a' : 'p'}`;
+}
+
+interface ItemRevenue {
+  name: string;
+  revenue: number; // paise
+}
+
+/** Revenue per item (qty × price_each, summed across every order), sorted
+ * highest-earning first. Deliberately independent of the backend's
+ * `insights.item_counts` (qty only) — the item that sells the most units is
+ * often not the item that earns the most, and that's the point of this. */
+function revenueByItem(orders: Order[]): ItemRevenue[] {
+  const totals = new Map<string, number>();
+  for (const order of orders) {
+    for (const item of order.items) {
+      totals.set(item.name, (totals.get(item.name) ?? 0) + item.qty * item.price_each);
+    }
+  }
+  return Array.from(totals.entries())
+    .map(([name, revenue]) => ({ name, revenue }))
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+const CHIT_PX = 4; // each stacked chit's height, px
+const TRACK_HEIGHT_PX = 72; // the column's vertical scale envelope
+const CHIT_THRESHOLD = Math.floor(TRACK_HEIGHT_PX / CHIT_PX); // degrade past this count
+
+/** One half-hour column: stacked kraft chits, one per order, up to
+ * CHIT_THRESHOLD — at canteen volumes (tens of orders/day) a shopkeeper can
+ * literally count them. Past that, a solid bar stands in rather than
+ * rendering 200 rectangles; the count above the column stays the same
+ * either way, so nothing readable is lost. */
+function DayShapeColumn({ bucket, maxCount }: { bucket: DayShapeBucket; maxCount: number }) {
+  const degraded = bucket.count > CHIT_THRESHOLD;
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-1" style={{ width: 18 }}>
+      {/* The count is the accessible content — never aria-hidden. */}
+      <span className="tabular font-display text-[10px] font-bold leading-none text-paper">
+        {bucket.count > 0 ? bucket.count : ' '}
+      </span>
+      <div
+        className="flex w-full flex-col-reverse items-stretch"
+        style={{ height: TRACK_HEIGHT_PX }}
+        aria-hidden="true"
+      >
+        {degraded ? (
+          <div
+            className="w-full rounded-[1px] bg-paper"
+            style={{ height: `${Math.max((bucket.count / maxCount) * 100, 8)}%` }}
+          />
+        ) : (
+          Array.from({ length: bucket.count }, (_, i) => (
+            <div key={i} className="h-1 w-full shrink-0 rounded-[1px] border-t border-ink/50 bg-paper" />
+          ))
+        )}
+      </div>
+      <span className="text-[9px] leading-none text-paper/40">
+        {bucket.half === 0 ? formatHourLabel(bucket.hour) : ''}
+      </span>
+    </div>
+  );
+}
+
+/** The day's shape: when the rush hit, how long it lasted. Extends the "Top
+ * items" bar's idiom (G6) into a full strip, drawn like the kitchen's own
+ * chalkboard tally — ink background, paper mono digits, same language as
+ * Prep.tsx's PrepSummaryStrip/PrepRow tally block — rather than a generic
+ * chart. A raw div, not the shared `Card` (which hardcodes `bg-paper`): a
+ * caller className relying on the cascade to override a hardcoded base
+ * class can silently lose that tie (§ 9.1.10), so this follows
+ * PrepSummaryStrip's own precedent of a plain `bg-ink` div instead. */
+function DayShapeCard({ orders, language }: { orders: Order[]; language: 'en' | 'hi' }) {
+  const buckets = buildDayShape(orders);
+  const activeIndices = buckets.reduce<number[]>((acc, b, i) => {
+    if (b.count > 0) acc.push(i);
+    return acc;
+  }, []);
+  if (activeIndices.length === 0) return null; // nothing to draw (defensive; the page already gates on order_count > 0)
+
+  const startIdx = Math.max(0, Math.min(...activeIndices) - 1);
+  const endIdx = Math.min(HALF_HOURS_PER_DAY - 1, Math.max(...activeIndices) + 1);
+  const visible = buckets.slice(startIdx, endIdx + 1);
+  const maxCount = Math.max(1, ...visible.map((b) => b.count));
+  const busiest = visible.reduce((best, b) => (b.count > best.count ? b : best), visible[0]);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl bg-ink p-4">
+      <div className="flex flex-col gap-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-paper/50">
+          {language === 'hi' ? 'दिन का उतार-चढ़ाव' : 'Day shape'}
+        </p>
+        <p className="text-sm text-paper/80">
+          {language === 'hi'
+            ? `सबसे व्यस्त ${formatHourLabel(busiest.hour)} बजे — ${busiest.count} ऑर्डर, ${formatPrice(busiest.revenue)}`
+            : `Busiest around ${formatHourLabel(busiest.hour)} — ${busiest.count} order${busiest.count === 1 ? '' : 's'}, ${formatPrice(busiest.revenue)}`}
+        </p>
+      </div>
+      {/* § 9.1.5: wide content scrolls in its own container, never the page. */}
+      <div className="overflow-x-auto">
+        <div className="flex items-end gap-1.5 pb-1">
+          {visible.map((b) => (
+            <DayShapeColumn key={b.index} bucket={b} maxCount={maxCount} />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -227,7 +386,11 @@ export function ShopHistoryPage() {
               <div className="flex flex-col gap-2.5">
                 {(() => {
                   const topItems = insights.item_counts.slice(0, 5);
-                  const maxQty = Math.max(...topItems.map((ic) => ic.qty));
+                  // Y13: an all-zero day (every returned qty is 0) made this
+                  // Math.max(...) 0, so ic.qty / maxQty was 0/0 — NaN — and
+                  // the resulting `width: NaN%` was silently dropped by the
+                  // browser. Floor it at 1 so the division always resolves.
+                  const maxQty = Math.max(1, ...topItems.map((ic) => ic.qty));
                   return topItems.map((ic) => (
                     <div key={ic.name} className="flex flex-col gap-1">
                       <div className="flex items-center justify-between gap-2">
@@ -274,8 +437,52 @@ export function ShopHistoryPage() {
               </div>
             </Card>
           )}
+
+          {/* Y5: revenue per item — derived client-side from orders[].items,
+              deliberately a different ranking than the qty-only "Top items"
+              card above (the item that sells most is often not the item
+              that earns most). Same G6 proportional-bar idiom, turmeric-toned
+              (the kitchen color) to read as a distinct metric, not a re-skin. */}
+          {(() => {
+            const topEarners = revenueByItem(orders).slice(0, 5);
+            if (topEarners.length === 0) return null;
+            const maxRevenue = Math.max(1, ...topEarners.map((ir) => ir.revenue));
+            return (
+              <Card className="flex flex-col gap-3 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink/40">
+                  {language === 'hi' ? 'सबसे ज़्यादा कमाई' : 'Top earners'}
+                </p>
+                <div className="flex flex-col gap-2.5">
+                  {topEarners.map((ir) => (
+                    <div key={ir.name} className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm text-ink">{ir.name}</span>
+                        <span className="tabular shrink-0 font-display text-xs font-bold text-turmeric-deep">
+                          {formatPrice(ir.revenue)}
+                        </span>
+                      </div>
+                      <div
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-turmeric-pale"
+                        aria-hidden="true"
+                      >
+                        <div
+                          className="h-full rounded-full bg-turmeric"
+                          style={{ width: `${Math.max((ir.revenue / maxRevenue) * 100, 6)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })()}
         </div>
       )}
+
+      {/* Y5: the day's shape — full width, its own row (not the stat-card
+          grid above), since it needs horizontal room to scroll and reads as
+          the kitchen's own chalkboard rather than another paper card. */}
+      {insights.order_count > 0 && <DayShapeCard orders={orders} language={language} />}
 
       {/* ── Order list ─────────────────────────────────────────────── */}
       {orders.length === 0 ? (
