@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -275,8 +276,8 @@ func (s *MenuService) validateAndNormalize(input *MenuItemInput) error {
 		return ErrBadRequest("diet must be 'veg' or 'non_veg'")
 	}
 	input.Tags = normalizeTags(input.Tags)
-	if input.PhotoURL != "" && !strings.HasPrefix(input.PhotoURL, "https://") && !strings.HasPrefix(input.PhotoURL, "http://") {
-		return ErrBadRequest("photo_url must be an http:// or https:// URL")
+	if input.PhotoURL != "" && !isCloudinaryImageURL(input.PhotoURL) {
+		return ErrBadRequest("photo_url must be an HTTPS URL hosted on res.cloudinary.com")
 	}
 	input.AvailFrom = normalizeTimeStr(input.AvailFrom)
 	input.AvailTo = normalizeTimeStr(input.AvailTo)
@@ -291,6 +292,15 @@ func (s *MenuService) validateAndNormalize(input *MenuItemInput) error {
 		return ErrBadRequest("set both avail_from and avail_to, or leave both empty")
 	}
 	return nil
+}
+
+// isCloudinaryImageURL keeps the API contract aligned with the deployed CSP:
+// menu photos are uploaded directly to Cloudinary and the browser only allows
+// images from res.cloudinary.com. Accepting other URLs stores values that the
+// production app will silently refuse to render.
+func isCloudinaryImageURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() == "res.cloudinary.com"
 }
 
 func normalizeTimeStr(s *string) *string {
