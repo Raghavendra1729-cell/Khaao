@@ -6,7 +6,7 @@ func TestValidate(t *testing.T) {
 	const strongSecret = "0123456789abcdef0123456789abcdef" // 32 chars
 
 	type envset struct {
-		appEnv, jwt, dbURL, firebase, frontend, authFake, tz, holdMinutes string
+		appEnv, jwt, dbURL, firebase, frontend, authFake, tz, holdMinutes, port string
 	}
 	base := envset{
 		appEnv:      "production",
@@ -17,6 +17,7 @@ func TestValidate(t *testing.T) {
 		authFake:    "false",
 		tz:          "Asia/Kolkata",
 		holdMinutes: "15",
+		port:        "8080",
 	}
 
 	cases := []struct {
@@ -30,6 +31,11 @@ func TestValidate(t *testing.T) {
 		{"production short jwt", func(e *envset) { e.jwt = "tooshort" }, true},
 		{"production default db", func(e *envset) { e.dbURL = devDefaultDatabaseURL }, true},
 		{"production non-https origin", func(e *envset) { e.frontend = "http://x.example.com" }, true},
+		{"production frontend origin with path", func(e *envset) { e.frontend = "https://x.example.com/app" }, true},
+		{"production frontend origin with query", func(e *envset) { e.frontend = "https://x.example.com?preview=true" }, true},
+		{"production frontend origin with credentials", func(e *envset) { e.frontend = "https://user@example.com" }, true},
+		{"production invalid port", func(e *envset) { e.port = "eighty" }, true},
+		{"production zero port", func(e *envset) { e.port = "0" }, true},
 		{"unknown app env fails closed", func(e *envset) { e.appEnv = "staging" }, true},
 		{"production localhost db rejected", func(e *envset) {
 			e.dbURL = "postgres://someone@localhost:5432/otherdb?sslmode=disable"
@@ -61,6 +67,7 @@ func TestValidate(t *testing.T) {
 			t.Setenv("AUTH_FAKE", e.authFake)
 			t.Setenv("BUSINESS_TIMEZONE", e.tz)
 			t.Setenv("HOLD_MINUTES", e.holdMinutes)
+			t.Setenv("PORT", e.port)
 
 			err := Load().Validate()
 			if tc.wantErr && err == nil {
