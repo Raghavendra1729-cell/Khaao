@@ -104,5 +104,16 @@ jobs:
           sudo caddy validate --config /etc/caddy/Caddyfile
           sudo systemctl restart khaao-backend
           sudo systemctl reload caddy
-          curl --fail --silent --show-error http://localhost:8080/api/health
+          # systemctl returns once the process has been started, not once Go
+          # has opened port 8080. Wait briefly so a healthy cold start is not
+          # incorrectly reported to GitHub as a failed deployment.
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://localhost:8080/api/health; then
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend did not become healthy within 30 seconds" >&2
+          exit 1
           REMOTE
