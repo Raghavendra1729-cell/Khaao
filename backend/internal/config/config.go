@@ -130,6 +130,9 @@ func (c *Config) Validate() error {
 	case "dev", "test":
 		// development defaults are permitted
 	case "production":
+		if err := validatePort(c.Port); err != nil {
+			return err
+		}
 		if c.JWTSecret == "" || c.JWTSecret == "dev-secret-change-me" || len(c.JWTSecret) < 32 {
 			return fmt.Errorf("JWT_SECRET must be a strong secret of at least 32 characters in production")
 		}
@@ -139,12 +142,36 @@ func (c *Config) Validate() error {
 		if c.FirebaseProjectID == "" {
 			return fmt.Errorf("FIREBASE_PROJECT_ID is required in production")
 		}
-		u, err := url.Parse(c.FrontendOrigin)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("FRONTEND_ORIGIN must be a valid https:// URL in production (got %q)", c.FrontendOrigin)
+		if err := validateFrontendOrigin(c.FrontendOrigin); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("APP_ENV must be one of dev, test, production (got %q)", c.AppEnv)
+	}
+	return nil
+}
+
+// validatePort catches a malformed listener address before the process opens
+// a database connection or starts its systemd restart loop. Ports are kept as
+// strings because http.Server expects an address string, but production
+// deployments must provide a real TCP port.
+func validatePort(port string) error {
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || n == 0 {
+		return fmt.Errorf("PORT must be a TCP port from 1 to 65535 in production (got %q)", port)
+	}
+	return nil
+}
+
+// validateFrontendOrigin requires an actual web origin, not merely an HTTPS
+// URL. CORS compares scheme, host, and port only: accepting a path, query,
+// fragment, or credentials here makes the configured Allow-Origin value
+// impossible for browsers to match and breaks every cross-origin API call.
+func validateFrontendOrigin(origin string) error {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
+		u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("FRONTEND_ORIGIN must be a valid https origin without a path, query, fragment, or credentials in production (got %q)", origin)
 	}
 	return nil
 }
