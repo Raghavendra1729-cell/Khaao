@@ -6,18 +6,19 @@ func TestValidate(t *testing.T) {
 	const strongSecret = "0123456789abcdef0123456789abcdef" // 32 chars
 
 	type envset struct {
-		appEnv, jwt, dbURL, firebase, frontend, authFake, tz, holdMinutes, port string
+		appEnv, jwt, dbURL, firebase, frontend, authFake, tz, holdMinutes, port, allowedDomain string
 	}
 	base := envset{
-		appEnv:      "production",
-		jwt:         strongSecret,
-		dbURL:       "postgres://user:pass@db.example.com:5432/khaao?sslmode=require",
-		firebase:    "khaao-prod",
-		frontend:    "https://khaao.example.com",
-		authFake:    "false",
-		tz:          "Asia/Kolkata",
-		holdMinutes: "15",
-		port:        "8080",
+		appEnv:        "production",
+		jwt:           strongSecret,
+		dbURL:         "postgres://user:pass@db.example.com:5432/khaao?sslmode=require",
+		firebase:      "khaao-prod",
+		frontend:      "https://khaao.example.com",
+		authFake:      "false",
+		tz:            "Asia/Kolkata",
+		holdMinutes:   "15",
+		port:          "8080",
+		allowedDomain: "college.edu",
 	}
 
 	cases := []struct {
@@ -27,6 +28,8 @@ func TestValidate(t *testing.T) {
 	}{
 		{"production all good", func(e *envset) {}, false},
 		{"production missing firebase", func(e *envset) { e.firebase = "" }, true},
+		{"production missing allowed email domain", func(e *envset) { e.allowedDomain = "" }, true},
+		{"production rejects an email in place of a domain", func(e *envset) { e.allowedDomain = "student@college.edu" }, true},
 		{"production default jwt", func(e *envset) { e.jwt = "dev-secret-change-me" }, true},
 		{"production short jwt", func(e *envset) { e.jwt = "tooshort" }, true},
 		{"production default db", func(e *envset) { e.dbURL = devDefaultDatabaseURL }, true},
@@ -68,6 +71,7 @@ func TestValidate(t *testing.T) {
 			t.Setenv("BUSINESS_TIMEZONE", e.tz)
 			t.Setenv("HOLD_MINUTES", e.holdMinutes)
 			t.Setenv("PORT", e.port)
+			t.Setenv("ALLOWED_EMAIL_DOMAIN", e.allowedDomain)
 
 			err := Load().Validate()
 			if tc.wantErr && err == nil {

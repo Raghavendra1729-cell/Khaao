@@ -31,7 +31,7 @@ say "Boot server (AUTH_FAKE, seeded menu)"
 APP_ENV=dev \
 DATABASE_URL="postgres://$DB_USER@localhost:5432/$DB?sslmode=disable" \
 JWT_SECRET="smoke-test-secret-must-be-at-least-32-bytes-long-xx" \
-FIREBASE_PROJECT_ID="smoke" ALLOWED_EMAIL_DOMAIN="sst.scaler.com" \
+FIREBASE_PROJECT_ID="smoke" ALLOWED_EMAIL_DOMAIN="college.edu" \
 SHOPKEEPER_EMAILS="shop@khaao.test" \
 AUTH_FAKE=true SEED_SAMPLE_MENU=true HOLD_MINUTES=15 \
 FRONTEND_ORIGIN="http://localhost:5173" PORT=$PORT \
@@ -43,7 +43,7 @@ for _ in $(seq 1 40); do curl -sf "$BASE/api/menu" >/dev/null 2>&1 && break; sle
 curl -sf "$BASE/api/menu" >/dev/null 2>&1 && ok "server up" || { bad "server did not start"; cat /tmp/khaao-smoke.log; exit 1; }
 
 say "Auth (fake tokens)"
-STU=$(curl -s -X POST "$BASE/api/auth/firebase" -H 'Content-Type: application/json' -d '{"id_token":"fake:alice@sst.scaler.com:Alice"}')
+STU=$(curl -s -X POST "$BASE/api/auth/firebase" -H 'Content-Type: application/json' -d '{"id_token":"fake:alice@college.edu:Alice"}')
 STU_T=$(j "$STU" .token); [ "$(j "$STU" .user.role)" = "student" ] && ok "student login" || bad "student login: $STU"
 SHOP=$(curl -s -X POST "$BASE/api/auth/firebase" -H 'Content-Type: application/json' -d '{"id_token":"fake:shop@khaao.test:Keeper"}')
 SHOP_T=$(j "$SHOP" .token); [ "$(j "$SHOP" .user.role)" = "shopkeeper" ] && ok "shop login" || bad "shop login: $SHOP"

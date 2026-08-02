@@ -57,12 +57,14 @@ func Load() *Config {
 	loadDotEnv()
 	var envErrors []string
 	return &Config{
-		Port:                envOr("PORT", "8080"),
-		AppEnv:              strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "dev"))),
-		DatabaseURL:         envOr("DATABASE_URL", devDefaultDatabaseURL),
-		JWTSecret:           envOr("JWT_SECRET", "dev-secret-change-me"),
-		FirebaseProjectID:   envOr("FIREBASE_PROJECT_ID", ""),
-		AllowedEmailDomain:  envOr("ALLOWED_EMAIL_DOMAIN", "sst.scaler.com"),
+		Port:              envOr("PORT", "8080"),
+		AppEnv:            strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "dev"))),
+		DatabaseURL:       envOr("DATABASE_URL", devDefaultDatabaseURL),
+		JWTSecret:         envOr("JWT_SECRET", "dev-secret-change-me"),
+		FirebaseProjectID: envOr("FIREBASE_PROJECT_ID", ""),
+		// There is no safe universal default for a college's student domain.
+		// Production validation below requires this to be set explicitly.
+		AllowedEmailDomain:  strings.ToLower(strings.TrimSpace(envOr("ALLOWED_EMAIL_DOMAIN", ""))),
 		ShopkeeperEmails:    envOr("SHOPKEEPER_EMAILS", ""),
 		AuthFake:            envOrBool(&envErrors, "AUTH_FAKE", false),
 		HoldMinutes:         envOrInt(&envErrors, "HOLD_MINUTES", 15),
@@ -142,6 +144,9 @@ func (c *Config) Validate() error {
 		if c.FirebaseProjectID == "" {
 			return fmt.Errorf("FIREBASE_PROJECT_ID is required in production")
 		}
+		if err := validateEmailDomain(c.AllowedEmailDomain); err != nil {
+			return err
+		}
 		if err := validateFrontendOrigin(c.FrontendOrigin); err != nil {
 			return err
 		}
@@ -172,6 +177,19 @@ func validateFrontendOrigin(origin string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("FRONTEND_ORIGIN must be a valid https origin without a path, query, fragment, or credentials in production (got %q)", origin)
+	}
+	return nil
+}
+
+// validateEmailDomain catches configuration mistakes that would otherwise
+// make every student login fail: leaving the domain unset, or pasting an
+// email address (including the leading @) instead of a domain.
+func validateEmailDomain(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("ALLOWED_EMAIL_DOMAIN is required in production")
+	}
+	if strings.ContainsAny(domain, "@/\\\\ ") || !strings.Contains(domain, ".") {
+		return fmt.Errorf("ALLOWED_EMAIL_DOMAIN must be a domain such as college.edu (got %q)", domain)
 	}
 	return nil
 }

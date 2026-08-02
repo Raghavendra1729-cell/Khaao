@@ -69,7 +69,7 @@ const MAX_ACTIONS_PER_TICK = intEnv('LOADTEST_MAX_ACTIONS_PER_TICK', 25); // cap
 // far faster than any human tapping through the same queue.
 const SHOP_MUTATION_PACE = floatEnv('LOADTEST_SHOP_MUTATION_PACE', 0.25);
 
-const STUDENT_DOMAIN = __ENV.LOADTEST_STUDENT_DOMAIN || 'sst.scaler.com';
+const STUDENT_DOMAIN = __ENV.LOADTEST_STUDENT_DOMAIN || 'college.edu';
 const SHOPKEEPER_EMAIL = __ENV.LOADTEST_SHOPKEEPER_EMAIL || 'loadtest-shopkeeper@example.com';
 const RUN_ID = __ENV.LOADTEST_RUN_ID || `${Date.now()}`;
 

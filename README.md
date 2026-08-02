@@ -1,6 +1,6 @@
 # Khaao — Canteen Pre-Order App
 
-A **mobile-first installable PWA** for a single college canteen. Students sign in with their `@sst.scaler.com` Google account, browse the menu, place one order at a time, and track it live via SSE. The shopkeeper accepts/rejects/trims orders, cooks to **aggregate demand** (Prep tab), taps **Done** per finished unit (FCFS-allocated to the earliest waiting order), hands items over one-by-one, and collects payment.
+A **mobile-first installable PWA** for a single college canteen. Students sign in with their configured college Google Workspace account, browse the menu, place one order at a time, and track it live via SSE. The shopkeeper accepts/rejects/trims orders, cooks to **aggregate demand** (Prep tab), taps **Done** per finished unit (FCFS-allocated to the earliest waiting order), hands items over one-by-one, and collects payment.
 
 > **For agents / contributors:** Full context — architecture decisions, codebase map, environment variables, API surface, what's done, and what's next — lives in **[STATUS.md](./STATUS.md)**. Read that first; this file is just a quickstart. `docs/SPEC.md` has the frozen core API/state-machine contract.
 
@@ -25,7 +25,8 @@ cd frontend && npm install && npm run dev  # :5173, proxies /api to backend
 ```
 
 Testing without Firebase (dev only): set `AUTH_FAKE=true` in `backend/.env`, then
-`POST /api/auth/firebase {"id_token": "fake:someone@sst.scaler.com:Name"}`. The
+`POST /api/auth/firebase {"id_token": "fake:someone@college.edu:Name"}` (with
+`ALLOWED_EMAIL_DOMAIN=college.edu`). The
 UI always uses the real Google popup — fake tokens are for curl/Playwright.
 
 ## Verification

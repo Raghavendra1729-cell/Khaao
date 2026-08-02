@@ -289,7 +289,7 @@ Backend (`backend/.env`, copy from `backend/.env.example`):
 | `DATABASE_URL` | — | Postgres only. Must not be localhost in production. |
 | `JWT_SECRET` | — | HS256 secret, ≥32 chars, must not be the default in production |
 | `FIREBASE_PROJECT_ID` | — | Required in production. Skip with `AUTH_FAKE=true` in dev. |
-| `ALLOWED_EMAIL_DOMAIN` | `sst.scaler.com` | Student email domain |
+| `ALLOWED_EMAIL_DOMAIN` | — | Required student email domain in production; no college is hard-coded |
 | `SHOPKEEPER_EMAILS` | — | Comma-separated allowlist, seeded to DB on boot |
 | `AUTH_FAKE` | `false` | Dev/test only — accepts `fake:<email>` tokens. Rejected in production. |
 | `HOLD_MINUTES` | `15` | Minutes a fully-ready order holds before expiring |
@@ -315,7 +315,8 @@ cd frontend && npm install && npm run dev  # :5173, proxies /api to backend
 ```
 
 Testing without Firebase (dev only): `AUTH_FAKE=true` in `backend/.env`, then
-`POST /api/auth/firebase {"id_token": "fake:someone@sst.scaler.com:Name"}`.
+`POST /api/auth/firebase {"id_token": "fake:someone@college.edu:Name"}`
+(with `ALLOWED_EMAIL_DOMAIN=college.edu`).
 The UI always uses the real Google popup — fake tokens are for curl/Playwright,
 not the login button.
 

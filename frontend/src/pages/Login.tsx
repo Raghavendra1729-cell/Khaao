@@ -10,7 +10,7 @@ export function Login() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [domain, setDomain] = useState('sst.scaler.com');
+  const [domain, setDomain] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -118,7 +118,9 @@ export function Login() {
             Continue with Google
           </Button>
 
-          <p className="mt-4 text-center text-sm text-ink/60">Use your @{domain} account</p>
+          <p className="mt-4 text-center text-sm text-ink/60">
+            {domain ? `Use your @${domain} account` : 'Use your college Google account'}
+          </p>
         </div>
       </div>
     </div>
