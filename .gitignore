@@ -27,6 +27,9 @@ frontend/.env
 *.pem
 artifacts/
 
+# Private operator/AI context: deliberately local-only, never publish it.
+AGENT_HANDOFF.md
+
 # Editor
 .idea/
 .vscode/
