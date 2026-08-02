@@ -20,6 +20,13 @@ frontend/dist/
 .env
 *.local
 
+# Production credentials and generated deployment artifacts. The tracked
+# *.env.example templates and deploy/RUNBOOK.md remain available in Git.
+backend/.env
+frontend/.env
+*.pem
+artifacts/
+
 # Editor
 .idea/
 .vscode/

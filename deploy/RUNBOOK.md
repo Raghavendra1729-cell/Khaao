@@ -1,12 +1,13 @@
 # Khaao — Production Deployment Runbook
 
-> **Status of this document:** this is a step-by-step guide for a human with
-> real infrastructure access (a domain, a server/VM, and account access to
-> Firebase/Cloudinary) to follow. No agent has provisioned anything described
-> below — see `STATUS.md` § 9 "What's LEFT → Deployment" (D-1 through D-7) for
-> the source checklist this expands on. Cross-reference `backend/.env.example`
-> and `frontend/.env.example` for the authoritative, current list of env vars
-> — if this doc and those files ever disagree, the `.env.example` files win.
+> **Production status (2026-08-02):** Khaao is live at
+> **https://khaaos.app** on one Azure Ubuntu VM. The backend health endpoint
+> and static frontend return HTTP 200, Firebase Google sign-in was verified,
+> and GitHub Actions now deploys every push to `main`; see **§ 9**. This
+> document also retains the original setup notes for rebuilding the
+> infrastructure from scratch. Cross-reference `backend/.env.example` and
+> `frontend/.env.example` for the authoritative current variable names — if
+> this doc and those files ever disagree, the `.env.example` files win.
 
 Target architecture (see `STATUS.md` § Topology decision for the full
 rationale): **one** Go backend instance, one managed Postgres, Caddy as the
@@ -14,6 +15,44 @@ TLS-terminating reverse proxy, frontend served as a static bundle. Do not
 scale the backend to multiple replicas without first solving distributed
 locking + distributed SSE — this app is deliberately architected for one
 instance at this scale (~2000 students).
+
+---
+
+## 0. Current production inventory — read this first
+
+This section records the real deployment without storing credentials. Never
+paste database URLs, private keys, Firebase secrets, or Cloudinary secrets
+into this file, an issue, a commit, or GitHub Actions logs.
+
+| Component | Current location / setting |
+|---|---|
+| Public app URL | `https://khaaos.app` |
+| VM | Azure resource group `Khaao`, Ubuntu 24.04 VM `khaao-api`, Central India |
+| Server login | SSH user `khaao`; private key stays only on the operator machine and in GitHub Secrets |
+| Repository checkout | `/opt/khaao/app` |
+| Backend | `/opt/khaao/bin/khaao-backend`, managed by `khaao-backend.service` |
+| Production env | `/etc/khaao/backend.env`, root-owned and mode `600` |
+| Database | Supabase Postgres **Session Pooler** connection URL (not the direct IPv6-only host) |
+| Reverse proxy / TLS | Caddy, configuration `/etc/caddy/Caddyfile` |
+| Frontend | `/var/www/khaao/frontend/releases/<commit>`; `current` symlink selects the live release |
+| Authentication | Firebase project `khaao0`; Google provider enabled; `khaaos.app` authorized |
+| Student rule | `ALLOWED_EMAIL_DOMAIN=sst.scaler.com` in `/etc/khaao/backend.env` |
+
+### One-command production checks
+
+After SSHing into the VM, run:
+
+```bash
+sudo systemctl is-active khaao-backend caddy
+curl -fsS http://localhost:8080/api/health && echo
+curl -fsSI https://khaaos.app/api/health
+readlink -f /var/www/khaao/frontend/current
+git -C /opt/khaao/app rev-parse --short HEAD
+```
+
+Expected: both services are `active`, both health checks succeed, `current`
+points to a release directory, and that release corresponds to the most
+recent successful GitHub deployment.
 
 ---
 
@@ -443,17 +482,89 @@ database/branch or restores in place. General shape:
 
 ---
 
-## Reminder for whoever picks this up
+## 9. Automatic deployment from GitHub
 
-This runbook and the files alongside it
-(`deploy/Caddyfile`, `deploy/khaao-backend.service`) are **configuration
-artifacts only** — nothing has actually been provisioned or deployed. Real
-deployment still requires a human with:
+The workflow is [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml).
+It runs on every push to `main` (and can also be run manually from GitHub
+Actions). It runs backend and frontend quality checks, builds the Linux
+backend and Vite frontend, uploads them to Azure over SSH, activates a
+commit-named frontend release, restarts the backend, reloads Caddy, and checks
+the local API health endpoint.
 
-- A registered domain (to replace the `khaao.example.com` placeholder)
-- A server/VM to run Caddy + the Go binary
-- Dashboard access to create the Firebase project and Cloudinary account
-  (§ 3 in particular cannot be checked by an agent — it needs a human login)
-- A managed Postgres account
+### Required GitHub repository secrets
 
-Follow §§ 1-7 above in order; § 8 is ongoing reference, not a one-time step.
+Set these under **Repository → Settings → Secrets and variables → Actions**:
+
+| Secret | Meaning |
+|---|---|
+| `AZURE_HOST` | The Azure VM public IPv4 address |
+| `AZURE_SSH_PRIVATE_KEY` | The full private-key PEM for the `khaao` VM user |
+
+Never commit the key, paste it in chat, or add it to `backend.env`. If it is
+ever exposed, create a new keypair, replace the VM's authorized public key,
+then replace the GitHub secret.
+
+### Normal release procedure
+
+```bash
+git add <changed-files>
+git commit -m "describe the change"
+git push origin main
+```
+
+Open GitHub → **Actions** → **Deploy production** and wait for the green
+check. A `git push` alone is not a completed live release; the deployment run
+must finish successfully.
+
+### If a deployment fails
+
+1. Open the failed GitHub Actions run and inspect its first failed step. Do
+   not paste credentials from logs into chat or issues.
+2. If a test/build step failed, fix it locally, rerun the relevant test,
+   commit, and push again.
+3. If SSH/upload failed, verify the VM is running, `AZURE_HOST` is still its
+   public IP, and the SSH secret contains both PEM boundary lines with no
+   extra quotes.
+4. If activation or the health check failed, SSH to the VM and run:
+
+   ```bash
+   sudo systemctl status khaao-backend caddy --no-pager
+   sudo journalctl -u khaao-backend -n 100 --no-pager
+   sudo journalctl -u caddy -n 100 --no-pager
+   curl -i http://localhost:8080/api/health
+   sudo caddy validate --config /etc/caddy/Caddyfile
+   ```
+
+5. If the old frontend appears live, inspect the release pointer:
+
+   ```bash
+   readlink -f /var/www/khaao/frontend/current
+   ls -lt /var/www/khaao/frontend/releases | head
+   ```
+
+### Roll back safely
+
+Each frontend release is retained as `releases/<commit>` and the server's
+source checkout/backend binary are tied to a commit. Prefer pushing a Git
+revert commit to `main`; GitHub Actions will deploy it and keep frontend and
+backend in sync. Do not only change the frontend symlink except for a very
+short emergency, because frontend and backend API versions may differ.
+
+### Infrastructure changes are manual
+
+The workflow deploys application code, not secrets or infrastructure. Treat
+these as deliberate manual changes on the VM/dashboard:
+
+- `/etc/khaao/backend.env` for production configuration and secrets
+- `/etc/caddy/Caddyfile` for domain, CSP, proxy, or TLS changes
+- Azure networking, DNS, Firebase, and Supabase settings
+
+After any manual Caddy edit, validate it before reloading:
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+The repository Caddyfile intentionally has `khaao.example.com` as a template
+placeholder. Never overwrite the live Caddyfile with it without replacing the
+hostname first.
