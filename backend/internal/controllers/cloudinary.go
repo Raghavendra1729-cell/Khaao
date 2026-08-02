@@ -21,6 +21,11 @@ type CloudinarySignatureResponse struct {
 
 func GetCloudinarySignature(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if cfg.CloudinaryCloudName == "" || cfg.CloudinaryAPIKey == "" || cfg.CloudinaryAPISecret == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "photo uploads are not configured"})
+			return
+		}
+
 		timestamp := time.Now().Unix()
 		folder := "khaao-menu"
 
