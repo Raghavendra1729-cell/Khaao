@@ -1,0 +1,108 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deployments race to replace the backend binary or frontend
+# release directory. A newer push supersedes an older queued deployment.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Test, build, and deploy to Azure
+    runs-on: ubuntu-latest
+    env:
+      AZURE_HOST: ${{ secrets.AZURE_HOST }}
+      AZURE_USER: khaao
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify backend
+        working-directory: backend
+        run: |
+          test -z "$(gofmt -l .)"
+          go build ./...
+          go vet ./...
+          go test ./... -race
+
+      - name: Verify and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run format:check
+          npx tsc -b --noEmit
+          npm test
+          npm run build
+
+      - name: Build deploy artifacts
+        run: |
+          mkdir -p artifacts
+          (cd backend && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../artifacts/khaao-backend ./cmd/server)
+          tar -C frontend/dist -czf artifacts/khaao-frontend.tar.gz .
+
+      - name: Configure SSH
+        env:
+          AZURE_SSH_PRIVATE_KEY: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
+        run: |
+          deploy_key="$HOME/.ssh/khaao_deploy_key"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AZURE_SSH_PRIVATE_KEY" > "$deploy_key"
+          chmod 600 "$deploy_key"
+          ssh-keyscan -H "$AZURE_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload release artifacts
+        run: |
+          deploy_key="$HOME/.ssh/khaao_deploy_key"
+          scp -i "$deploy_key" artifacts/khaao-backend "$AZURE_USER@$AZURE_HOST:/tmp/khaao-backend-${GITHUB_SHA}"
+          scp -i "$deploy_key" artifacts/khaao-frontend.tar.gz "$AZURE_USER@$AZURE_HOST:/tmp/khaao-frontend-${GITHUB_SHA}.tar.gz"
+
+      - name: Activate release and verify health
+        run: |
+          deploy_key="$HOME/.ssh/khaao_deploy_key"
+          ssh -i "$deploy_key" "$AZURE_USER@$AZURE_HOST" "bash -s" -- "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          sha="$1"
+          app_root=/opt/khaao/app
+          frontend_root=/var/www/khaao/frontend
+          release_dir="$frontend_root/releases/$sha"
+
+          git -C "$app_root" fetch --depth=1 origin main
+          git -C "$app_root" reset --hard "$sha"
+
+          sudo install -o root -g root -m 755 "/tmp/khaao-backend-$sha" /opt/khaao/bin/khaao-backend
+          rm "/tmp/khaao-backend-$sha"
+
+          sudo mkdir -p "$release_dir"
+          sudo tar -xzf "/tmp/khaao-frontend-$sha.tar.gz" -C "$release_dir"
+          rm "/tmp/khaao-frontend-$sha.tar.gz"
+
+          # The initial manual deploy used /dist. Switch Caddy to a stable
+          # /current symlink once; every later deploy flips that symlink
+          # atomically to a fully-uploaded release directory.
+          sudo sed -i 's#/var/www/khaao/frontend/dist#/var/www/khaao/frontend/current#' /etc/caddy/Caddyfile
+          sudo ln -sfn "releases/$sha" "$frontend_root/current"
+
+          sudo caddy validate --config /etc/caddy/Caddyfile
+          sudo systemctl restart khaao-backend
+          sudo systemctl reload caddy
+          curl --fail --silent --show-error http://localhost:8080/api/health
+          REMOTE
