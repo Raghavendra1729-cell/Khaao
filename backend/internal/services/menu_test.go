@@ -140,6 +140,40 @@ func TestMenuCreateRuneSafeTagTruncation(t *testing.T) {
 	}
 }
 
+func TestMenuCreateValidatesPhotoURLAgainstProductionImagePolicy(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		photoURL string
+		wantErr  bool
+	}{
+		{"empty optional photo", "", false},
+		{"cloudinary https URL", "https://res.cloudinary.com/khaao/image/upload/v1/chai.jpg", false},
+		{"unencrypted Cloudinary URL", "http://res.cloudinary.com/khaao/image/upload/v1/chai.jpg", true},
+		{"unapproved image host", "https://images.example.com/chai.jpg", true},
+		{"Cloudinary lookalike host", "https://res.cloudinary.com.example.com/chai.jpg", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, _ := newMenuService()
+			_, err := svc.Create(ctx, services.MenuItemInput{
+				Name:     "Chai",
+				Price:    100,
+				Diet:     "veg",
+				PhotoURL: tt.photoURL,
+			})
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+		})
+	}
+}
+
 // TestMenuUpdateAppliesInputFields is a plain happy-path check on
 // MenuService.Update — it had zero prior test coverage, and the fix for the
 // lost-update race (TestMenuUpdateDoesNotClobberConcurrentStockChange)
