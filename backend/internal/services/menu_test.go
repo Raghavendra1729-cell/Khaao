@@ -3,6 +3,7 @@ package services_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -100,13 +101,59 @@ func TestMenuListAvailableCacheRace(t *testing.T) {
 	}
 	menuRepo.blockFindAll = nil
 
-	callsBeforeSecondRead := menuRepo.findAllCalls
+	callsBeforeSecondRead := menuRepo.findAllCallCount()
 	if _, err := svc.ListAvailable(ctx); err != nil {
 		t.Fatalf("ListAvailable (post-race): %v", err)
 	}
-	if menuRepo.findAllCalls == callsBeforeSecondRead {
+	if menuRepo.findAllCallCount() == callsBeforeSecondRead {
 		t.Fatalf("post-race ListAvailable served from cache instead of re-reading — " +
 			"the racing stale write clobbered the invalidation")
+	}
+}
+
+// TestMenuListAvailableCoalescesConcurrentMisses proves a cache invalidation
+// cannot turn one menu_update event into one database read per connected
+// student. A cache miss may perform the three aggregate queries once; callers
+// arriving while that read is in flight must share its result instead.
+func TestMenuListAvailableCoalescesConcurrentMisses(t *testing.T) {
+	ctx := context.Background()
+	svc, _, menuRepo := newMenuService()
+	menuRepo.items = []models.MenuItem{{ID: 1, Name: "Chai", Price: 100, IsAvailable: true}}
+
+	unblock := make(chan struct{})
+	menuRepo.blockFindAll = unblock
+
+	const callers = 40
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := svc.ListAvailable(ctx)
+			errs <- err
+		}()
+	}
+	close(start)
+
+	// Give all callers a chance to encounter the intentionally blocked miss.
+	// Without coalescing, every one reaches FindAll before this channel opens.
+	time.Sleep(100 * time.Millisecond)
+	if calls := menuRepo.findAllCallCount(); calls != 1 {
+		close(unblock)
+		wg.Wait()
+		t.Fatalf("FindAll calls during one concurrent cache miss = %d, want 1", calls)
+	}
+
+	close(unblock)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("ListAvailable: %v", err)
+		}
 	}
 }
 

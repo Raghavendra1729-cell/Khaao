@@ -8,53 +8,32 @@
 >
 > **§ 12 is the working protocol.** Read it before you pick up a task.
 
-## Current state (2026-07-28 — fifth pass)
+## Current state (2026-08-03 — production bottleneck pass)
 
-Everything landed through 2026-08-03 is committed and green. R1–R31, F1–F24,
-the G-series, the T-series (2026-07-22 audit), the U-series (2026-07-25 audit),
-V1–V10, H2, Q1/Q2, W1/W2/W4/W6/W9, P1/P2/P3/P6/P7, S1/S2 and X1–X7 are all in
-`main`. **The long task write-ups for finished work were removed from this file
-on 2026-07-28** — each one now survives as a single row in its section's status
-table, which is where § 12.5 says a landed task belongs. The reasoning behind
-each fix is in `git log`.
+Everything through `b95a6dc` is committed, deployed from `main`, and its
+production workflow is green. The historical R/F/G/T/U/V/H/Q/W/P/S/X/Y work
+is recorded in the tables below; detailed rationale belongs in `git log`.
 
-**§ 9.12, the Y-series** is a 16-item frontend backlog from a fresh audit
-against the built output, aimed at the owner's brief (*"find issues, any
-optimization needed; frontend improvements, visualizations for better UX/UI —
-I want it to look the best, best experience, smooth"*). **This pass landed
-twelve of the sixteen**: Y1 (font reclaim), the `Modal.tsx` bundle
-(Y3/Y7/Y10), `StatusStamps.tsx` (Y2), `QtyStepper.tsx` + `MenuItemCard.tsx`
-(Y9→Y4), `History.tsx`'s day-shape + revenue-per-item visualization
-(Y5/Y13), and the cross-file sweeps (Y8 keyboard-reachable rails, Y14
-skeleton status announcements, Y16 drops the trailing `.00`). Each landed
-with a regression test confirmed red against the unfixed code first, in four
-worktree-isolated agents (bundles M+N, O, P run in parallel; Q run after,
-since it sweeps files the first three had just edited) merged back to `main`
-one at a time with the full gate re-run after each merge. **Two of the four
-merges needed hand resolution** — the M+N/P agents' worktrees branched before
-Y1 landed, and the Q agent's worktree branched before M/N/O/P landed, so its
-`History.test.tsx` collided with Y5's and its `Menu.test.tsx` diff collided
-with Y4's; both were reconciled by hand, and one real fallout bug (Y5's test
-asserting the pre-Y16 `.00`-suffixed price strings) was caught and fixed in
-the process. **Y6, Y11, Y12, Y15 are now complete.**
+This pass closes three scale/reliability risks found while tracing production
+paths: concurrent menu refetches share one in-flight database load, stale SSE
+errors cannot tear down a healthy replacement connection, and the expiry worker
+has a focused ready-order deadline index. The first two have regression tests
+that failed before their fixes.
 
-Gate on the current tree, all landed Y-series work included:
+Gate on the current tree:
 
 | Gate | Result |
 |---|---|
 | `tsc -b --noEmit` | clean |
-| `npm run lint` | 0 errors, 26 pre-existing-style warnings (was 24; +2 non-null-assertion warnings in the new rail test, same pattern as elsewhere in the codebase) |
-| `vitest run` | **149/149 passing**, 24 test files (was 111/19 before this pass) |
+| `npm run lint` | 0 errors, 25 existing-style warnings |
+| `vitest run` | **150/150 passing**, 24 test files |
 | `npm run format:check` | clean |
-| `vite build` initial student JS | **244.40 KB raw** — under the 250 KB hard stop |
-| `vite build` service-worker precache | **706.68 KiB, 41 entries — under the ~800 KB soft ceiling** |
-| Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
+| `vite build` initial student JS | **244.44 KB raw** — under the 250 KB hard stop |
+| `vite build` service-worker precache | **706.72 KiB, 41 entries — under the ~800 KB soft ceiling** |
+| Backend (`go test ./... -race`) | clean |
 
-**Precache arc this pass:** 801.93 KiB/49 entries (start) → 696.51 KiB/42
-(after Y1's font reclaim alone) → 702.92 KiB/42 (final, after Y2/Y5/Y14 added
-back ~6.4 KB of CSS/markup). Still comfortably under the ceiling; the
-remaining ~97 KB is what Y11 and Y15 (both still open) should be measured
-against.
+The current precache remains comfortably below its soft ceiling; preserve that
+headroom when evaluating larger offline features.
 
 ### The backlogs
 
@@ -89,33 +68,11 @@ against.
 
 ### Start here
 
-**§ 9.12 (Y-series) is 12/16 done — bundles Y0, M, N, O, P, Q have all
-landed.** Suggested order for what's left:
-
-1. **Y6** — `Orders.tsx`, the accept-with-nothing-checked guard. Small, and
-   the file will get busier once Y15/H1 land, so a good first pick.
-2. **Y15** — the queue-depth strip, same file as Y6 (sequence after it), and
-   read § 9.4-H5 first so the two urgency treatments share one visual idiom.
-   H1 (the cash drawer) also owns this file and is the largest of the three —
-   land it last (see the bundle table's "K — shop orders page" row).
-3. **Y12 → H3 → Y11**, in that order, all on `pages/student/OrderStatus.tsx`
-   (the bundle table's "I — order-status page" row): Y12 is a two-line
-   `localStorage` guard; H3 is the price-drift notice (V3 already landed, so
-   it's unblocked); Y11 adds the elapsed-time line and is the largest — both
-   Y11 and Y15 should be measured against the ~97 KB of precache headroom
-   still left from Y1.
-4. Then the still-open **H1, H3–H8** (H3 is part of step 3's bundle above,
-   the rest aren't), **P4/P5**, **W3/W5/W8**, **M1–M6**, **S3/S4/S5**,
-   **Q3–Q9** — none of these were touched this pass.
-
-**Two things carry over and are still true:**
-
-- **Do not promote the § 9.7 install push to real students until W3 is fixed.**
-  Both prompt cards still collide with the bottom nav on notched iPhones —
-  a bad first impression on the exact feature being promoted.
-- **W5 (§ 9.8) needs a decision, not just code.** P3 built the *manual*
-  Reconnect button; W5 also wanted the *silent* automatic re-post of a pruned
-  subscription. Settle whether the button alone closes it before writing more.
+The Y-series is complete; do not use its old task text as a backlog. The next
+authorized work is the still-open H, Q, P4, M, and S items listed below. Do
+not start the B-series without an explicit owner decision. Before any release,
+preserve the production deployment check in `AGENT_HANDOFF.md`: a push is not
+deployed until GitHub Actions' **Deploy production** workflow is green.
 ---
 
 ## 1. What is Khaao?

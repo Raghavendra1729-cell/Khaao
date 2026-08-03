@@ -44,6 +44,9 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
 
   useEffect(() => {
     if (!path) return;
+    // Capture the non-null route for the async ticket callback. `path` is a
+    // dependency and could be null again by the time that callback runs.
+    const streamPath = path;
 
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -51,18 +54,23 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
     let stopped = false;
 
     function scheduleReconnect(): void {
-      if (stopped) return;
+      // An EventSource can emit more than one terminal error. Keep only one
+      // pending retry so repeated/late errors cannot create parallel streams.
+      if (stopped || reconnectTimer) return;
       // Jittered (0.5x-1.5x) so a backend restart that drops every connected
       // client at the same instant doesn't have all ~1-2k of them remint
       // tickets and reconnect on the exact same synchronized schedule.
       // Capped after jitter so MAX_BACKOFF_MS stays a true ceiling.
       const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempt * (0.5 + Math.random()), MAX_BACKOFF_MS);
       attempt += 1;
-      reconnectTimer = setTimeout(connect, delay);
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
     }
 
     function connect(): void {
-      if (stopped) return;
+      if (stopped || source) return;
 
       // Mint a brand-new ticket for this specific connection attempt (never
       // reuse one across reconnects — a ticket is one-use and short-lived,
@@ -70,10 +78,11 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
       mintSSETicket()
         .then((ticket) => {
           if (stopped) return;
-          const separator = path!.includes('?') ? '&' : '?';
-          source = new EventSource(`${path}${separator}ticket=${encodeURIComponent(ticket)}`);
+          const separator = streamPath.includes('?') ? '&' : '?';
+          const nextSource = new EventSource(`${streamPath}${separator}ticket=${encodeURIComponent(ticket)}`);
+          source = nextSource;
 
-          source.onopen = () => {
+          nextSource.onopen = () => {
             attempt = 0; // reset backoff on a successful connection
             // A dropped connection (or a server restart between a DB commit
             // and its broadcast — see STATUS.md § SSE replay guarantee) can
@@ -83,7 +92,7 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
             onOpenRef.current?.();
           };
 
-          source.onmessage = (event: MessageEvent<string>) => {
+          nextSource.onmessage = (event: MessageEvent<string>) => {
             try {
               const data = JSON.parse(event.data) as SSEMessage;
               onMessageRef.current(data);
@@ -92,8 +101,11 @@ export function useSSE(path: string | null, onMessage: (msg: SSEMessage) => void
             }
           };
 
-          source.onerror = () => {
-            source?.close();
+          nextSource.onerror = () => {
+            // A delayed error from a retired EventSource must not close the
+            // current replacement connection or enqueue another retry.
+            if (stopped || source !== nextSource) return;
+            nextSource.close();
             source = null;
             scheduleReconnect();
           };

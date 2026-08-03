@@ -15,6 +15,7 @@ import (
 	"khaao/internal/realtime"
 	"khaao/internal/repository"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/datatypes"
 )
 
@@ -170,6 +171,10 @@ type MenuService struct {
 	// serving pre-mutation data for a full TTL despite the doc comment
 	// above promising a shopkeeper's own change is never masked.
 	cacheGen uint64
+	// cacheLoad coalesces concurrent cache misses. A menu_update event can
+	// make thousands of clients refetch at once; without this, each caller
+	// would independently run the menu, order-count, and rating queries.
+	cacheLoad singleflight.Group
 }
 
 func NewMenuService(repo repository.MenuRepo, orderRepo repository.OrderRepo, ratingRepo repository.RatingRepo, poolRepo repository.PoolRepo, uow repository.UnitOfWork, hub *realtime.Hub, cfg *config.Config) *MenuService {
@@ -197,33 +202,49 @@ func (s *MenuService) ListAvailable(ctx context.Context) ([]MenuItemResponse, er
 		s.cacheMu.Unlock()
 		return items, nil
 	}
-	gen := s.cacheGen
 	s.cacheMu.Unlock()
 
-	items, err := s.repo.FindAll(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	counts, err := s.orderCountsToday(ctx)
-	if err != nil {
-		return nil, err
-	}
-	aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp := toMenuResponses(items, s.now(), counts, aggs)
+	result, err, _ := s.cacheLoad.Do("available", func() (any, error) {
+		// A caller may have populated the cache after this request's initial
+		// check but before it became the singleflight leader.
+		s.cacheMu.Lock()
+		if s.cache != nil && time.Now().Before(s.cache.expiresAt) {
+			items := s.cache.items
+			s.cacheMu.Unlock()
+			return items, nil
+		}
+		gen := s.cacheGen
+		s.cacheMu.Unlock()
 
-	s.cacheMu.Lock()
-	// Only commit if nothing invalidated the cache while we were reading —
-	// otherwise this stale read would clobber a fresher invalidation and
-	// serve pre-mutation data for a full TTL.
-	if s.cacheGen == gen {
-		s.cache = &menuCacheEntry{items: resp, expiresAt: time.Now().Add(availableMenuCacheTTL)}
-	}
-	s.cacheMu.Unlock()
+		items, err := s.repo.FindAll(ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		counts, err := s.orderCountsToday(ctx)
+		if err != nil {
+			return nil, err
+		}
+		aggs, err := s.ratingRepo.GetMenuAggregates(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp := toMenuResponses(items, s.now(), counts, aggs)
 
-	return resp, nil
+		s.cacheMu.Lock()
+		// Only commit if nothing invalidated the cache while we were reading —
+		// otherwise this stale read would clobber a fresher invalidation and
+		// serve pre-mutation data for a full TTL.
+		if s.cacheGen == gen {
+			s.cache = &menuCacheEntry{items: resp, expiresAt: time.Now().Add(availableMenuCacheTTL)}
+		}
+		s.cacheMu.Unlock()
+
+		return resp, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.([]MenuItemResponse), nil
 }
 
 func (s *MenuService) ListAll(ctx context.Context) ([]MenuItemResponse, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,6 +207,7 @@ type mockMenuRepo struct {
 	blockFindAll <-chan struct{}
 	// findAllCalls counts FindAll invocations so a test can tell whether a
 	// later ListAvailable call hit the cache or triggered a fresh repo read.
+	findAllMu    sync.Mutex
 	findAllCalls int
 	// deletedIDs mirrors a real soft delete: Delete marks the id rather than
 	// removing it from items, and FindMapByIDs (like GORM's default scope)
@@ -214,7 +216,9 @@ type mockMenuRepo struct {
 }
 
 func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuItem, error) {
+	m.findAllMu.Lock()
 	m.findAllCalls++
+	m.findAllMu.Unlock()
 	if m.blockFindAll != nil {
 		<-m.blockFindAll
 	}
@@ -228,6 +232,12 @@ func (m *mockMenuRepo) FindAll(ctx context.Context, avail bool) ([]models.MenuIt
 		return out, nil
 	}
 	return m.items, nil
+}
+
+func (m *mockMenuRepo) findAllCallCount() int {
+	m.findAllMu.Lock()
+	defer m.findAllMu.Unlock()
+	return m.findAllCalls
 }
 func (m *mockMenuRepo) FindByID(ctx context.Context, id uint) (*models.MenuItem, error) {
 	return &models.MenuItem{ID: id, Name: "Test Item", Price: 1000, IsAvailable: true}, nil

@@ -72,6 +72,27 @@ describe('useSSE', () => {
     window.removeEventListener('khaao:unauthorized', unauthorizedHandler);
   });
 
+  it('ignores a late error from a replaced EventSource', async () => {
+    vi.mocked(authApi.mintSSETicket).mockResolvedValue('tok');
+    vi.spyOn(Math, 'random').mockReturnValue(0); // first retry in 500ms
+    renderHook(() => useSSE('/api/stream', vi.fn()));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const first = latestSource();
+    first.onerror?.();
+    await vi.advanceTimersByTimeAsync(500);
+    const replacement = latestSource();
+    expect(replacement).not.toBe(first);
+
+    // Browsers can deliver the old connection's final error after the retry
+    // has already opened. It must not close the healthy replacement or queue
+    // another reconnect loop.
+    first.onerror?.();
+    expect(replacement.closed).toBe(false);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+  });
+
   it('caps backoff delay at 15s and never exceeds it', async () => {
     vi.mocked(authApi.mintSSETicket).mockResolvedValue('tok');
     renderHook(() => useSSE('/api/stream', vi.fn()));
