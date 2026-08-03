@@ -5,6 +5,10 @@ import { Button } from '../components/ui/Button';
 import { GetTheApp } from '../components/settings/GetTheApp';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
 
+// Vite replaces this at build time; the typeof guard keeps direct Vitest and
+// other non-Vite module execution honest rather than crashing Settings.
+const buildId = typeof __KHAOO_BUILD_ID__ === 'string' ? __KHAOO_BUILD_ID__ : 'local';
+
 /**
  * Settings — reachable from AvatarMenu, available to both roles (STATUS.md
  * § 9.7 P1). Lazy-loaded as its own chunk via App.tsx's route-group `lazy()`
@@ -63,16 +67,31 @@ export function SettingsPage() {
         <h2 className="mb-2 font-display text-lg font-bold text-ink">
           {showHindi ? 'Khaao के बारे में' : 'About Khaao'}
         </h2>
-        {/* TODO(STATUS.md § 9.10-S3): who runs Khaao, what it stores, and the
-            "we will never ask you to pay in the app" line belong here. Not
-            implemented — do not fabricate operator/contact/data-handling
-            claims; that's this task's own explicit warning. */}
-        <p className="text-sm text-ink/40">{showHindi ? 'जल्द आ रहा है।' : 'Coming soon.'}</p>
+        <div className="flex flex-col gap-2 text-sm text-ink/70">
+          <p>
+            {showHindi
+              ? 'Khaao कैंटीन के लिए पहले से ऑर्डर करने और टोकन के साथ पिक-अप करने का तरीका है।'
+              : 'Khaao lets you order from the canteen ahead and pick up with a token.'}
+          </p>
+          <p>
+            {showHindi
+              ? 'हम आपके खाते, ऑर्डर और आइटम की जानकारी दिखाते हैं ताकि कैंटीन आपका ऑर्डर तैयार और पूरा कर सके।'
+              : 'Your account, order, and item details are used to prepare your order and show its live status.'}
+          </p>
+          <p className="font-medium text-ink">
+            {showHindi
+              ? 'भुगतान हमेशा काउंटर पर होता है — Khaao कभी भी ऐप में भुगतान नहीं मांगेगा।'
+              : 'Payment is always at the counter — Khaao will never ask you to pay in the app.'}
+          </p>
+          <p className="text-xs text-ink/50">
+            {showHindi
+              ? 'मदद चाहिए? अपनी कैंटीन टीम से उनके सामान्य सहायता माध्यम से बात करें।'
+              : 'Need help? Contact your canteen team through their usual support channel.'}
+          </p>
+        </div>
       </Card>
 
-      {/* TODO(STATUS.md § 9.10-S4): build identity (short git SHA + build
-          timestamp, injected via Vite `define`) belongs here as small mono
-          footer text. Not implemented — do not fabricate a version string. */}
+      <p className="pb-safe text-center font-display text-[11px] text-ink/40">Build {buildId}</p>
     </div>
   );
 }

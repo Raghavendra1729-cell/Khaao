@@ -121,6 +121,9 @@ export function Login() {
           <p className="mt-4 text-center text-sm text-ink/60">
             {domain ? `Use your @${domain} account` : 'Use your college Google account'}
           </p>
+          <p className="mt-2 text-center text-xs text-ink/50">
+            Add Khaao to your home screen after signing in for a faster canteen queue.
+          </p>
         </div>
       </div>
     </div>
