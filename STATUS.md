@@ -10,7 +10,7 @@
 
 ## Current state (2026-07-28 — fifth pass)
 
-Everything landed through 2026-07-27 is committed and green. R1–R31, F1–F24,
+Everything landed through 2026-08-03 is committed and green. R1–R31, F1–F24,
 the G-series, the T-series (2026-07-22 audit), the U-series (2026-07-25 audit),
 V1–V10, H2, Q1/Q2, W1/W2/W4/W6/W9, P1/P2/P3/P6/P7, S1/S2 and X1–X7 are all in
 `main`. **The long task write-ups for finished work were removed from this file
@@ -36,7 +36,7 @@ Y1 landed, and the Q agent's worktree branched before M/N/O/P landed, so its
 `History.test.tsx` collided with Y5's and its `Menu.test.tsx` diff collided
 with Y4's; both were reconciled by hand, and one real fallout bug (Y5's test
 asserting the pre-Y16 `.00`-suffixed price strings) was caught and fixed in
-the process. **Y6, Y11, Y12, Y15 remain open.**
+the process. **Y6, Y11, Y12, Y15 are now complete.**
 
 Gate on the current tree, all landed Y-series work included:
 
@@ -46,8 +46,8 @@ Gate on the current tree, all landed Y-series work included:
 | `npm run lint` | 0 errors, 26 pre-existing-style warnings (was 24; +2 non-null-assertion warnings in the new rail test, same pattern as elsewhere in the codebase) |
 | `vitest run` | **148/148 passing**, 24 test files (was 111/19 before this pass) |
 | `npm run format:check` | clean |
-| `vite build` initial student JS | **241.78 KB raw** — under the 250 KB hard stop, +0.04 KB this pass (negligible, from Y8's rail attributes) |
-| `vite build` service-worker precache | **702.92 KiB, 42 entries — under the ~800 KB soft ceiling**, ~97 KB headroom left |
+| `vite build` initial student JS | **244.40 KB raw** — under the 250 KB hard stop |
+| `vite build` service-worker precache | **706.68 KiB, 41 entries — under the ~800 KB soft ceiling** |
 | Backend (`go build` / `vet` / `gofmt` / `test`) | unchanged this pass — not re-run, not claimed |
 
 **Precache arc this pass:** 801.93 KiB/49 entries (start) → 696.51 KiB/42
@@ -64,12 +64,12 @@ against.
 | **§ 9.4 — H-series (H1–H8)** | Frontend design + UX | 8 | H2 done; **H1, H3–H8 open** |
 | **§ 9.5 — Q-series (Q1–Q9)** | Testing, as real student / shopkeeper scenarios | 9 | Q1/Q2 done; **Q3–Q9 open** |
 | § 9.6 — B-series (B1–B16) | Deferred product decisions | 16 | **NOT authorized** — owner picks deliberately |
-| **§ 9.7 — P-series (P1–P7)** | Install & distribution, the Settings screen | 7 | P1/P2/P3/P6/P7 done; **P4/P5 open** |
-| **§ 9.8 — W-series (W1–W9)** | PWA / mobile defects, 2026-07-27 audit | 9 | W1/W2/W4/W6/W9 done, W7 investigated; **W3/W5/W8 open** |
+| **§ 9.7 — P-series (P1–P7)** | Install & distribution, the Settings screen | 7 | P1/P2/P3/P5/P6/P7 done; **P4 open** |
+| **§ 9.8 — W-series (W1–W9)** | PWA / mobile defects, 2026-07-27 audit | 9 | W1/W2/W3/W4/W5/W6/W8/W9 done, W7 investigated |
 | **§ 9.9 — M-series (M1–M6)** | Mobile experience — the app *as a phone app* | 6 | **All open** |
 | **§ 9.10 — S-series (S1–S5)** | Trust & provenance | 5 | S1/S2 done; **S3/S4/S5 open** |
 | § 9.11 — X-series (X1–X7) | Frontend defects + design, 2026-07-27 fourth pass | 7 | **All done** — records only |
-| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | 12/16 done (Y1–Y5, Y7–Y10, Y13, Y14, Y16); **Y6, Y11, Y12, Y15 open** |
+| **§ 9.12 — Y-series (Y1–Y16)** | **Frontend defects + design elevation + visualizations, 2026-07-28 fifth pass** | **16** | **All done** |
 | Deployment D-1..D-7 | Human-led, needs real infra | 7 | Open |
 
 > **Note the section order.** § 9.6 (deferred, *not* authorized) sits between
