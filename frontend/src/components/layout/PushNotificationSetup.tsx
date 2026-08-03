@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../../context/LanguageContext';
 import { Button } from '../ui/Button';
 import { useInstallPromptShowing } from '../../lib/promptCoordination';
-import { requestNotificationPermissionAndSubscribe } from '../../lib/push';
+import { requestNotificationPermissionAndSubscribe, subscribeCurrentDevice } from '../../lib/push';
 import { useToast } from '../ui/Toast';
+import { Modal } from '../ui/Modal';
 
 interface PushNotificationSetupProps {
   /** Gates Hindi copy explicitly, matching Layout.tsx's AvatarMenu — a
@@ -59,12 +60,27 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
       return;
     }
 
+    let cancelled = false;
     navigator.serviceWorker.ready.then((registration) => {
       registration.pushManager.getSubscription().then((subscription) => {
-        if (subscription || installPromptShowingRef.current) return;
+        if (cancelled || subscription || installPromptShowingRef.current) return;
+        // A backend can prune an expired subscription while the browser still
+        // holds permission. Repair that normal case quietly on mount; the
+        // visible card remains as a recovery path if the repair cannot reach
+        // the network. This keeps a granted device from losing ready alerts
+        // until somebody happens to open Settings.
+        if (Notification.permission === 'granted') {
+          void subscribeCurrentDevice().catch(() => {
+            if (!cancelled) setShowPrompt(true);
+          });
+          return;
+        }
         setShowPrompt(true);
       });
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleEnable = async () => {
@@ -100,13 +116,20 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
   }
 
   return (
-    <div className="fixed inset-x-4 bottom-20 z-40 mx-auto max-w-sm rounded-xl border border-edge bg-paper p-4 shadow-ticket">
+    <Modal
+      open
+      onClose={handleDismiss}
+      title={showHindi ? 'सूचनाएं चालू करें' : 'Enable Notifications'}
+      size="sm"
+      footer={
+        <Button type="button" onClick={handleEnable} loading={loading} fullWidth>
+          {showHindi ? 'चालू करें' : 'Enable'}
+        </Button>
+      }
+    >
       <div className="flex items-start gap-3">
         <div className="flex-1">
-          <p className="text-sm font-bold text-ink">
-            {showHindi ? 'सूचनाएं चालू करें' : 'Enable Notifications'}
-          </p>
-          <p className="mt-0.5 text-xs text-ink/70">
+          <p className="text-sm text-ink/70">
             {isShop
               ? showHindi
                 ? 'टैब बंद होने पर भी नए ऑर्डर की सूचना पाएं।'
@@ -132,10 +155,6 @@ export function PushNotificationSetup({ isShop }: PushNotificationSetupProps) {
           </svg>
         </button>
       </div>
-
-      <Button type="button" onClick={handleEnable} loading={loading} fullWidth className="mt-3">
-        {showHindi ? 'चालू करें' : 'Enable'}
-      </Button>
-    </div>
+    </Modal>
   );
 }

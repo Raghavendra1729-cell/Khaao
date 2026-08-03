@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
 import { setInstallPromptShowing } from '../../lib/promptCoordination';
 import { dismissInstallCard, isInstallCardDismissedRecently, useInstallState } from '../../lib/install';
 
@@ -40,7 +41,19 @@ export function InstallPrompt() {
   };
 
   return (
-    <div className="fixed inset-x-4 bottom-20 z-40 mx-auto max-w-sm rounded-xl border border-edge bg-paper p-4 shadow-ticket">
+    <Modal
+      open
+      onClose={handleDismiss}
+      title="Get Khaao"
+      size="sm"
+      footer={
+        state.kind === 'promptable' ? (
+          <Button type="button" onClick={handleInstallClick} fullWidth>
+            Download
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="flex items-start gap-3">
         <div className="flex-1">
           {state.kind === 'ios-manual' ? (
@@ -49,10 +62,7 @@ export function InstallPrompt() {
               <span className="font-semibold">"Add to Home Screen"</span>.
             </p>
           ) : (
-            <>
-              <p className="text-sm font-bold text-ink">Download Khaao</p>
-              <p className="mt-0.5 text-xs text-ink/70">Order faster from your home screen.</p>
-            </>
+            <p className="text-sm text-ink/70">Order faster from your home screen.</p>
           )}
         </div>
         <button
@@ -73,12 +83,6 @@ export function InstallPrompt() {
           </svg>
         </button>
       </div>
-
-      {state.kind === 'promptable' && (
-        <Button type="button" onClick={handleInstallClick} fullWidth className="mt-3">
-          Download
-        </Button>
-      )}
-    </div>
+    </Modal>
   );
 }
