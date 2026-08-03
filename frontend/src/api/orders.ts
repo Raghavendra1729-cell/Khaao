@@ -6,10 +6,10 @@ export interface OrderItemInput {
   qty: number;
 }
 
-export async function createOrder(items: OrderItemInput[]): Promise<Order> {
+export async function createOrder(items: OrderItemInput[], expectedTotal: number): Promise<Order> {
   const res = await apiFetch<{ order: Order }>('/orders', {
     method: 'POST',
-    body: { items },
+    body: { items, expected_total: expectedTotal },
   });
   return res.order;
 }

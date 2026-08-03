@@ -155,12 +155,20 @@ export function Menu() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      await createOrder(cartEntries as OrderItemInput[]);
+      return createOrder(cartEntries as OrderItemInput[], cartTotal);
     },
-    onSuccess: () => {
+    onSuccess: (order) => {
       setCart({});
       saveStoredCart({});
       setShowCheckout(false);
+      if (order?.price_changed) {
+        try {
+          sessionStorage.setItem(`khaao_price_change_${order.id}`, JSON.stringify(order.price_changed));
+        } catch {
+          // Private-browsing/quota edge cases: the order remains valid and
+          // the server's live total is still reflected by the active-order UI.
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
       queryClient.invalidateQueries({ queryKey: ['orders', 'history'] });
       showToast('Order placed — track it on Order status.', 'success');
@@ -179,6 +187,27 @@ export function Menu() {
       }
     },
     onError: (err) => {
+      // A stale menu can lose one item between opening checkout and submit.
+      // Keep the usable lines, remove the server-named line, and leave the
+      // checkout open so the student can review the corrected total.
+      if (err instanceof ApiError && err.status === 422) {
+        const unavailableItem = (menuQuery.data ?? []).find(
+          (item) => cart[item.id] > 0 && err.message.toLowerCase().includes(item.name.toLowerCase()),
+        );
+        if (unavailableItem) {
+          setCart((prev) => {
+            const next = { ...prev };
+            delete next[unavailableItem.id];
+            return next;
+          });
+          showToast(
+            `${unavailableItem.name} is no longer available and was removed from your cart.`,
+            'error',
+          );
+          queryClient.invalidateQueries({ queryKey: ['menu'] });
+          return;
+        }
+      }
       showToast(err instanceof ApiError ? err.message : 'Could not submit your order.', 'error');
       queryClient.invalidateQueries({ queryKey: ['orders', 'active'] });
     },

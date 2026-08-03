@@ -89,6 +89,14 @@ export interface Order {
   student_name: string; // "" for the student's own view
   student_email: string; // "" for the student's own view
   items: OrderItem[];
+  /** Present only in the create-order response when a stale cart total was
+   * re-priced by the live menu. It is intentionally absent from later GETs. */
+  price_changed?: PriceChange;
+}
+
+export interface PriceChange {
+  expected: number;
+  charged: number;
 }
 
 export interface PrepItem {

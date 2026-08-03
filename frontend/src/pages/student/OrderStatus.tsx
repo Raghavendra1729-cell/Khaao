@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getActiveOrder, getOrderHistory, cancelOrder, submitRatings } from '../../api/orders';
 import { getMenu } from '../../api/menu';
 import { ApiError } from '../../api/client';
-import type { MenuItem, Order, OrderStatus as OrderStatusType } from '../../api/types';
+import type { MenuItem, Order, OrderStatus as OrderStatusType, PriceChange } from '../../api/types';
 import {
   cloudinaryThumb,
   formatCountdown,
@@ -51,6 +51,49 @@ function ReadyBanner({ order }: { order: Order }) {
   );
 }
 
+function formatElapsed(createdAt: string, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - new Date(createdAt).getTime()) / 60_000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder === 0 ? `${hours}h ago` : `${hours}h ${remainder}m ago`;
+}
+
+function OrderElapsedTime({ createdAt }: { createdAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <p className="mb-4 text-center font-display text-xs text-ink/50">
+      Placed {formatDateTime(createdAt)} · {formatElapsed(createdAt, now)}
+    </p>
+  );
+}
+
+function takePriceChange(orderId: number): PriceChange | null {
+  try {
+    const key = `khaao_price_change_${orderId}`;
+    const raw = sessionStorage.getItem(key);
+    sessionStorage.removeItem(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof (parsed as PriceChange).expected !== 'number' ||
+      typeof (parsed as PriceChange).charged !== 'number'
+    ) {
+      return null;
+    }
+    return parsed as PriceChange;
+  } catch {
+    return null;
+  }
+}
+
 function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => void }) {
   const droppedItems = order.items.filter((i) => i.status === 'rejected');
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -64,6 +107,7 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
   // treats an unseeded prior status as "don't notify").
   const prevStatusRef = useRef<OrderStatusType | null>(null);
   const [ticketPopping, setTicketPopping] = useState(false);
+  const [priceChange] = useState(() => order.price_changed ?? takePriceChange(order.id));
 
   useEffect(() => {
     const prevStatus = prevStatusRef.current;
@@ -111,6 +155,15 @@ function ActiveOrderView({ order, onCancel }: { order: Order; onCancel: () => vo
       >
         <OrderTicket id={order.order_no} size="lg" />
       </div>
+
+      {order.status !== 'ready' && <OrderElapsedTime createdAt={order.created_at} />}
+
+      {priceChange && (
+        <p className="mb-4 rounded-lg border border-turmeric/40 bg-turmeric-pale px-3 py-2 text-center text-sm text-turmeric-deep">
+          Your total changed from {formatPrice(priceChange.expected)} to {formatPrice(priceChange.charged)}{' '}
+          while you were ordering. You'll pay {formatPrice(priceChange.charged)} at the counter.
+        </p>
+      )}
 
       <div className="mb-6">
         <StatusStamps status={order.status} />
@@ -511,7 +564,12 @@ export function OrderStatusPage() {
     // handful of ids — cap it rather than let it grow forever.
     const next = [...ratedOrders, orderId].slice(-50);
     setRatedOrders(next);
-    localStorage.setItem('khaao_rated_orders', JSON.stringify(next));
+    try {
+      localStorage.setItem('khaao_rated_orders', JSON.stringify(next));
+    } catch {
+      // Private-browsing/quota edge cases: keep the prompt dismissed for this
+      // session even when the completed rating cannot be remembered.
+    }
   };
 
   if (activeOrderQuery.isLoading || historyQuery.isLoading) return <OrderStatusSkeleton />;
