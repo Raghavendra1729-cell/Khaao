@@ -44,7 +44,7 @@ Gate on the current tree, all landed Y-series work included:
 |---|---|
 | `tsc -b --noEmit` | clean |
 | `npm run lint` | 0 errors, 26 pre-existing-style warnings (was 24; +2 non-null-assertion warnings in the new rail test, same pattern as elsewhere in the codebase) |
-| `vitest run` | **148/148 passing**, 24 test files (was 111/19 before this pass) |
+| `vitest run` | **149/149 passing**, 24 test files (was 111/19 before this pass) |
 | `npm run format:check` | clean |
 | `vite build` initial student JS | **244.40 KB raw** — under the 250 KB hard stop |
 | `vite build` service-worker precache | **706.68 KiB, 41 entries — under the ~800 KB soft ceiling** |
