@@ -38,6 +38,38 @@ function formatOrderAge(minutes: number, language: 'en' | 'hi'): string {
   return language === 'hi' ? `${minutes} मिनट पहले` : `${minutes} min ago`;
 }
 
+function IncomingQueueStrip({
+  incoming,
+  now,
+  language,
+}: {
+  incoming: Order[];
+  now: number;
+  language: 'en' | 'hi';
+}) {
+  if (incoming.length === 0) return null;
+  const oldestMinutes = Math.max(...incoming.map((order) => orderAgeMinutes(order.created_at, now)));
+  return (
+    <div className="flex items-center gap-4 rounded-xl bg-ink px-4 py-3 text-paper">
+      <div>
+        <p className="tabular font-display text-3xl font-bold leading-none">{incoming.length}</p>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-paper/70">
+          {language === 'hi' ? 'इंतज़ार में' : 'waiting'}
+        </p>
+      </div>
+      <div className="h-9 w-px bg-paper/20" />
+      <div>
+        <p className="tabular font-display text-xl font-bold leading-none">
+          {formatOrderAge(oldestMinutes, language)}
+        </p>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-paper/70">
+          {language === 'hi' ? 'सबसे पुराना' : 'oldest'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── New orders subpage ───────────────────────────────────────────────────────
 
 /**
@@ -223,6 +255,7 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
   });
 
   const busy = acceptMutation.isPending || rejectMutation.isPending;
+  const acceptedItemCount = pendingItems.filter((item) => checked[item.id] ?? true).length;
   const minutesWaiting = orderAgeMinutes(order.created_at, now);
   const ageClass = minutesWaiting >= 10 ? 'text-stamp' : minutesWaiting >= 5 ? 'text-turmeric-deep' : '';
 
@@ -312,13 +345,20 @@ function IncomingOrderCard({ order, now }: { order: Order; now: number }) {
           </Button>
           <Button
             className="flex-1"
-            disabled={busy}
+            disabled={busy || acceptedItemCount === 0}
             loading={acceptMutation.isPending}
             onClick={() => acceptMutation.mutate()}
           >
             <span>{language === 'hi' ? 'स्वीकारें' : 'Accept'}</span>
           </Button>
         </div>
+        {acceptedItemCount === 0 && (
+          <p className="mt-2 text-center text-xs font-medium text-stamp-dark">
+            {language === 'hi'
+              ? 'स्वीकारने के लिए कुछ नहीं बचा — अस्वीकार करें।'
+              : 'Nothing left to accept — use Reject.'}
+          </p>
+        )}
       </Card>
 
       {showRejectDialog && (
@@ -518,6 +558,7 @@ function NewOrdersList({
   }
   return (
     <div className="flex flex-col gap-3">
+      <IncomingQueueStrip incoming={incoming} now={now} language={language} />
       {incoming.map((order) => (
         <IncomingOrderCard key={order.id} order={order} now={now} />
       ))}

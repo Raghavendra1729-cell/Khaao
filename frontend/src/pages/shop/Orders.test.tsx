@@ -55,6 +55,17 @@ function baseOrder(overrides: Partial<Order> = {}): Order {
         status: 'pending',
         price_each: 1000,
       },
+      {
+        id: 2,
+        menu_item_id: 11,
+        name: 'Tea',
+        photo_url: null,
+        qty: 1,
+        allocated_qty: 0,
+        handed_qty: 0,
+        status: 'pending',
+        price_each: 1000,
+      },
     ],
     ...overrides,
   };
@@ -102,7 +113,7 @@ describe('Shop Accept surfaces stock-update failures (STATUS.md § 9.5 T3)', () 
     await waitFor(() => expect(screen.getByText('Samosa ×2')).toBeInTheDocument());
 
     // Uncheck the item — Accept then tries to mark it out of stock and reject it.
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByText('Accept'));
 
     await waitFor(() => expect(acceptOrderMock).toHaveBeenCalledWith(1, [1]));
@@ -136,7 +147,7 @@ describe('Shop Accept/Reject do not flag stock when the primary action itself fa
 
     await waitFor(() => expect(screen.getByText('Samosa ×2')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByText('Accept'));
 
     await waitFor(() => expect(acceptOrderMock).toHaveBeenCalledWith(1, [1]));
@@ -158,13 +169,37 @@ describe('Shop Accept/Reject do not flag stock when the primary action itself fa
     // Open the reject dialog and tick the item as unavailable.
     fireEvent.click(screen.getByText('Reject'));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getAllByRole('checkbox')[0]);
     fireEvent.click(within(dialog).getByText('Reject order'));
 
     await waitFor(() => expect(rejectOrderMock).toHaveBeenCalledWith(1));
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
 
     expect(setMenuItemStockMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Incoming order acceptance guard (STATUS.md § 9.12 Y6)', () => {
+  beforeEach(() => {
+    getShopOrdersMock.mockReset();
+    acceptOrderMock.mockReset();
+    rejectOrderMock.mockReset();
+    setMenuItemStockMock.mockReset();
+  });
+
+  it('requires at least one checked item before Accept can submit', async () => {
+    getShopOrdersMock.mockResolvedValue({ incoming: [baseOrder()], in_progress: [], awaiting_payment: [] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await screen.findByText('Samosa ×2');
+    for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+
+    const accept = screen.getByRole('button', { name: 'Accept' });
+    expect(accept).toBeDisabled();
+    expect(screen.getByText('Nothing left to accept — use Reject.')).toBeInTheDocument();
+    fireEvent.click(accept);
+    expect(acceptOrderMock).not.toHaveBeenCalled();
   });
 });
 
